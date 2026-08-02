@@ -1,8 +1,10 @@
+import { SiteHeader } from "@/components/layout/site-header";
+import { SystemStatusView } from "@/components/status/system-status-view";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function TestBazyPage() {
+export default async function SystemStatusPage() {
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -11,54 +13,31 @@ export default async function TestBazyPage() {
     .eq("id", 1)
     .single();
 
-  if (error) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-8 text-white">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-red-500/30 bg-red-500/10 p-8">
-          <p className="text-sm font-semibold uppercase tracking-widest text-red-300">
-            Błąd połączenia
-          </p>
-
-          <h1 className="mt-3 text-3xl font-bold">
-            Nie udało się pobrać danych z Supabase
-          </h1>
-
-          <pre className="mt-6 overflow-auto rounded-xl bg-black/40 p-4 text-sm text-red-200">
-            {error.message}
-          </pre>
-        </div>
-      </main>
-    );
-  }
+  const updatedAt = data?.updated_at
+    ? new Intl.DateTimeFormat("pl-PL", {
+        dateStyle: "long",
+        timeStyle: "short",
+        timeZone: "Europe/Warsaw",
+      }).format(new Date(data.updated_at))
+    : "Brak danych";
 
   return (
-    <main className="min-h-screen bg-slate-950 p-8 text-white">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-8">
-        <p className="text-sm font-semibold uppercase tracking-widest text-emerald-300">
-          Połączenie aktywne
-        </p>
+    <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
+      <SiteHeader />
 
-        <h1 className="mt-3 text-4xl font-bold">{data.app_name}</h1>
-
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-black/30 p-4">
-            <p className="text-sm text-slate-400">Status</p>
-            <p className="mt-1 font-semibold text-emerald-300">
-              {data.status}
-            </p>
-          </div>
-
-          <div className="rounded-xl bg-black/30 p-4">
-            <p className="text-sm text-slate-400">Wersja</p>
-            <p className="mt-1 font-semibold">{data.version}</p>
-          </div>
-
-          <div className="rounded-xl bg-black/30 p-4">
-            <p className="text-sm text-slate-400">Baza danych</p>
-            <p className="mt-1 font-semibold">Supabase PostgreSQL</p>
-          </div>
-        </div>
-      </div>
+      <SystemStatusView
+        data={
+          data
+            ? {
+                appName: data.app_name,
+                status: data.status,
+                version: data.version,
+                updatedAt,
+              }
+            : undefined
+        }
+        errorMessage={error?.message}
+      />
     </main>
   );
 }
