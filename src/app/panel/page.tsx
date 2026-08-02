@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import {
   Activity,
   FileVideo,
   LayoutDashboard,
   LogOut,
+  Plus,
   UserRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -75,6 +77,15 @@ export default async function UserPanelPage() {
               przesyłania filmów i tworzenia analiz
               ergonomicznych.
             </p>
+
+            <Link
+                href="/panel/analizy/nowa"
+                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+                >
+                <Plus className="size-5" />
+                Utwórz nową analizę
+            </Link>
+
           </div>
 
           <div className="rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
