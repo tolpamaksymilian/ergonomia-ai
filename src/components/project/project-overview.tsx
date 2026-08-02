@@ -42,11 +42,10 @@ const roadmap: RoadmapItem[] = [
   },
   {
     title: "Logowanie i role",
-    description:
-      "Rejestracja, logowanie, konta użytkowników oraz role user i admin.",
+    description: "Rejestracja, potwierdzanie e-maila, logowanie, profile oraz role user i admin.",
     weight: 10,
-    completion: 0,
-    status: "next",
+    completion: 100,
+    status: "done",
   },
   {
     title: "Panel reguł administratora",
@@ -246,12 +245,13 @@ export function ProjectOverview() {
             </p>
 
             <h2 className="mt-3 text-3xl font-bold">
-              Warstwę publiczną i fundamenty dostępu
+              Panel administratora i strukturę analiz
             </h2>
 
             <p className="mt-5 leading-7 text-slate-400">
-              Najbliższym dużym etapem będzie logowanie, profil użytkownika,
-              role oraz zabezpieczenie panelu administratora.
+              Logowanie, profile i role są już aktywne. Obecnie rozwijamy
+              bezpieczny panel administratora oraz strukturę danych potrzebną
+              do obsługi analiz wideo.
             </p>
           </div>
 
