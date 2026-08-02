@@ -1,129 +1,100 @@
 "use client";
 
-import {
-  ContactShadows,
-  Float,
-  Line,
-  Sparkles,
-} from "@react-three/drei";
+import { ContactShadows, Float, Line, Sparkles } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 
+export type FocusMode = "full" | "upper" | "arm";
+
+type ErgonomicSkeletonProps = {
+  focusMode?: FocusMode;
+};
+
 type Point3D = [number, number, number];
 
-const jointPoints: Record<string, Point3D> = {
-  head: [0.1, 2.52, 0],
+const joints: Record<string, Point3D> = {
+  head: [0.06, 2.52, 0],
   neck: [0.02, 1.98, 0],
+  chest: [0.03, 1.42, 0.02],
+  pelvis: [0.02, 0.42, 0],
 
-  leftShoulder: [-0.62, 1.75, 0],
-  rightShoulder: [0.66, 1.75, 0],
+  leftShoulder: [-0.62, 1.8, 0],
+  rightShoulder: [0.66, 1.8, 0],
 
-  leftElbow: [-1.02, 0.92, 0.12],
-  rightElbow: [1.04, 1.02, -0.02],
+  leftElbow: [-1.04, 0.96, 0.14],
+  rightElbow: [1.02, 1.04, -0.02],
 
-  leftWrist: [-0.8, 0.06, 0.26],
-  rightWrist: [1.34, 0.23, 0.1],
+  leftWrist: [-0.82, 0.12, 0.24],
+  rightWrist: [1.32, 0.28, 0.08],
 
-  leftHip: [-0.34, 0.35, 0],
-  rightHip: [0.36, 0.35, 0],
+  leftHand: [-0.7, -0.14, 0.28],
+  rightHand: [1.48, 0.08, 0.12],
 
-  leftKnee: [-0.43, -0.9, 0.1],
-  rightKnee: [0.47, -0.84, -0.06],
+  leftHip: [-0.34, 0.34, 0],
+  rightHip: [0.38, 0.34, 0],
 
-  leftAnkle: [-0.46, -2.08, 0.02],
-  rightAnkle: [0.5, -2.08, 0.04],
+  leftKnee: [-0.42, -0.9, 0.08],
+  rightKnee: [0.48, -0.84, -0.04],
+
+  leftAnkle: [-0.44, -2.02, 0.02],
+  rightAnkle: [0.52, -2.02, 0.04],
+
+  leftFoot: [-0.36, -2.12, 0.34],
+  rightFoot: [0.66, -2.12, 0.34],
 };
 
 const skeletonSegments: Array<[string, string]> = [
   ["head", "neck"],
+  ["neck", "chest"],
+  ["chest", "pelvis"],
 
   ["neck", "leftShoulder"],
   ["neck", "rightShoulder"],
 
   ["leftShoulder", "leftElbow"],
   ["leftElbow", "leftWrist"],
+  ["leftWrist", "leftHand"],
 
   ["rightShoulder", "rightElbow"],
   ["rightElbow", "rightWrist"],
+  ["rightWrist", "rightHand"],
 
-  ["neck", "leftHip"],
-  ["neck", "rightHip"],
-
+  ["pelvis", "leftHip"],
+  ["pelvis", "rightHip"],
   ["leftHip", "rightHip"],
 
   ["leftHip", "leftKnee"],
   ["leftKnee", "leftAnkle"],
+  ["leftAnkle", "leftFoot"],
 
   ["rightHip", "rightKnee"],
   ["rightKnee", "rightAnkle"],
+  ["rightAnkle", "rightFoot"],
 ];
 
 const bodySegments: Array<{
   start: string;
   end: string;
   radius: number;
+  color: string;
 }> = [
-  {
-    start: "leftShoulder",
-    end: "leftElbow",
-    radius: 0.13,
-  },
-  {
-    start: "leftElbow",
-    end: "leftWrist",
-    radius: 0.105,
-  },
-  {
-    start: "rightShoulder",
-    end: "rightElbow",
-    radius: 0.13,
-  },
-  {
-    start: "rightElbow",
-    end: "rightWrist",
-    radius: 0.105,
-  },
-  {
-    start: "leftHip",
-    end: "leftKnee",
-    radius: 0.18,
-  },
-  {
-    start: "leftKnee",
-    end: "leftAnkle",
-    radius: 0.145,
-  },
-  {
-    start: "rightHip",
-    end: "rightKnee",
-    radius: 0.18,
-  },
-  {
-    start: "rightKnee",
-    end: "rightAnkle",
-    radius: 0.145,
-  },
+  { start: "leftShoulder", end: "leftElbow", radius: 0.14, color: "#0e7490" },
+  { start: "leftElbow", end: "leftWrist", radius: 0.11, color: "#0e7490" },
+  { start: "rightShoulder", end: "rightElbow", radius: 0.14, color: "#0e7490" },
+  { start: "rightElbow", end: "rightWrist", radius: 0.11, color: "#0e7490" },
+
+  { start: "leftHip", end: "leftKnee", radius: 0.18, color: "#155e75" },
+  { start: "leftKnee", end: "leftAnkle", radius: 0.145, color: "#155e75" },
+  { start: "rightHip", end: "rightKnee", radius: 0.18, color: "#155e75" },
+  { start: "rightKnee", end: "rightAnkle", radius: 0.145, color: "#155e75" },
 ];
 
-type SegmentTransform = {
-  midpoint: THREE.Vector3;
-  quaternion: THREE.Quaternion;
-  length: number;
-};
-
-function calculateSegmentTransform(
-  start: Point3D,
-  end: Point3D,
-): SegmentTransform {
+function segmentTransform(start: Point3D, end: Point3D) {
   const startVector = new THREE.Vector3(...start);
   const endVector = new THREE.Vector3(...end);
 
-  const direction = new THREE.Vector3().subVectors(
-    endVector,
-    startVector,
-  );
-
+  const direction = new THREE.Vector3().subVectors(endVector, startVector);
   const midpoint = new THREE.Vector3()
     .addVectors(startVector, endVector)
     .multiplyScalar(0.5);
@@ -140,46 +111,84 @@ function calculateSegmentTransform(
   };
 }
 
-function SkeletonSegment({
+function CameraRig({ focusMode }: { focusMode: FocusMode }) {
+  const targetRef = useRef(new THREE.Vector3(0, 0.4, 0));
+
+  useFrame((state, delta) => {
+    const camera = state.camera as THREE.PerspectiveCamera;
+
+    const focusMap: Record<
+      FocusMode,
+      { position: Point3D; target: Point3D; pointerFactor: number }
+    > = {
+      full: {
+        position: [0, 0.15, 7.4],
+        target: [0, 0.35, 0],
+        pointerFactor: 0.18,
+      },
+      upper: {
+        position: [0, 1.15, 5.1],
+        target: [0, 1.18, 0],
+        pointerFactor: 0.1,
+      },
+      arm: {
+        position: [1.55, 1.0, 3.7],
+        target: [0.94, 0.98, 0],
+        pointerFactor: 0.06,
+      },
+    };
+
+    const current = focusMap[focusMode];
+    const ease = 1 - Math.exp(-delta * 4);
+
+    const desiredPosition = new THREE.Vector3(
+      current.position[0] + state.pointer.x * current.pointerFactor,
+      current.position[1] - state.pointer.y * current.pointerFactor * 0.65,
+      current.position[2],
+    );
+
+    const desiredTarget = new THREE.Vector3(
+      current.target[0],
+      current.target[1] - state.pointer.y * 0.08,
+      current.target[2],
+    );
+
+    camera.position.lerp(desiredPosition, ease);
+    targetRef.current.lerp(desiredTarget, ease);
+    camera.lookAt(targetRef.current);
+  });
+
+  return null;
+}
+
+function SkeletonTube({
   start,
   end,
 }: {
   start: Point3D;
   end: Point3D;
 }) {
-  const transform = useMemo(
-    () => calculateSegmentTransform(start, end),
-    [start, end],
-  );
+  const transform = useMemo(() => segmentTransform(start, end), [start, end]);
 
   return (
-    <group
-      position={transform.midpoint}
-      quaternion={transform.quaternion}
-    >
+    <group position={transform.midpoint} quaternion={transform.quaternion}>
       <mesh>
-        <cylinderGeometry
-          args={[0.045, 0.045, transform.length, 16]}
-        />
-
+        <cylinderGeometry args={[0.04, 0.04, transform.length, 18]} />
         <meshStandardMaterial
           color="#7dd3fc"
           emissive="#0891b2"
-          emissiveIntensity={1.1}
+          emissiveIntensity={1.25}
           metalness={0.35}
-          roughness={0.2}
+          roughness={0.18}
         />
       </mesh>
 
       <mesh>
-        <cylinderGeometry
-          args={[0.075, 0.075, transform.length, 16]}
-        />
-
+        <cylinderGeometry args={[0.072, 0.072, transform.length, 18]} />
         <meshBasicMaterial
           color="#22d3ee"
           transparent
-          opacity={0.08}
+          opacity={0.06}
           depthWrite={false}
         />
       </mesh>
@@ -187,42 +196,30 @@ function SkeletonSegment({
   );
 }
 
-function BodySegment({
+function BodyTube({
   start,
   end,
   radius,
+  color,
 }: {
   start: Point3D;
   end: Point3D;
   radius: number;
+  color: string;
 }) {
-  const transform = useMemo(
-    () => calculateSegmentTransform(start, end),
-    [start, end],
-  );
+  const transform = useMemo(() => segmentTransform(start, end), [start, end]);
 
   return (
-    <mesh
-      position={transform.midpoint}
-      quaternion={transform.quaternion}
-    >
-      <cylinderGeometry
-        args={[
-          radius * 0.88,
-          radius,
-          transform.length,
-          24,
-        ]}
-      />
-
+    <mesh position={transform.midpoint} quaternion={transform.quaternion}>
+      <cylinderGeometry args={[radius * 0.88, radius, transform.length, 24]} />
       <meshStandardMaterial
-        color="#164e63"
-        emissive="#0e7490"
-        emissiveIntensity={0.2}
+        color={color}
+        emissive="#0f766e"
+        emissiveIntensity={0.18}
         transparent
-        opacity={0.28}
-        metalness={0.4}
-        roughness={0.32}
+        opacity={0.24}
+        metalness={0.42}
+        roughness={0.28}
         side={THREE.DoubleSide}
         depthWrite={false}
       />
@@ -230,7 +227,7 @@ function BodySegment({
   );
 }
 
-function Joint({
+function JointNode({
   position,
   active = false,
 }: {
@@ -243,7 +240,6 @@ function Joint({
         <>
           <mesh>
             <sphereGeometry args={[0.19, 24, 24]} />
-
             <meshBasicMaterial
               color="#fbbf24"
               transparent
@@ -252,29 +248,21 @@ function Joint({
             />
           </mesh>
 
-          <mesh>
-            <torusGeometry args={[0.15, 0.008, 12, 48]} />
-
-            <meshBasicMaterial
-              color="#fbbf24"
-              transparent
-              opacity={0.72}
-            />
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.145, 0.008, 12, 48]} />
+            <meshBasicMaterial color="#fbbf24" transparent opacity={0.72} />
           </mesh>
         </>
       )}
 
       <mesh>
-        <sphereGeometry
-          args={[active ? 0.095 : 0.072, 24, 24]}
-        />
-
+        <sphereGeometry args={[active ? 0.094 : 0.07, 24, 24]} />
         <meshStandardMaterial
           color={active ? "#fde68a" : "#a5f3fc"}
           emissive={active ? "#f59e0b" : "#06b6d4"}
-          emissiveIntensity={active ? 1.6 : 0.8}
-          metalness={0.3}
-          roughness={0.16}
+          emissiveIntensity={active ? 1.6 : 0.9}
+          metalness={0.32}
+          roughness={0.14}
         />
       </mesh>
     </group>
@@ -297,13 +285,11 @@ function AngleArc({
   rotation?: Point3D;
 }) {
   const points = useMemo(() => {
-    const segments = 36;
+    const segments = 40;
 
     return Array.from({ length: segments }, (_, index) => {
-      const progress = index / (segments - 1);
-
-      const angle =
-        startAngle + (endAngle - startAngle) * progress;
+      const t = index / (segments - 1);
+      const angle = startAngle + (endAngle - startAngle) * t;
 
       return new THREE.Vector3(
         Math.cos(angle) * radius,
@@ -315,14 +301,7 @@ function AngleArc({
 
   return (
     <group position={center} rotation={rotation}>
-      <Line
-        points={points}
-        color={color}
-        lineWidth={1.7}
-        transparent
-        opacity={0.9}
-      />
-
+      <Line points={points} color={color} lineWidth={1.8} transparent opacity={0.92} />
       <mesh
         position={[
           Math.cos(endAngle) * radius,
@@ -330,8 +309,7 @@ function AngleArc({
           0,
         ]}
       >
-        <sphereGeometry args={[0.035, 16, 16]} />
-
+        <sphereGeometry args={[0.03, 16, 16]} />
         <meshBasicMaterial color={color} />
       </mesh>
     </group>
@@ -341,40 +319,32 @@ function AngleArc({
 function TorsoShell() {
   return (
     <>
-      <mesh
-        position={[0.03, 1.05, -0.01]}
-        rotation={[0, 0, -0.035]}
-        scale={[0.88, 1.08, 0.48]}
-      >
-        <capsuleGeometry args={[0.48, 0.82, 12, 28]} />
-
+      <mesh position={[0.03, 1.08, 0]} rotation={[0, 0, -0.03]} scale={[0.92, 1.18, 0.5]}>
+        <capsuleGeometry args={[0.5, 0.95, 14, 28]} />
         <meshStandardMaterial
-          color="#155e75"
-          emissive="#164e63"
-          emissiveIntensity={0.28}
+          color="#164e63"
+          emissive="#155e75"
+          emissiveIntensity={0.22}
           transparent
-          opacity={0.22}
-          metalness={0.45}
-          roughness={0.28}
+          opacity={0.23}
+          metalness={0.48}
+          roughness={0.25}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
       </mesh>
 
-      <mesh
-        position={[0.02, 0.34, 0]}
-        scale={[0.68, 0.42, 0.42]}
-      >
+      <mesh position={[0.02, 0.38, 0]} scale={[0.72, 0.46, 0.44]}>
         <sphereGeometry args={[0.62, 32, 32]} />
-
         <meshStandardMaterial
-          color="#0e7490"
+          color="#155e75"
           emissive="#164e63"
           emissiveIntensity={0.16}
           transparent
-          opacity={0.24}
-          metalness={0.35}
-          roughness={0.32}
+          opacity={0.22}
+          metalness={0.38}
+          roughness={0.3}
+          side={THREE.DoubleSide}
           depthWrite={false}
         />
       </mesh>
@@ -382,36 +352,51 @@ function TorsoShell() {
   );
 }
 
-function HeadModel() {
+function HeadShell() {
   return (
-    <group position={jointPoints.head}>
+    <group position={joints.head}>
       <mesh scale={[0.82, 1, 0.82]}>
         <sphereGeometry args={[0.31, 32, 32]} />
-
         <meshStandardMaterial
           color="#164e63"
           emissive="#0891b2"
-          emissiveIntensity={0.28}
+          emissiveIntensity={0.24}
           transparent
-          opacity={0.36}
+          opacity={0.32}
           metalness={0.35}
-          roughness={0.2}
+          roughness={0.18}
           depthWrite={false}
         />
       </mesh>
 
-      <mesh
-        position={[0.02, 0.01, 0.02]}
-        scale={[0.66, 0.82, 0.66]}
-      >
+      <mesh scale={[0.66, 0.84, 0.66]}>
         <sphereGeometry args={[0.31, 24, 24]} />
+        <meshBasicMaterial color="#67e8f9" transparent opacity={0.06} wireframe />
+      </mesh>
+    </group>
+  );
+}
 
-        <meshBasicMaterial
-          color="#67e8f9"
-          transparent
-          opacity={0.07}
-          wireframe
-        />
+function FloorScanner() {
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  useFrame((state) => {
+    if (!ringRef.current) return;
+
+    const s = 1 + Math.sin(state.clock.getElapsedTime() * 1.35) * 0.06;
+    ringRef.current.scale.set(s, s, s);
+  });
+
+  return (
+    <group position={[0, -2.16, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh ref={ringRef}>
+        <ringGeometry args={[0.9, 0.94, 64]} />
+        <meshBasicMaterial color="#22d3ee" transparent opacity={0.5} side={THREE.DoubleSide} />
+      </mesh>
+
+      <mesh>
+        <ringGeometry args={[1.28, 1.32, 64]} />
+        <meshBasicMaterial color="#10b981" transparent opacity={0.18} side={THREE.DoubleSide} />
       </mesh>
     </group>
   );
@@ -421,74 +406,43 @@ function ScanBeam() {
   const beamRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
-    const beam = beamRef.current;
+    if (!beamRef.current) return;
 
-    if (!beam) {
-      return;
-    }
-
-    const progress =
-      (state.clock.getElapsedTime() * 0.18) % 1;
-
-    beam.position.y = -2.05 + progress * 4.7;
+    const p = (state.clock.getElapsedTime() * 0.18) % 1;
+    beamRef.current.position.y = -2.06 + p * 4.72;
   });
 
   return (
-    <mesh ref={beamRef} position={[0, 0, 0.35]}>
-      <boxGeometry args={[3.25, 0.025, 0.04]} />
-
-      <meshBasicMaterial
-        color="#67e8f9"
-        transparent
-        opacity={0.68}
-      />
+    <mesh ref={beamRef} position={[0, 0, 0.36]}>
+      <boxGeometry args={[3.2, 0.025, 0.04]} />
+      <meshBasicMaterial color="#67e8f9" transparent opacity={0.66} />
     </mesh>
   );
 }
 
-function GroundScanner() {
-  const ringRef = useRef<THREE.Mesh>(null);
+function FingerFan({ side }: { side: "left" | "right" }) {
+  const hand = side === "left" ? joints.leftHand : joints.rightHand;
+  const sign = side === "left" ? -1 : 1;
 
-  useFrame((state) => {
-    const ring = ringRef.current;
-
-    if (!ring) {
-      return;
-    }
-
-    const scale =
-      1 + Math.sin(state.clock.getElapsedTime() * 1.4) * 0.08;
-
-    ring.scale.set(scale, scale, scale);
-  });
+  const lines = [
+    [hand, [hand[0] + 0.16 * sign, hand[1] - 0.02, hand[2] + 0.02]],
+    [hand, [hand[0] + 0.18 * sign, hand[1] + 0.05, hand[2] + 0.02]],
+    [hand, [hand[0] + 0.16 * sign, hand[1] + 0.12, hand[2] + 0.01]],
+  ] as Array<[Point3D, Point3D]>;
 
   return (
-    <group
-      position={[0, -2.14, 0]}
-      rotation={[-Math.PI / 2, 0, 0]}
-    >
-      <mesh ref={ringRef}>
-        <ringGeometry args={[0.86, 0.9, 64]} />
-
-        <meshBasicMaterial
-          color="#22d3ee"
+    <>
+      {lines.map(([start, end], index) => (
+        <Line
+          key={`${side}-${index}`}
+          points={[new THREE.Vector3(...start), new THREE.Vector3(...end)]}
+          color="#67e8f9"
+          lineWidth={1}
           transparent
           opacity={0.55}
-          side={THREE.DoubleSide}
         />
-      </mesh>
-
-      <mesh>
-        <ringGeometry args={[1.28, 1.3, 64]} />
-
-        <meshBasicMaterial
-          color="#10b981"
-          transparent
-          opacity={0.2}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-    </group>
+      ))}
+    </>
   );
 }
 
@@ -496,109 +450,96 @@ function DigitalHuman() {
   const groupRef = useRef<THREE.Group>(null);
 
   useFrame((state) => {
-    const group = groupRef.current;
+    if (!groupRef.current) return;
 
-    if (!group) {
-      return;
-    }
-
-    const targetRotationY = state.pointer.x * 0.2;
-    const targetRotationX = -state.pointer.y * 0.06;
-
-    group.rotation.y = THREE.MathUtils.lerp(
-      group.rotation.y,
-      targetRotationY,
+    groupRef.current.rotation.y = THREE.MathUtils.lerp(
+      groupRef.current.rotation.y,
+      state.pointer.x * 0.18,
       0.04,
     );
 
-    group.rotation.x = THREE.MathUtils.lerp(
-      group.rotation.x,
-      targetRotationX,
+    groupRef.current.rotation.x = THREE.MathUtils.lerp(
+      groupRef.current.rotation.x,
+      -state.pointer.y * 0.05,
       0.04,
     );
 
-    group.position.y =
-      Math.sin(state.clock.getElapsedTime() * 1.1) * 0.025;
+    groupRef.current.position.y = Math.sin(state.clock.getElapsedTime() * 1.15) * 0.024;
   });
 
   return (
-    <group
-      ref={groupRef}
-      position={[0, -0.05, 0]}
-      scale={1.02}
-    >
+    <group ref={groupRef} position={[0, -0.04, 0]} scale={1.03}>
       <TorsoShell />
-      <HeadModel />
+      <HeadShell />
 
       {bodySegments.map((segment) => (
-        <BodySegment
+        <BodyTube
           key={`${segment.start}-${segment.end}`}
-          start={jointPoints[segment.start]}
-          end={jointPoints[segment.end]}
+          start={joints[segment.start]}
+          end={joints[segment.end]}
           radius={segment.radius}
+          color={segment.color}
         />
       ))}
 
       {skeletonSegments.map(([startName, endName]) => (
-        <SkeletonSegment
+        <SkeletonTube
           key={`${startName}-${endName}`}
-          start={jointPoints[startName]}
-          end={jointPoints[endName]}
+          start={joints[startName]}
+          end={joints[endName]}
         />
       ))}
 
-      {Object.entries(jointPoints).map(
-        ([jointName, position]) => (
-          <Joint
-            key={jointName}
-            position={position}
-            active={[
-              "neck",
-              "rightElbow",
-              "leftHip",
-              "rightKnee",
-            ].includes(jointName)}
-          />
-        ),
-      )}
+      {Object.entries(joints).map(([name, position]) => (
+        <JointNode
+          key={name}
+          position={position}
+          active={["neck", "rightElbow", "pelvis", "rightKnee"].includes(name)}
+        />
+      ))}
+
+      <FingerFan side="left" />
+      <FingerFan side="right" />
 
       <AngleArc
-        center={jointPoints.rightElbow}
+        center={joints.rightElbow}
         radius={0.34}
-        startAngle={1.8}
+        startAngle={1.85}
         endAngle={4.45}
         color="#fbbf24"
       />
 
       <AngleArc
-        center={jointPoints.neck}
-        radius={0.29}
-        startAngle={0.1}
-        endAngle={1.4}
+        center={joints.neck}
+        radius={0.28}
+        startAngle={0.08}
+        endAngle={1.35}
         color="#34d399"
       />
 
       <AngleArc
-        center={[0.02, 0.72, 0.14]}
+        center={[0.03, 0.74, 0.14]}
         radius={0.38}
-        startAngle={1.15}
-        endAngle={1.9}
+        startAngle={1.16}
+        endAngle={1.92}
         color="#22d3ee"
       />
 
+      <FloorScanner />
       <ScanBeam />
-      <GroundScanner />
     </group>
   );
 }
 
-export function ErgonomicSkeleton() {
+export function ErgonomicSkeleton({
+  focusMode = "full",
+}: ErgonomicSkeletonProps) {
   return (
-    <div className="h-[470px] w-full sm:h-[500px]">
+    <div className="h-[500px] w-full sm:h-[540px]">
       <Canvas
         dpr={[1, 1.6]}
         camera={{
-          position: [0, 0.15, 7.5],
+          position: [0, 0.15, 7.4],
           fov: 42,
           near: 0.1,
           far: 100,
@@ -611,23 +552,25 @@ export function ErgonomicSkeleton() {
       >
         <fog attach="fog" args={["#07111f", 7, 13]} />
 
+        <CameraRig focusMode={focusMode} />
+
         <ambientLight intensity={0.75} />
 
         <directionalLight
           position={[4, 6, 5]}
-          intensity={2.5}
-          color="#d5fff7"
+          intensity={2.6}
+          color="#d8fff7"
         />
 
         <pointLight
-          position={[-3.5, 1.5, 3]}
+          position={[-3.6, 1.6, 3]}
           intensity={22}
           color="#06b6d4"
           distance={11}
         />
 
         <pointLight
-          position={[3.5, -1, 2.5]}
+          position={[3.4, -1, 2.5]}
           intensity={18}
           color="#10b981"
           distance={10}
@@ -642,31 +585,31 @@ export function ErgonomicSkeleton() {
 
         <Sparkles
           count={46}
-          scale={[5, 5.6, 3]}
-          size={1.5}
+          scale={[5, 5.8, 3]}
+          size={1.45}
           speed={0.18}
-          opacity={0.3}
+          opacity={0.28}
           color="#67e8f9"
         />
 
         <gridHelper
           args={[8, 20, "#155e75", "#0f2535"]}
-          position={[0, -2.16, 0]}
+          position={[0, -2.18, 0]}
         />
 
         <Float
-          speed={1.15}
-          rotationIntensity={0.025}
-          floatIntensity={0.08}
-          floatingRange={[-0.035, 0.035]}
+          speed={1.1}
+          rotationIntensity={0.02}
+          floatIntensity={0.06}
+          floatingRange={[-0.03, 0.03]}
         >
           <DigitalHuman />
         </Float>
 
         <ContactShadows
           position={[0, -2.18, 0]}
-          opacity={0.4}
-          scale={5}
+          opacity={0.42}
+          scale={5.2}
           blur={2.6}
           far={4}
           color="#020617"
