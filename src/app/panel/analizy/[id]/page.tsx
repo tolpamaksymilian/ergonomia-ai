@@ -14,6 +14,7 @@ import {
 import { AnalysisAutoRefresh } from "@/components/analyses/analysis-auto-refresh";
 import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
+import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +53,17 @@ export default async function AnalysisDetailsPage({
       error_message,
       queued_at,
       created_at,
-      updated_at
+      updated_at,
+      processing_stage,
+      result_video_path,
+      result_json_path,
+      thumbnail_path,
+      pose_model,
+      pose_sample_stride,
+      pose_processed_frames,
+      pose_detected_frames,
+      pose_average_confidence,
+      pose_completed_at
     `)
     .eq("id", id)
     .maybeSingle();
@@ -62,6 +73,71 @@ export default async function AnalysisDetailsPage({
   }
 
   const signedUrlLifetimeSeconds = 10 * 60;
+
+
+  const resultUrlLifetimeSeconds =
+    10 * 60;
+
+  const resultVideoAccess =
+    analysis.result_video_path
+      ? await supabase.storage
+          .from("analysis-results")
+          .createSignedUrl(
+            analysis.result_video_path,
+            resultUrlLifetimeSeconds,
+          )
+      : {
+          data: null,
+          error: null,
+        };
+
+  const resultJsonAccess =
+    analysis.result_json_path
+      ? await supabase.storage
+          .from("analysis-results")
+          .createSignedUrl(
+            analysis.result_json_path,
+            resultUrlLifetimeSeconds,
+          )
+      : {
+          data: null,
+          error: null,
+        };
+
+  const thumbnailAccess =
+    analysis.thumbnail_path
+      ? await supabase.storage
+          .from("analysis-results")
+          .createSignedUrl(
+            analysis.thumbnail_path,
+            resultUrlLifetimeSeconds,
+          )
+      : {
+          data: null,
+          error: null,
+        };
+
+  const resultVideoUrl =
+    resultVideoAccess.data?.signedUrl ??
+    null;
+
+  const resultJsonUrl =
+    resultJsonAccess.data?.signedUrl ??
+    null;
+
+  const thumbnailUrl =
+    thumbnailAccess.data?.signedUrl ??
+    null;
+
+  const resultAccessError =
+    [
+      resultVideoAccess.error?.message,
+      resultJsonAccess.error?.message,
+      thumbnailAccess.error?.message,
+    ]
+      .filter(Boolean)
+      .join(" ") || null;
+
 
   const {
     data: signedVideoData,
@@ -79,11 +155,19 @@ export default async function AnalysisDetailsPage({
   const signedVideoErrorMessage =
     signedVideoError?.message ?? null;
 
-  const shouldRefresh = [
-    "uploading",
-    "queued",
-    "processing",
-  ].includes(analysis.status);
+  const shouldRefresh =
+    analysis.status === "uploading" ||
+    analysis.status === "processing" ||
+    (
+      analysis.status === "queued" &&
+      [
+        null,
+        "queued",
+        "ready-for-ai",
+      ].includes(
+        analysis.processing_stage,
+      )
+    );
 
   const status = getStatusDetails(
     analysis.status,
@@ -227,6 +311,33 @@ export default async function AnalysisDetailsPage({
             errorMessage={signedVideoErrorMessage}
             expiresInMinutes={10}
           />
+          {analysis.processing_stage ===
+            "ready-for-ergonomics" && (
+            <div className="mt-6">
+              <PoseResultsPreview
+                videoUrl={resultVideoUrl}
+                thumbnailUrl={thumbnailUrl}
+                jsonUrl={resultJsonUrl}
+                poseModel={analysis.pose_model}
+                sampleStride={
+                  analysis.pose_sample_stride
+                }
+                processedFrames={
+                  analysis.pose_processed_frames
+                }
+                detectedFrames={
+                  analysis.pose_detected_frames
+                }
+                averageConfidence={
+                  analysis.pose_average_confidence
+                }
+                errorMessage={
+                  resultAccessError
+                }
+                expiresInMinutes={10}
+              />
+            </div>
+          )}
         </div>
 
         <section className="mt-6 rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
@@ -266,12 +377,26 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Analiza AI"
+              label="Szkielet RTMW"
               completed={
+                analysis.processing_stage ===
+                  "ready-for-ergonomics" ||
                 analysis.status === "completed"
               }
               active={
-                analysis.status === "processing"
+                analysis.status ===
+                  "processing" &&
+                [
+                  "pose-claimed",
+                  "downloading-for-pose",
+                  "initializing-pose-inference",
+                  "pose-inference",
+                  "uploading-pose-results",
+                  "saving-pose-results",
+                ].includes(
+                  analysis.processing_stage ??
+                    "",
+                )
               }
             />
 

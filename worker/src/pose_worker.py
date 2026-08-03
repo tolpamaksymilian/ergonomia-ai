@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -537,6 +538,282 @@ def create_video_writer(
 
     return writer
 
+def transcode_video_to_h264(
+    source_path: Path,
+    destination_path: Path,
+    logger: logging.Logger,
+) -> None:
+    """
+    Konwertuje roboczy film MP4V do:
+    MP4 + H.264 + yuv420p.
+
+    Taki format jest obsługiwany przez
+    Chrome, Edge, Firefox i Safari.
+    """
+
+    ffmpeg_binary = (
+        resolve_ffmpeg_binary()
+    )
+
+    if not source_path.exists():
+        raise RuntimeError(
+            "Nie znaleziono roboczego filmu "
+            f"do konwersji: {source_path}"
+        )
+
+    if source_path.stat().st_size <= 0:
+        raise RuntimeError(
+            "Roboczy film przed konwersją "
+            "jest pusty."
+        )
+
+    destination_path.unlink(
+        missing_ok=True,
+    )
+
+    command = [
+        ffmpeg_binary,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source_path),
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-movflags",
+        "+faststart",
+        "-tag:v",
+        "avc1",
+        str(destination_path),
+    ]
+
+    logger.info(
+        "Konwersja filmu wynikowego do H.264..."
+    )
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    if result.returncode != 0:
+        error_details = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or (
+                "FFmpeg zakończył działanie "
+                "nieznanym błędem."
+            )
+        )
+
+        raise RuntimeError(
+            "Nie udało się przekonwertować "
+            "filmu do H.264: "
+            f"{error_details[-2000:]}"
+        )
+
+    if (
+        not destination_path.exists()
+        or destination_path.stat().st_size <= 0
+    ):
+        raise RuntimeError(
+            "FFmpeg nie utworzył poprawnego "
+            "filmu H.264."
+        )
+
+    logger.info(
+        "Film H.264 gotowy: %.2f MB",
+        destination_path.stat().st_size
+        / 1024
+        / 1024,
+    )
+
+def resolve_ffmpeg_binary() -> str:
+    """
+    Znajduje program FFmpeg.
+
+    Kolejność:
+    1. FFMPEG_PATH z worker/.env
+    2. ffmpeg dostępny w PATH
+    3. alias utworzony przez WinGet
+    """
+
+    configured_path = os.getenv(
+        "FFMPEG_PATH",
+        "",
+    ).strip()
+
+    path_from_system = shutil.which(
+        "ffmpeg"
+    )
+
+    local_app_data = os.getenv(
+        "LOCALAPPDATA",
+        "",
+    ).strip()
+
+    winget_alias_path = (
+        Path(local_app_data)
+        / "Microsoft"
+        / "WinGet"
+        / "Links"
+        / "ffmpeg.exe"
+        if local_app_data
+        else None
+    )
+
+    candidates = [
+        configured_path or None,
+        path_from_system,
+        (
+            str(winget_alias_path)
+            if winget_alias_path is not None
+            else None
+        ),
+    ]
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        candidate_path = Path(
+            candidate
+        ).expanduser()
+
+        if (
+            candidate_path.exists()
+            and candidate_path.is_file()
+        ):
+            return str(
+                candidate_path.resolve()
+            )
+
+    raise RuntimeError(
+        "Nie znaleziono programu FFmpeg. "
+        "Ustaw pełną ścieżkę w zmiennej FFMPEG_PATH "
+        "w pliku worker/.env."
+    )
+
+def transcode_video_to_h264(
+    source_path: Path,
+    destination_path: Path,
+    logger: logging.Logger,
+) -> None:
+    """
+    Konwertuje roboczy film OpenCV/mp4v do formatu
+    zgodnego z przeglądarkami: MP4 + H.264 + yuv420p.
+    """
+
+    ffmpeg_binary = shutil.which("ffmpeg")
+
+    if ffmpeg_binary is None:
+        raise RuntimeError(
+            "Nie znaleziono programu FFmpeg w PATH. "
+            "Zainstaluj FFmpeg i uruchom ponownie terminal."
+        )
+
+    if not source_path.exists():
+        raise RuntimeError(
+            f"Nie znaleziono roboczego filmu: {source_path}"
+        )
+
+    if source_path.stat().st_size <= 0:
+        raise RuntimeError(
+            "Roboczy film przed konwersją jest pusty."
+        )
+
+    command = [
+        ffmpeg_binary,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source_path),
+
+        # Film wynikowy obecnie nie zawiera ścieżki audio.
+        "-an",
+
+        # Maksymalna zgodność z przeglądarkami.
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+
+        # Zapewnia parzyste wymiary wymagane przez yuv420p.
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+
+        # Metadane filmu trafiają na początek pliku,
+        # dzięki czemu odtwarzanie może zacząć się szybciej.
+        "-movflags",
+        "+faststart",
+
+        # Jawne oznaczenie H.264 w kontenerze MP4.
+        "-tag:v",
+        "avc1",
+
+        str(destination_path),
+    ]
+
+    logger.info(
+        "Konwersja filmu wynikowego do H.264..."
+    )
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    if result.returncode != 0:
+        error_details = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "FFmpeg zakończył działanie nieznanym błędem."
+        )
+
+        raise RuntimeError(
+            "Nie udało się przekonwertować filmu do H.264: "
+            f"{error_details[-2000:]}"
+        )
+
+    if (
+        not destination_path.exists()
+        or destination_path.stat().st_size <= 0
+    ):
+        raise RuntimeError(
+            "FFmpeg nie utworzył poprawnego filmu H.264."
+        )
+
+    logger.info(
+        "Film H.264 gotowy: %.2f MB",
+        destination_path.stat().st_size
+        / 1024
+        / 1024,
+    )
+
 
 def process_pose_video(
     supabase: Client,
@@ -605,6 +882,16 @@ def process_pose_video(
             "Film nie zawiera poprawnej rozdzielczości."
         )
 
+    raw_output_video_path = (
+        job_directory
+        / "pose-overlay-raw.mp4"
+    )
+
+    raw_output_video_path = (
+        job_directory
+        / "pose-overlay-raw.mp4"
+    )
+
     output_video_path = (
         job_directory
         / "pose-overlay.mp4"
@@ -621,7 +908,7 @@ def process_pose_video(
     )
 
     writer = create_video_writer(
-        output_path=output_video_path,
+        output_path=raw_output_video_path,
         fps=fps,
         width=width,
         height=height,
@@ -861,6 +1148,32 @@ def process_pose_video(
         capture.release()
         writer.release()
 
+    if processed_frames <= 0:
+        raise RuntimeError(
+            "Nie wykonano inferencji dla żadnej klatki."
+        )
+
+    if detected_frames <= 0:
+        raise RuntimeError(
+            "Model nie wykrył człowieka "
+            "w żadnej analizowanej klatce."
+        )
+
+    transcode_video_to_h264(
+        source_path=raw_output_video_path,
+        destination_path=output_video_path,
+        logger=logger,
+    )
+
+    try:
+        raw_output_video_path.unlink(
+            missing_ok=True,
+        )
+    except OSError:
+        logger.warning(
+            "Nie udało się usunąć roboczego filmu: %s",
+            raw_output_video_path,
+        )
     if processed_frames <= 0:
         raise RuntimeError(
             "Nie wykonano inferencji dla żadnej klatki."
