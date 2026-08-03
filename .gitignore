@@ -33,6 +33,16 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Python AI worker
+worker/.venv/
+worker/.env
+worker/data/
+worker/logs/
+worker/models/
+worker/outputs/
+worker/**/__pycache__/
+worker/**/*.pyc
+
 # vercel
 .vercel
 
