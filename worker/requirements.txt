@@ -1,4 +1,6 @@
 supabase
 python-dotenv
-opencv-python-headless
+pydantic
+opencv-contrib-python-headless>=4.10,<5
 tenacity
+tqdm>=4.66,<5
