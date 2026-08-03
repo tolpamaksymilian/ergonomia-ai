@@ -78,13 +78,23 @@ export default async function UserPanelPage() {
               ergonomicznych.
             </p>
 
-            <Link
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link
                 href="/panel/analizy/nowa"
-                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
-                >
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+              >
                 <Plus className="size-5" />
                 Utwórz nową analizę
-            </Link>
+              </Link>
+
+              <Link
+                href="/panel/analizy"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 font-semibold text-white transition hover:bg-white/[0.08]"
+              >
+                <FileVideo className="size-5 text-cyan-300" />
+                Historia analiz
+              </Link>
+            </div>
 
           </div>
 

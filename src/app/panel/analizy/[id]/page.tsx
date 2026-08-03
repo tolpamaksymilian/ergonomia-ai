@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 
 import { AnalysisAutoRefresh } from "@/components/analyses/analysis-auto-refresh";
+import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
+import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +38,7 @@ export default async function AnalysisDetailsPage({
       description,
       status,
       progress,
+      source_video_path,
       source_file_name,
       source_mime_type,
       source_size_bytes,
@@ -57,6 +60,24 @@ export default async function AnalysisDetailsPage({
   if (error || !analysis) {
     notFound();
   }
+
+  const signedUrlLifetimeSeconds = 10 * 60;
+
+  const {
+    data: signedVideoData,
+    error: signedVideoError,
+  } = await supabase.storage
+    .from("analysis-videos")
+    .createSignedUrl(
+      analysis.source_video_path,
+      signedUrlLifetimeSeconds,
+    );
+
+  const signedVideoUrl =
+    signedVideoData?.signedUrl ?? null;
+
+  const signedVideoErrorMessage =
+    signedVideoError?.message ?? null;
 
   const shouldRefresh = [
     "uploading",
@@ -99,13 +120,21 @@ export default async function AnalysisDetailsPage({
             </span>
           </Link>
 
-          <Link
-            href="/panel"
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
-          >
-            <ArrowLeft className="size-4" />
-            Powrót do panelu
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <DeleteAnalysisButton
+              analysisId={analysis.id}
+              title={analysis.title}
+              status={analysis.status}
+            />
+
+            <Link
+              href="/panel/analizy"
+              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
+            >
+              <ArrowLeft className="size-4" />
+              Historia analiz
+            </Link>
+          </div>
         </header>
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.38fr]">
@@ -189,6 +218,16 @@ export default async function AnalysisDetailsPage({
             }
           />
         </section>
+
+        <div className="mt-6">
+          <PrivateVideoPreview
+            signedUrl={signedVideoUrl}
+            fileName={analysis.source_file_name}
+            mimeType={analysis.source_mime_type}
+            errorMessage={signedVideoErrorMessage}
+            expiresInMinutes={10}
+          />
+        </div>
 
         <section className="mt-6 rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
           <div className="flex flex-wrap items-center justify-between gap-4">
