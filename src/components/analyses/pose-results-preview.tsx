@@ -6,6 +6,7 @@ import {
   FileJson,
   ImageIcon,
   RefreshCw,
+  Scissors,
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
@@ -16,10 +17,17 @@ type PoseResultsPreviewProps = {
   jsonUrl: string | null;
 
   poseModel: string | null;
-  sampleStride: number | null;
   processedFrames: number | null;
   detectedFrames: number | null;
   averageConfidence: number | string | null;
+  presenceRatio: number | string | null;
+
+  activeStartSeconds: number | string | null;
+  activeEndSeconds: number | string | null;
+  activeDurationSeconds: number | string | null;
+
+  trackingMethod: string | null;
+  smoothingMethod: string | null;
 
   errorMessage?: string | null;
   expiresInMinutes?: number;
@@ -30,57 +38,42 @@ export function PoseResultsPreview({
   thumbnailUrl,
   jsonUrl,
   poseModel,
-  sampleStride,
   processedFrames,
   detectedFrames,
   averageConfidence,
+  presenceRatio,
+  activeStartSeconds,
+  activeEndSeconds,
+  activeDurationSeconds,
+  trackingMethod,
+  smoothingMethod,
   errorMessage,
   expiresInMinutes = 10,
 }: PoseResultsPreviewProps) {
-  /*
-   * Zachowujemy pierwszy zestaw signed URL.
-   * Odświeżenie statusu analizy nie zresetuje filmu.
-   */
-  const activeVideoUrlRef =
-    useRef<string | null>(videoUrl);
+  const activeVideoUrlRef = useRef<string | null>(videoUrl);
+  const activeThumbnailUrlRef = useRef<string | null>(thumbnailUrl);
+  const activeJsonUrlRef = useRef<string | null>(jsonUrl);
 
-  const activeThumbnailUrlRef =
-    useRef<string | null>(thumbnailUrl);
+  const activeVideoUrl = activeVideoUrlRef.current;
+  const activeThumbnailUrl = activeThumbnailUrlRef.current;
+  const activeJsonUrl = activeJsonUrlRef.current;
 
-  const activeJsonUrlRef =
-    useRef<string | null>(jsonUrl);
+  const [playbackError, setPlaybackError] = useState(false);
 
-  const activeVideoUrl =
-    activeVideoUrlRef.current;
-
-  const activeThumbnailUrl =
-    activeThumbnailUrlRef.current;
-
-  const activeJsonUrl =
-    activeJsonUrlRef.current;
-
-  const [playbackError, setPlaybackError] =
-    useState(false);
-
-  const confidence =
-    averageConfidence === null
-      ? null
-      : Number(averageConfidence);
-
-  const confidencePercent =
-    confidence !== null &&
-    Number.isFinite(confidence)
-      ? `${(confidence * 100).toFixed(1)}%`
-      : "Brak danych";
+  const confidencePercent = formatPercent(averageConfidence);
+  const presencePercent = formatPercent(presenceRatio);
 
   const detectionPercent =
-    processedFrames &&
-    detectedFrames !== null
-      ? `${(
-          (detectedFrames / processedFrames) *
-          100
-        ).toFixed(1)}%`
+    processedFrames && detectedFrames !== null
+      ? `${((detectedFrames / processedFrames) * 100).toFixed(1)}%`
       : "Brak danych";
+
+  const activeRange = formatActiveRange(
+    activeStartSeconds,
+    activeEndSeconds,
+  );
+
+  const activeDuration = formatDuration(activeDurationSeconds);
 
   function refreshAccess() {
     window.location.reload();
@@ -92,89 +85,59 @@ export function PoseResultsPreview({
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.19em] text-emerald-300">
             <ShieldCheck className="size-4" />
-            Wynik RTMW Wholebody
+            Wynik RTMW Wholebody V2
           </div>
 
           <h2 className="mt-3 text-2xl font-semibold text-white">
             Wykryty szkielet pracownika
           </h2>
 
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            Wyniki zapisano w prywatnym magazynie
-            i udostępniono przez czasowy adres dostępu.
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+            Film wynikowy zawiera tylko najdłuższy aktywny fragment z pracownikiem.
+            Punkty są śledzone dla jednej osoby i stabilizowane czasowo.
           </p>
         </div>
 
-        <div className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-4 py-2 text-xs font-semibold text-emerald-200">
-          Etap AI ukończony
+        <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-4 py-2 text-xs font-semibold text-emerald-200">
+          <Scissors className="size-4" />
+          Automatycznie przycięty
         </div>
       </header>
 
-      <div className="grid gap-3 border-b border-white/10 p-6 sm:grid-cols-2 sm:p-8 lg:grid-cols-5">
-        <Metric
-          label="Model"
-          value={poseModel || "RTMW Wholebody"}
-        />
-
-        <Metric
-          label="Próbkowanie"
-          value={
-            sampleStride
-              ? `Co ${sampleStride}. klatkę`
-              : "Brak danych"
-          }
-        />
-
+      <div className="grid gap-3 border-b border-white/10 p-6 sm:grid-cols-2 sm:p-8 lg:grid-cols-4 xl:grid-cols-8">
+        <Metric label="Model" value={poseModel || "RTMW Wholebody"} />
+        <Metric label="Aktywny zakres" value={activeRange} />
+        <Metric label="Długość wyniku" value={activeDuration} />
         <Metric
           label="Klatki modelu"
-          value={
-            processedFrames?.toLocaleString(
-              "pl-PL",
-            ) ?? "Brak danych"
-          }
+          value={processedFrames?.toLocaleString("pl-PL") ?? "Brak danych"}
         />
-
+        <Metric label="Wykrycie osoby" value={detectionPercent} />
+        <Metric label="Pokrycie obecności" value={presencePercent} />
+        <Metric label="Średnia pewność" value={confidencePercent} />
         <Metric
-          label="Wykrycie osoby"
-          value={detectionPercent}
-        />
-
-        <Metric
-          label="Średnia pewność"
-          value={confidencePercent}
+          label="Stabilizacja"
+          value={smoothingMethod ? "One Euro" : "Brak danych"}
+          title={smoothingMethod ?? undefined}
         />
       </div>
 
       {errorMessage ? (
-        <ResultError
-          message={errorMessage}
-          onRefresh={refreshAccess}
-        />
+        <ResultError message={errorMessage} onRefresh={refreshAccess} />
       ) : (
         <div className="p-6 sm:p-8">
-          {activeVideoUrl &&
-          !playbackError ? (
+          {activeVideoUrl && !playbackError ? (
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-black">
               <video
                 controls
                 playsInline
                 preload="metadata"
-                poster={
-                  activeThumbnailUrl ??
-                  undefined
-                }
-                onError={() =>
-                  setPlaybackError(true)
-                }
+                poster={activeThumbnailUrl ?? undefined}
+                onError={() => setPlaybackError(true)}
                 className="aspect-video max-h-[720px] w-full bg-black object-contain"
               >
-                <source
-                  src={activeVideoUrl}
-                  type="video/mp4"
-                />
-
-                Twoja przeglądarka nie obsługuje
-                odtwarzania tego filmu.
+                <source src={activeVideoUrl} type="video/mp4" />
+                Twoja przeglądarka nie obsługuje odtwarzania tego filmu.
               </video>
             </div>
           ) : activeThumbnailUrl ? (
@@ -195,18 +158,26 @@ export function PoseResultsPreview({
 
           {playbackError && (
             <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-400/[0.06] px-4 py-3 text-sm leading-6 text-amber-100/80">
-              Przeglądarka nie mogła odtworzyć
-              filmu wynikowego. Miniatura pozostaje
-              dostępna. Może być potrzebna zmiana
-              kodeka filmu na H.264.
+              Przeglądarka nie mogła odtworzyć filmu wynikowego. Miniatura i dane
+              JSON pozostają dostępne.
             </div>
           )}
 
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            <TechnicalInfo
+              label="Tracking głównej osoby"
+              value={trackingMethod || "Brak danych"}
+            />
+            <TechnicalInfo
+              label="Wygładzanie punktów"
+              value={smoothingMethod || "Brak danych"}
+            />
+          </div>
+
           <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
             <p className="max-w-xl text-xs leading-5 text-slate-500">
-              Adresy dostępu wygasają po około{" "}
-              {expiresInMinutes} minutach. Odśwież
-              stronę, aby wygenerować nowe.
+              Adresy dostępu wygasają po około {expiresInMinutes} minutach.
+              Odśwież stronę, aby wygenerować nowe.
             </p>
 
             <div className="flex flex-wrap gap-3">
@@ -257,19 +228,31 @@ export function PoseResultsPreview({
 function Metric({
   label,
   value,
+  title,
 }: {
   label: string;
   value: string;
+  title?: string;
 }) {
   return (
     <div className="min-w-0 rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4">
       <p className="text-[9px] uppercase tracking-[0.16em] text-slate-600">
         {label}
       </p>
-
-      <p className="mt-2 truncate text-sm font-semibold text-white">
+      <p className="mt-2 truncate text-sm font-semibold text-white" title={title}>
         {value}
       </p>
+    </div>
+  );
+}
+
+function TechnicalInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/[0.07] bg-slate-950/30 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-[0.15em] text-slate-600">
+        {label}
+      </p>
+      <p className="mt-2 break-all text-xs leading-5 text-slate-300">{value}</p>
     </div>
   );
 }
@@ -285,11 +268,9 @@ function ResultError({
     <div className="p-6 sm:p-8">
       <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300/20 bg-amber-400/[0.045] px-6 text-center">
         <TriangleAlert className="size-8 text-amber-300" />
-
         <p className="mt-5 max-w-xl text-sm leading-6 text-slate-400">
           {message}
         </p>
-
         <button
           type="button"
           onClick={onRefresh}
@@ -301,4 +282,46 @@ function ResultError({
       </div>
     </div>
   );
+}
+
+function formatPercent(value: number | string | null) {
+  if (value === null) {
+    return "Brak danych";
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "Brak danych";
+  }
+
+  return `${(numericValue * 100).toFixed(1)}%`;
+}
+
+function formatDuration(value: number | string | null) {
+  if (value === null) {
+    return "Brak danych";
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "Brak danych";
+  }
+
+  return `${numericValue.toFixed(2)} s`;
+}
+
+function formatActiveRange(
+  startValue: number | string | null,
+  endValue: number | string | null,
+) {
+  const start = Number(startValue);
+  const end = Number(endValue);
+
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return "Brak danych";
+  }
+
+  return `${start.toFixed(2)}–${end.toFixed(2)} s`;
 }

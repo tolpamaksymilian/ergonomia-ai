@@ -57,6 +57,15 @@ export default async function AnalysisDetailsPage({
       processing_stage,
       result_video_path,
       result_json_path,
+      active_segment_start_frame,
+      active_segment_end_frame,
+      active_segment_start_seconds,
+      active_segment_end_seconds,
+      active_segment_duration_seconds,
+      pose_presence_ratio,
+      pose_tracking_method,
+      pose_smoothing_method,
+      pose_quality_version,
       thumbnail_path,
       pose_model,
       pose_sample_stride,
@@ -319,21 +328,16 @@ export default async function AnalysisDetailsPage({
                 thumbnailUrl={thumbnailUrl}
                 jsonUrl={resultJsonUrl}
                 poseModel={analysis.pose_model}
-                sampleStride={
-                  analysis.pose_sample_stride
-                }
-                processedFrames={
-                  analysis.pose_processed_frames
-                }
-                detectedFrames={
-                  analysis.pose_detected_frames
-                }
-                averageConfidence={
-                  analysis.pose_average_confidence
-                }
-                errorMessage={
-                  resultAccessError
-                }
+                processedFrames={analysis.pose_processed_frames}
+                detectedFrames={analysis.pose_detected_frames}
+                averageConfidence={analysis.pose_average_confidence}
+                presenceRatio={analysis.pose_presence_ratio}
+                activeStartSeconds={analysis.active_segment_start_seconds}
+                activeEndSeconds={analysis.active_segment_end_seconds}
+                activeDurationSeconds={analysis.active_segment_duration_seconds}
+                trackingMethod={analysis.pose_tracking_method}
+                smoothingMethod={analysis.pose_smoothing_method}
+                errorMessage={resultAccessError}
                 expiresInMinutes={10}
               />
             </div>
