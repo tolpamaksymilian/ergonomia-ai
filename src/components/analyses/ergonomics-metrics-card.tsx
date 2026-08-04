@@ -34,11 +34,10 @@ export function ErgonomicsMetricsCard({
             Dane techniczne etapu
           </p>
           <h2 id="ergonomics-metrics-title" className="mt-1 text-xl font-semibold text-cyan-100">
-            Metryki ergonomiczne zostały obliczone
+            Metryki są gotowe
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-400">
-            Są to surowe pomiary geometryczne. Nie stanowią jeszcze klasyfikacji
-            ryzyka, wyniku RULA ani REBA.
+            Kolejny etap to ocena ryzyka.
           </p>
         </div>
       </div>
@@ -68,8 +67,7 @@ export function ErgonomicsMetricsCard({
 
       <p className="mt-4 text-xs leading-5 text-slate-500">
         Liczba metryk: <span className="font-semibold text-slate-300">14</span>.
-        Pokrycie opisuje udział poprawnych wartości wśród wszystkich możliwych
-        pomiarów, a nie dokładność modelu AI.
+        Pokrycie oznacza udział poprawnych pomiarów, a nie dokładność AI.
       </p>
     </section>
   );

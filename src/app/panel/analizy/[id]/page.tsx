@@ -458,7 +458,7 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Ocena i raport — planowane"
+              label="Ocena ryzyka — w przygotowaniu"
             />
           </div>
         </section>
@@ -557,8 +557,7 @@ function getStatusDetails(
   ) {
     return {
       label: "Obliczanie metryk",
-      description:
-        "Obliczamy techniczne metryki ergonomiczne dla wykrytego ruchu.",
+      description: "Obliczamy metryki ergonomiczne.",
       icon: LoaderCircle,
       animated: true,
       containerClass:
@@ -575,8 +574,7 @@ function getStatusDetails(
   ) {
     return {
       label: "Metryki gotowe",
-      description:
-        "Metryki ergonomiczne zostały obliczone. Automatyczna ocena ryzyka jest kolejnym etapem rozwoju.",
+      description: "Metryki są gotowe. Kolejny etap to ocena ryzyka.",
       icon: CheckCircle2,
       animated: false,
       containerClass:
@@ -593,8 +591,7 @@ function getStatusDetails(
   ) {
     return {
       label: "Poza gotowa do metryk",
-      description:
-        "Analiza pozy została zakończona. Dane są gotowe do obliczenia metryk ergonomicznych.",
+      description: "Pozycja została wykryta. Czekamy na obliczenie metryk.",
       icon: CheckCircle2,
       animated: false,
       containerClass:

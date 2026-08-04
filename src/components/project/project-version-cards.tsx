@@ -1,9 +1,9 @@
 import {
   BrainCircuit,
-  Cloud,
   FileText,
   MonitorCog,
   Ruler,
+  ShieldCheck,
 } from "lucide-react";
 
 import { projectStatus } from "@/config/project-status";
@@ -20,14 +20,14 @@ const versions = [
     icon: Ruler,
   },
   {
-    label: "Tryb workera",
-    value: projectStatus.versions.workerMode,
-    icon: MonitorCog,
+    label: "Risk Engine",
+    value: projectStatus.versions.riskEngine,
+    icon: ShieldCheck,
   },
   {
-    label: "Worker online",
-    value: projectStatus.versions.workerOnline,
-    icon: Cloud,
+    label: "Tryb workerów",
+    value: projectStatus.versions.workerMode,
+    icon: MonitorCog,
   },
   {
     label: "Raport końcowy",

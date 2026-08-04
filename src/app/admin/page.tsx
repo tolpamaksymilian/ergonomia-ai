@@ -92,15 +92,8 @@ export default async function AdminPage() {
               Stan i rozwój systemu
             </h1>
             <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">
-              Panel pokazuje rzeczywisty zakres działających modułów,
-              zintegrowany etap metryk ergonomicznych oraz Risk Engine
-              rozwijany jako kolejny niezależny etap.
+              Tu sprawdzisz gotowe moduły i najbliższe etapy rozwoju.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3 text-sm">
-              <StatusBadge label="Sesja aktywna" />
-              <StatusBadge label="Rola administratora" />
-              <StatusBadge label="RLS aktywne" />
-            </div>
           </div>
 
           <aside className="rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
@@ -140,11 +133,10 @@ export default async function AdminPage() {
               Rozwój systemu
             </p>
             <h2 className="mt-4 text-3xl font-bold tracking-[-0.03em] sm:text-4xl">
-              Roadmapa oparta na rzeczywistych etapach
+              Roadmapa projektu
             </h2>
-            <p className="mt-5 text-lg leading-8 text-slate-400">
-              Status i procent są wyliczane z jednej publicznej konfiguracji.
-              Nie są przechowywane w Supabase ani wpisywane ręcznie w widoku.
+            <p className="mt-4 text-slate-400">
+              Procent wynika automatycznie ze statusów etapów.
             </p>
           </div>
           <div className="mt-8">
@@ -202,15 +194,6 @@ export default async function AdminPage() {
         </section>
       </div>
     </main>
-  );
-}
-
-function StatusBadge({ label }: { label: string }) {
-  return (
-    <span className="flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/[0.06] px-3 py-1.5 text-emerald-200">
-      <span className="size-2 rounded-full bg-emerald-400" />
-      {label}
-    </span>
   );
 }
 

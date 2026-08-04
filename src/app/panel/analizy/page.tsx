@@ -153,9 +153,7 @@ export default async function AnalysesPage({
           </h1>
 
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-400">
-            Przeglądaj przesłane filmy, ich status,
-            postęp przetwarzania oraz przyszłe wyniki
-            analizy ergonomicznej.
+            Sprawdź status, postęp i wyniki przesłanych nagrań.
           </p>
         </section>
 

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -12,11 +11,7 @@ import {
   Hand,
   Info,
   ListChecks,
-  LogIn,
-  ScanLine,
   ScanSearch,
-  ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 
 import { ErgonomicVisualization } from "@/components/landing/ergonomic-visualization";
@@ -60,34 +55,22 @@ export function HeroSection({
   const [hoveredRegion, setHoveredRegion] =
     useState<AnalysisRegionId | null>(null);
   const activeRegion = hoveredRegion ?? selectedRegion;
-  const shouldReduceMotion = useReducedMotion();
-
   return (
     <section className="relative overflow-hidden px-5 pb-20 pt-28 sm:px-6 sm:pb-24 sm:pt-36">
       <BackgroundEffects />
 
-      <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:min-h-[780px] lg:grid-cols-[0.92fr_1.08fr] xl:gap-20">
-        <motion.div
-          initial={shouldReduceMotion ? false : { opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: shouldReduceMotion ? 0 : 0.75, ease: "easeOut" }}
-        >
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">
-            <Sparkles className="size-4" />
-            Analiza krótkich nagrań stanowiska pracy
-          </div>
-
-          <h1 className="mt-8 max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-white min-[420px]:text-5xl sm:text-6xl xl:text-7xl">
-            Analiza ergonomii pracy{" "}
+      <div className="relative mx-auto grid max-w-7xl gap-12 lg:min-h-[720px] lg:grid-cols-[0.9fr_1.1fr] lg:items-start xl:gap-16">
+        <div className="lg:pt-20">
+          <h1 className="max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-white min-[420px]:text-5xl sm:text-6xl">
+            Sprawdź ergonomię pracy na podstawie{" "}
             <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-sky-300 bg-clip-text text-transparent">
-              wspierana przez AI
+              krótkiego filmu
             </span>
           </h1>
 
           <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-300">
-            Prześlij krótkie nagranie stanowiska pracy. System wykryje
-            pracownika, przeanalizuje ruch ciała i dłoni oraz przygotuje dane
-            potrzebne do oceny obciążenia ergonomicznego.
+            System wykrywa pozycję pracownika, analizuje ruch i porządkuje dane
+            potrzebne do dalszej oceny.
           </p>
 
           <div className="mt-9 flex flex-wrap gap-4">
@@ -99,65 +82,21 @@ export function HeroSection({
               }
               className="group flex items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/20 transition hover:-translate-y-0.5 hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 motion-reduce:transition-none"
             >
-              {isAuthenticated
-                ? "Utwórz nową analizę"
-                : "Zaloguj się i rozpocznij"}
+              Rozpocznij analizę
               <ArrowRight className="size-5 transition group-hover:translate-x-1" />
             </Link>
 
             <Link
-              href={isAuthenticated ? "/o-projekcie" : "/rejestracja"}
+              href="/o-projekcie"
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 motion-reduce:transition-none"
             >
-              {isAuthenticated ? (
-                <ScanLine className="size-5 text-cyan-300" />
-              ) : (
-                <LogIn className="size-5 text-cyan-300" />
-              )}
-              {isAuthenticated ? "Jak działa system" : "Utwórz konto"}
+              <ScanSearch className="size-5 text-cyan-300" />
+              Jak to działa
             </Link>
           </div>
+        </div>
 
-          <div className="mt-10 flex flex-wrap gap-x-7 gap-y-3 text-sm text-slate-400">
-            <span className="flex items-center gap-2">
-              <ShieldCheck className="size-4 text-emerald-400" />
-              Prywatne filmy
-            </span>
-            <span className="flex items-center gap-2">
-              <ScanSearch className="size-4 text-emerald-400" />
-              Pose Pipeline V3.0
-            </span>
-            <span className="flex items-center gap-2">
-              <ListChecks className="size-4 text-cyan-300" />
-              14 metryk technicznych
-            </span>
-          </div>
-
-          <div className="mt-12 grid gap-4 sm:grid-cols-2">
-            <InfoCard
-              icon={BrainCircuit}
-              title="Działa obecnie"
-              text="Wykrywanie pracownika, analiza ciała i dłoni, aktywny fragment oraz dane pozy."
-            />
-
-            <InfoCard
-              icon={ShieldCheck}
-              title="Rozwijany etap"
-              text="Silnik metryk działa lokalnie. Końcowa ocena ryzyka i raport nie są jeszcze dostępne."
-            />
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.97, y: 28 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{
-            duration: shouldReduceMotion ? 0 : 0.9,
-            delay: shouldReduceMotion ? 0 : 0.15,
-            ease: "easeOut",
-          }}
-          className="relative"
-        >
+        <div className="relative">
           <div className="absolute inset-10 rounded-full bg-emerald-400/10 blur-[120px]" />
 
           <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[#07111f]/90 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:rounded-[34px]">
@@ -241,7 +180,7 @@ export function HeroSection({
           </div>
 
           <div className="pointer-events-none absolute -bottom-5 left-10 right-10 h-12 rounded-full bg-emerald-400/10 blur-3xl" />
-        </motion.div>
+        </div>
       </div>
     </section>
   );
@@ -321,27 +260,6 @@ function Metric({
           {value}
         </p>
       </div>
-    </div>
-  );
-}
-
-function InfoCard({
-  icon: Icon,
-  title,
-  text,
-}: {
-  icon: typeof BrainCircuit;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="flex size-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
-        <Icon className="size-5 text-cyan-300" />
-      </div>
-
-      <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{text}</p>
     </div>
   );
 }

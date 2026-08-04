@@ -72,9 +72,7 @@ export default async function UserPanelPage() {
             </h1>
 
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Prześlij krótkie nagranie, aby uruchomić analizę pozy
-              pracownika. System przygotuje film wynikowy i dane pozy;
-              końcowa ocena ryzyka pozostaje w przygotowaniu.
+              Prześlij film i sprawdź uporządkowane wyniki analizy ruchu.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -124,14 +122,14 @@ export default async function UserPanelPage() {
           <DashboardCard
             icon={LayoutDashboard}
             title="Ocena i raport"
-            description="Końcowa klasyfikacja ryzyka, wykresy i raport PDF są w przygotowaniu."
+            description="Prezentacja oceny i raport są w przygotowaniu."
             status="Planowane"
           />
 
           <DashboardCard
             icon={FileVideo}
             title="Analizy wideo"
-            description="Tworzenie analizy, prywatny upload oraz przeglądanie wyników pozy są dostępne."
+            description="Przesyłaj filmy i przeglądaj wyniki pozy oraz metryk."
             status="Dostępne"
             available
           />
