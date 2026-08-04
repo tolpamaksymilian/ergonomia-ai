@@ -6,9 +6,11 @@ import { useState } from "react";
 import {
   ArrowRight,
   BrainCircuit,
+  Check,
   CircleDot,
   Crosshair,
   Hand,
+  Info,
   ListChecks,
   LogIn,
   ScanLine,
@@ -18,7 +20,12 @@ import {
 } from "lucide-react";
 
 import { ErgonomicVisualization } from "@/components/landing/ergonomic-visualization";
-import type { AnalysisFocusMode } from "@/config/analysis-visualization";
+import {
+  analysisRegions,
+  getAnalysisRegion,
+  type AnalysisFocusMode,
+  type AnalysisRegionId,
+} from "@/config/analysis-visualization";
 
 const focusModes: Array<{
   id: AnalysisFocusMode;
@@ -48,6 +55,11 @@ export function HeroSection({
   isAuthenticated: boolean;
 }) {
   const [focusMode, setFocusMode] = useState<AnalysisFocusMode>("full");
+  const [selectedRegion, setSelectedRegion] =
+    useState<AnalysisRegionId>("trunk");
+  const [hoveredRegion, setHoveredRegion] =
+    useState<AnalysisRegionId | null>(null);
+  const activeRegion = hoveredRegion ?? selectedRegion;
   const shouldReduceMotion = useReducedMotion();
 
   return (
@@ -184,7 +196,21 @@ export function HeroSection({
 
               <CornerMarkers />
 
-              <ErgonomicVisualization focusMode={focusMode} />
+              <ErgonomicVisualization
+                activeRegion={activeRegion}
+                focusMode={focusMode}
+                onRegionHover={setHoveredRegion}
+                onRegionSelect={setSelectedRegion}
+              />
+
+              <AnalysisRegionControls
+                activeRegion={activeRegion}
+                onRegionSelect={(region) => {
+                  setHoveredRegion(null);
+                  setSelectedRegion(region);
+                }}
+                selectedRegion={selectedRegion}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
@@ -336,6 +362,72 @@ function BackgroundEffects() {
             "linear-gradient(to bottom, black, transparent 90%)",
         }}
       />
+    </div>
+  );
+}
+
+function AnalysisRegionControls({
+  activeRegion,
+  selectedRegion,
+  onRegionSelect,
+}: {
+  activeRegion: AnalysisRegionId;
+  selectedRegion: AnalysisRegionId;
+  onRegionSelect: (region: AnalysisRegionId) => void;
+}) {
+  const region = getAnalysisRegion(activeRegion);
+
+  return (
+    <div className="relative z-20 grid gap-4 border-t border-white/10 bg-slate-950/55 p-4 sm:grid-cols-[minmax(0,1fr)_290px] sm:p-5">
+      <div
+        className="min-w-0 rounded-2xl border border-cyan-300/10 bg-cyan-400/[0.035] p-4"
+        aria-live="polite"
+      >
+        <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.17em] text-cyan-300/75">
+          <Crosshair className="size-3.5" aria-hidden="true" />
+          Analizowany obszar
+        </div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="font-semibold text-white">{region.label}</p>
+          <p className="text-xs font-medium text-emerald-200">
+            {region.metric}
+          </p>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          {region.description}
+        </p>
+      </div>
+
+      <div className="min-w-0">
+        <p className="mb-2 flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <Info className="size-3" aria-hidden="true" />
+          Wybierz strefę lub wskaż model
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {analysisRegions.map((item) => {
+            const active = item.id === selectedRegion;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onRegionSelect(item.id)}
+                aria-pressed={active}
+                className={`flex min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-[10px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:text-[11px] motion-reduce:transition-none ${
+                  active
+                    ? "border-cyan-300/30 bg-cyan-400/15 text-cyan-100"
+                    : "border-white/[0.07] bg-white/[0.035] text-slate-400 hover:bg-white/[0.08] hover:text-slate-200"
+                }`}
+              >
+                {active && (
+                  <Check className="size-3 shrink-0" aria-hidden="true" />
+                )}
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
