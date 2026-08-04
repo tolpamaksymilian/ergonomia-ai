@@ -1,0 +1,252 @@
+"""Pose V3 JSON parsing, frame processing, summaries, and file output."""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from .metrics import compute_frame_metrics
+from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, RejectionReason, ValidatedHand
+
+
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0"})
+DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
+BODY_KEYPOINT_INDICES: dict[str, int] = {
+    "nose": 0,
+    "left_shoulder": 5,
+    "right_shoulder": 6,
+    "left_elbow": 7,
+    "right_elbow": 8,
+    "left_wrist": 9,
+    "right_wrist": 10,
+    "left_hip": 11,
+    "right_hip": 12,
+}
+
+
+class InputSchemaError(ValueError):
+    rejection_reason: RejectionReason = "unsupported_input_schema"
+
+
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _metadata_number(value: Any) -> int | float | None:
+    numeric = _finite_number(value)
+    if numeric is None:
+        return None
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+def _timestamp(value: Any) -> float | None:
+    numeric = _finite_number(value)
+    return float(numeric) if numeric is not None else None
+
+
+def _parse_coordinates(value: Any) -> tuple[np.ndarray | None, RejectionReason | None]:
+    if value is None:
+        return None, "missing_keypoint"
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None, "invalid_coordinate"
+    if value[0] is None or value[1] is None:
+        return None, "missing_keypoint"
+    first = _finite_number(value[0])
+    second = _finite_number(value[1])
+    if first is None or second is None:
+        return None, "invalid_coordinate"
+    if abs(first) <= 1e-8 and abs(second) <= 1e-8:
+        return None, "invalid_coordinate"
+    return np.asarray([first, second], dtype=float), None
+
+
+def _body_point(
+    name: str,
+    index: int,
+    keypoints: Any,
+    scores: Any,
+    threshold: float,
+) -> PointSample:
+    coordinate_value = keypoints[index] if isinstance(keypoints, list) and index < len(keypoints) else None
+    coordinates, coordinate_reason = _parse_coordinates(coordinate_value)
+    score_value = scores[index] if isinstance(scores, list) and index < len(scores) else None
+    score = _finite_number(score_value)
+    if coordinate_reason is not None:
+        return PointSample(name, None, 0.0, coordinate_reason)
+    if score is None or not 0.0 <= score <= 1.0 or score < threshold:
+        return PointSample(name, coordinates, 0.0, "low_keypoint_quality")
+    return PointSample(name, coordinates, min(1.0, max(0.0, score)))
+
+
+def _invalid_hand(side: str, reason: RejectionReason) -> ValidatedHand:
+    return ValidatedHand(side=side, valid=False, quality=0.0, landmarks={}, rejection_reason=reason)  # type: ignore[arg-type]
+
+
+def _parse_hand(side: str, value: Any) -> ValidatedHand:
+    if not isinstance(value, dict) or value.get("visible") is not True:
+        return _invalid_hand(side, "hand_not_valid")
+    quality = _finite_number(value.get("quality"))
+    if quality is None or not 0.0 <= quality <= 1.0:
+        return _invalid_hand(side, "low_keypoint_quality")
+    landmarks_value = value.get("landmarks_2d")
+    if not isinstance(landmarks_value, list) or len(landmarks_value) != 21:
+        return _invalid_hand(side, "missing_keypoint")
+
+    landmarks: dict[int, PointSample] = {}
+    for index, raw_point in enumerate(landmarks_value):
+        coordinates, reason = _parse_coordinates(raw_point)
+        name = f"{side}_hand_landmark_{index}"
+        landmarks[index] = PointSample(
+            name=name,
+            coordinates=coordinates,
+            quality=quality if reason is None else 0.0,
+            rejection_reason=reason,
+        )
+    return ValidatedHand(
+        side=side,  # type: ignore[arg-type]
+        valid=True,
+        quality=quality,
+        landmarks=landmarks,
+        rejection_reason=None,
+    )
+
+
+def _quality_threshold(document: dict[str, Any]) -> float:
+    configuration = document.get("configuration")
+    value = configuration.get("keypoint_threshold") if isinstance(configuration, dict) else None
+    threshold = _finite_number(value)
+    if threshold is None or not 0.0 <= threshold <= 1.0:
+        return DEFAULT_KEYPOINT_QUALITY_THRESHOLD
+    return threshold
+
+
+def _parse_frame(value: Any, threshold: float) -> FramePose:
+    frame = value if isinstance(value, dict) else {}
+    keypoints = frame.get("smoothed_keypoints")
+    scores = frame.get("scores")
+    body = {
+        name: _body_point(name, index, keypoints, scores, threshold)
+        for name, index in BODY_KEYPOINT_INDICES.items()
+    }
+    return FramePose(
+        person_detected=frame.get("detected") is True,
+        body=body,
+        left_hand=_parse_hand("left", frame.get("left_hand")),
+        right_hand=_parse_hand("right", frame.get("right_hand")),
+    )
+
+
+def summarize_metric(results: list[MetricResult]) -> dict[str, int | float | None]:
+    values = np.asarray(
+        [result.value for result in results if result.valid and result.value is not None],
+        dtype=float,
+    )
+    valid_frames = int(values.size)
+    invalid_frames = len(results) - valid_frames
+    valid_ratio = valid_frames / len(results) if results else 0.0
+    if valid_frames == 0:
+        return {
+            "valid_frames": 0,
+            "invalid_frames": invalid_frames,
+            "valid_ratio": round(valid_ratio, 6),
+            "mean": None,
+            "median": None,
+            "minimum": None,
+            "maximum": None,
+            "percentile_95": None,
+        }
+    return {
+        "valid_frames": valid_frames,
+        "invalid_frames": invalid_frames,
+        "valid_ratio": round(valid_ratio, 6),
+        "mean": round(float(np.mean(values)), 6),
+        "median": round(float(np.median(values)), 6),
+        "minimum": round(float(np.min(values)), 6),
+        "maximum": round(float(np.max(values)), 6),
+        "percentile_95": round(float(np.percentile(values, 95)), 6),
+    }
+
+
+def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(document, dict):
+        raise InputSchemaError("Główny element wejściowego JSON musi być obiektem.")
+    schema_version = document.get("schema_version")
+    if schema_version not in SUPPORTED_POSE_SCHEMAS:
+        raise InputSchemaError(
+            f"Nieobsługiwana wersja schematu pozy: {schema_version!r}; obsługiwane: {sorted(SUPPORTED_POSE_SCHEMAS)}."
+        )
+    frames_value = document.get("frames", [])
+    if frames_value is None:
+        frames_value = []
+    if not isinstance(frames_value, list):
+        raise InputSchemaError("Pole 'frames' musi być tablicą.")
+
+    threshold = _quality_threshold(document)
+    metric_series: dict[str, list[MetricResult]] = {name: [] for name in METRIC_NAMES}
+    output_frames: list[dict[str, Any]] = []
+    for fallback_index, raw_frame in enumerate(frames_value):
+        raw_frame_dict = raw_frame if isinstance(raw_frame, dict) else {}
+        frame_pose = _parse_frame(raw_frame_dict, threshold)
+        metrics = compute_frame_metrics(frame_pose)
+        for name in METRIC_NAMES:
+            metric_series[name].append(metrics[name])
+
+        source_timestamp = _timestamp(raw_frame_dict.get("source_timestamp_seconds"))
+        output_timestamp = _timestamp(raw_frame_dict.get("output_timestamp_seconds"))
+        output_frames.append(
+            {
+                "source_frame_index": _metadata_number(raw_frame_dict.get("source_frame_index")),
+                "output_frame_index": _metadata_number(raw_frame_dict.get("output_frame_index"))
+                if raw_frame_dict.get("output_frame_index") is not None
+                else fallback_index,
+                "timestamp": output_timestamp if output_timestamp is not None else source_timestamp,
+                "source_timestamp_seconds": source_timestamp,
+                "output_timestamp_seconds": output_timestamp,
+                "person_detected": frame_pose.person_detected,
+                "metrics": {name: metrics[name].to_dict() for name in METRIC_NAMES},
+            }
+        )
+
+    return {
+        "schema_version": "1.0",
+        "generated_by": "Ergonomia AI Ergonomics Metrics Engine",
+        "source_pose_schema_version": schema_version,
+        "analysis_id": document.get("analysis_id"),
+        "coordinate_space": document.get("coordinate_space", "source-video-pixels"),
+        "metrics_version": "ergonomics-metrics-v1.0",
+        "configuration": {
+            "interpolation_enabled": False,
+            "threshold_scoring_enabled": False,
+            "body_keypoint_quality_threshold": threshold,
+            "quality_aggregation": "minimum_required_point_quality",
+        },
+        "summary": {name: summarize_metric(metric_series[name]) for name in METRIC_NAMES},
+        "frames": output_frames,
+    }
+
+
+def process_pose_file(input_path: str | Path, output_path: str | Path) -> dict[str, Any]:
+    source_path = Path(input_path)
+    destination_path = Path(output_path)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Plik wejściowy nie istnieje: {source_path}")
+    if not source_path.is_file():
+        raise IsADirectoryError(f"Ścieżka wejściowa nie jest plikiem: {source_path}")
+    with source_path.open("r", encoding="utf-8") as source_file:
+        document = json.load(source_file)
+    result = process_pose_document(document)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with destination_path.open("w", encoding="utf-8", newline="\n") as destination_file:
+        json.dump(result, destination_file, ensure_ascii=False, indent=2, allow_nan=False)
+        destination_file.write("\n")
+    return result
