@@ -491,6 +491,36 @@ function getStatusDetails(
   processingStage: string | null,
 ): StatusDetails {
   if (
+    status === "processing" &&
+    processingStage === "ergonomics-processing"
+  ) {
+    return {
+      label: "Obliczanie metryk",
+      icon: LoaderCircle,
+      animated: true,
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      badgeClass:
+        "bg-cyan-400/10 text-cyan-300",
+    };
+  }
+
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-risk-assessment"
+  ) {
+    return {
+      label: "Metryki gotowe",
+      icon: CheckCircle2,
+      animated: false,
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      badgeClass:
+        "bg-emerald-400/10 text-emerald-300",
+    };
+  }
+
+  if (
     status === "queued" &&
     processingStage === "ready-for-ergonomics"
   ) {

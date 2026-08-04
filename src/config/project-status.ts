@@ -44,19 +44,23 @@ const completedStages = [
   ["pose-v3", "Pose Pipeline V3.0", "Modułowy pipeline ciała i zwalidowanych dłoni."],
   ["metrics-v1", "Ergonomics Metrics Engine V1", "Lokalne obliczanie 14 surowych metryk geometrycznych wraz z jakością danych."],
   ["metrics-tests", "Testy jednostkowe metryk", "Testy geometrii, jakości, uszkodzonych klatek i podsumowań."],
+  ["metrics-worker-integration", "Integracja Ergonomics Metrics Engine z workerem", "Osobny worker automatycznie przejmuje analizy po zakończeniu Pose Pipeline."],
+  ["metrics-supabase", "Zapis metryk do Supabase", "Pełny dokument trafia do prywatnego Storage, a ograniczone podsumowanie do rekordu analizy."],
+  ["ergonomic-transition", "Przejście do ready-for-risk-assessment", "Po zapisaniu metryk analiza jest przekazywana do przyszłego etapu oceny ryzyka."],
 ] as const;
 
 const inProgressStages = [
-  ["metrics-worker-integration", "Integracja ergonomics engine z workerem", "Automatyczne uruchamianie metryk po zakończeniu Pose Pipeline."],
-  ["metrics-supabase", "Zapis metryk do Supabase", "Bezpieczne przechowywanie wyników silnika metryk."],
-  ["ergonomic-transition", "Automatyczne przejście do oceny ergonomicznej", "Przekazanie zatwierdzonych metryk do przyszłego etapu oceny."],
+  ["risk-engine-v1", "Risk Engine V1", "Projektowanie osobnego etapu interpretacji zatwierdzonych metryk."],
+  ["risk-classification", "Klasyfikacja poziomów ryzyka", "Przygotowanie reguł klasyfikacji bez deklarowania gotowej oceny."],
 ] as const;
 
 const plannedStages = [
-  ["threshold-panel", "Panel edycji progów", "Konfigurowalne zakresy i reguły oceny ergonomicznej."],
-  ["risk-classification", "Klasyfikacja poziomu ryzyka", "Końcowa interpretacja pomiarów bez obietnicy automatycznej certyfikacji."],
+  ["rula", "RULA", "Planowana metoda oceny obciążenia kończyn górnych."],
+  ["reba", "REBA", "Planowana metoda oceny obciążenia całego ciała."],
+  ["threshold-panel", "Konfigurowalne progi", "Edytowalne zakresy i reguły oceny ergonomicznej."],
   ["exposure", "Analiza czasu ekspozycji", "Pomiar czasu utrzymywania wymagających pozycji."],
   ["charts", "Wykresy", "Czytelna prezentacja zmian metryk w czasie."],
+  ["key-frames", "Kluczowe klatki", "Wybór reprezentatywnych momentów wymagających dalszej interpretacji."],
   ["final-report", "Raport końcowy", "Podsumowanie pomiarów, jakości danych i przyszłej oceny."],
   ["pdf", "PDF", "Eksport raportu do formatu PDF."],
   ["cleanup", "Automatyczne czyszczenie starych filmów", "Polityka retencji prywatnych materiałów wideo."],
@@ -118,8 +122,8 @@ export const projectStatus = {
     {
       id: "ergonomic-metrics",
       title: "Obliczenie metryk ergonomicznych",
-      description: "Silnik 14 metryk działa lokalnie; integracja z kolejką jest w realizacji.",
-      status: "in_progress",
+      description: "Osobny worker oblicza 14 metryk i zapisuje ich techniczne podsumowanie.",
+      status: "completed",
     },
     {
       id: "assessment-report",
@@ -137,8 +141,8 @@ export const projectStatus = {
     ["RTMW WholeBody", "133 punkty ciała", "completed"],
     ["Walidacja dłoni", "Filtrowanie punktów palców", "completed"],
     ["JSON pozy", "Punkty, jakość i znaczniki czasu", "completed"],
-    ["Metryki ergonomiczne", "14 surowych pomiarów — silnik lokalny", "in_progress"],
-    ["Ocena ryzyka", "Planowany silnik interpretacji", "planned"],
+    ["Metryki ergonomiczne", "14 surowych pomiarów i podsumowanie pokrycia", "completed"],
+    ["Ocena ryzyka", "Risk Engine V1 jest kolejnym rozwijanym etapem", "in_progress"],
     ["Raport", "Planowane podsumowanie i PDF", "planned"],
   ].map(([title, description, status], index) => ({
     id: `pipeline-${index + 1}`,
@@ -156,10 +160,10 @@ export const projectStatus = {
     ["Przycinanie aktywnego fragmentu", "Wynik skupia się na fragmencie z pracownikiem."],
     ["Film wynikowy", "Prywatny film H.264 prezentuje zatwierdzone punkty."],
     ["Dane pozy", "Pose Pipeline zapisuje wersjonowany JSON."],
-    ["Lokalny silnik 14 metryk", "Surowe pomiary geometryczne wraz z jakością danych."],
+    ["Automatyczny etap 14 metryk", "Osobny worker zapisuje surowe pomiary i ograniczone podsumowanie danych."],
   ].map(([title, description]) => ({ title, description })) satisfies ProjectFeature[],
   plannedFeatures: [
-    ["Automatyczna integracja metryk", "Połączenie lokalnego silnika z kolejką analiz."],
+    ["Risk Engine V1", "Interpretacja metryk pozostaje kolejnym rozwijanym etapem."],
     ["Konfigurowalne progi", "Edytowalne zasady oceny ergonomicznej."],
     ["Końcowa ocena ryzyka", "Interpretacja metryk pozostaje w przygotowaniu."],
     ["Wykresy", "Prezentacja pomiarów w czasie."],

@@ -10,8 +10,8 @@ const stages = [
   },
   {
     title: "Metryki ergonomiczne",
-    status: "Silnik lokalny",
-    description: "Silnik V1 działa lokalnie; automatyczne uruchamianie w kolejce jest w realizacji.",
+    status: "Oczekują",
+    description: "Osobny Ergonomics Worker V1 automatycznie przejmie dane pozy z kolejki.",
     icon: Gauge,
     className: "border-cyan-400/20 bg-cyan-400/[0.07] text-cyan-200",
   },
@@ -39,8 +39,8 @@ export function AnalysisAvailability() {
             Analiza pozy została zakończona
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-400">
-            Dane są gotowe do obliczenia metryk ergonomicznych. Poniżej widać
-            dokładny zakres dostępny na obecnym etapie projektu.
+            Dane oczekują na osobny Ergonomics Worker. Wyniki pozy pozostają
+            zachowane niezależnie od powodzenia kolejnego etapu.
           </p>
         </div>
       </div>

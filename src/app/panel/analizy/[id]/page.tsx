@@ -13,6 +13,7 @@ import {
 
 import { AnalysisAutoRefresh } from "@/components/analyses/analysis-auto-refresh";
 import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
+import { ErgonomicsMetricsCard } from "@/components/analyses/ergonomics-metrics-card";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
@@ -73,7 +74,15 @@ export default async function AnalysisDetailsPage({
       pose_processed_frames,
       pose_detected_frames,
       pose_average_confidence,
-      pose_completed_at
+      pose_completed_at,
+      ergonomics_metrics_path,
+      ergonomics_metrics_version,
+      ergonomics_processed_frames,
+      ergonomics_valid_metric_ratio,
+      ergonomics_metrics_summary,
+      ergonomics_completed_at,
+      ergonomics_error_code,
+      ergonomics_error_message
     `)
     .eq("id", id)
     .maybeSingle();
@@ -174,6 +183,7 @@ export default async function AnalysisDetailsPage({
         null,
         "queued",
         "ready-for-ai",
+        "ready-for-ergonomics",
       ].includes(
         analysis.processing_stage,
       )
@@ -322,12 +332,29 @@ export default async function AnalysisDetailsPage({
             errorMessage={signedVideoErrorMessage}
             expiresInMinutes={10}
           />
-          {analysis.processing_stage ===
-            "ready-for-ergonomics" && (
+          {[
+            "ready-for-ergonomics",
+            "ergonomics-processing",
+            "ready-for-risk-assessment",
+            "ergonomics-failed",
+          ].includes(analysis.processing_stage ?? "") && (
               <div className="mt-6">
-                <div className="mb-6">
-                  <AnalysisAvailability />
-                </div>
+                {analysis.processing_stage === "ready-for-ergonomics" && (
+                  <div className="mb-6">
+                    <AnalysisAvailability />
+                  </div>
+                )}
+
+                {analysis.processing_stage === "ready-for-risk-assessment" && (
+                  <div className="mb-6">
+                    <ErgonomicsMetricsCard
+                      version={analysis.ergonomics_metrics_version}
+                      processedFrames={analysis.ergonomics_processed_frames}
+                      validMetricRatio={analysis.ergonomics_valid_metric_ratio}
+                      completedAt={analysis.ergonomics_completed_at}
+                    />
+                  </div>
+                )}
 
                 <PoseResultsPreview
                   videoUrl={resultVideoUrl}
@@ -389,8 +416,12 @@ export default async function AnalysisDetailsPage({
             <PipelineStep
               label="Pose Pipeline V3.0"
               completed={
-                analysis.processing_stage ===
-                  "ready-for-ergonomics" ||
+                [
+                  "ready-for-ergonomics",
+                  "ergonomics-processing",
+                  "ergonomics-failed",
+                  "ready-for-risk-assessment",
+                ].includes(analysis.processing_stage ?? "") ||
                 analysis.status === "completed"
               }
               active={
@@ -403,6 +434,11 @@ export default async function AnalysisDetailsPage({
                   "pose-inference",
                   "uploading-pose-results",
                   "saving-pose-results",
+                  "downloading-for-pose-v3",
+                  "pose-inference-active-segment-v3",
+                  "pose-v3-rendering-validated-results",
+                  "uploading-pose-results-v3",
+                  "saving-pose-results-v3",
                 ].includes(
                   analysis.processing_stage ??
                     "",
@@ -412,7 +448,13 @@ export default async function AnalysisDetailsPage({
 
             <PipelineStep
               label="Metryki ergonomiczne"
-              active={analysis.processing_stage === "ready-for-ergonomics"}
+              completed={
+                analysis.processing_stage === "ready-for-risk-assessment"
+              }
+              active={[
+                "ready-for-ergonomics",
+                "ergonomics-processing",
+              ].includes(analysis.processing_stage ?? "")}
             />
 
             <PipelineStep
@@ -509,6 +551,42 @@ function getStatusDetails(
   status: string,
   processingStage: string | null,
 ) {
+  if (
+    status === "processing" &&
+    processingStage === "ergonomics-processing"
+  ) {
+    return {
+      label: "Obliczanie metryk",
+      description:
+        "Obliczamy techniczne metryki ergonomiczne dla wykrytego ruchu.",
+      icon: LoaderCircle,
+      animated: true,
+      containerClass:
+        "border-cyan-400/20 bg-cyan-400/[0.06]",
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      textClass: "text-cyan-300",
+    };
+  }
+
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-risk-assessment"
+  ) {
+    return {
+      label: "Metryki gotowe",
+      description:
+        "Metryki ergonomiczne zostały obliczone. Automatyczna ocena ryzyka jest kolejnym etapem rozwoju.",
+      icon: CheckCircle2,
+      animated: false,
+      containerClass:
+        "border-emerald-400/20 bg-emerald-400/[0.06]",
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      textClass: "text-emerald-300",
+    };
+  }
+
   if (
     status === "queued" &&
     processingStage === "ready-for-ergonomics"

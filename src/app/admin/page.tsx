@@ -93,8 +93,8 @@ export default async function AdminPage() {
             </h1>
             <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">
               Panel pokazuje rzeczywisty zakres działających modułów,
-              bieżącą integrację silnika metryk i funkcje zaplanowane na
-              kolejne etapy.
+              zintegrowany etap metryk ergonomicznych oraz Risk Engine
+              rozwijany jako kolejny niezależny etap.
             </p>
             <div className="mt-8 flex flex-wrap gap-3 text-sm">
               <StatusBadge label="Sesja aktywna" />
