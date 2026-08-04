@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "Ergonomia AI Ergonomics Metrics Engine",
+  "metrics_version": "ergonomics-metrics-v1.0",
+  "analysis_id": "risk-engine-fixture-analysis",
+  "coordinate_space": "source-video-pixels",
+  "configuration": {"interpolation_enabled": false, "threshold_scoring_enabled": false},
+  "summary": {},
+  "frames": [
+    {"source_frame_index": 0, "output_frame_index": 0, "timestamp": 0.0, "person_detected": true, "metrics": {
+      "trunk_inclination_deg": {"value": 12.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "neck_flexion_deg": {"value": 14.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_upper_arm_elevation_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_upper_arm_elevation_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_elbow_flexion_deg": {"value": 90.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_elbow_flexion_deg": {"value": 90.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_forearm_inclination_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_forearm_inclination_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_wrist_flexion_deg": {"value": 10.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_wrist_flexion_deg": {"value": 10.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_hand_closure_ratio": {"value": 0.1, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_hand_closure_ratio": {"value": 0.1, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_pinch_distance_ratio": {"value": 0.5, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_pinch_distance_ratio": {"value": 0.5, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null}
+    }},
+    {"source_frame_index": 1, "output_frame_index": 1, "timestamp": 0.5, "person_detected": true, "metrics": {
+      "trunk_inclination_deg": {"value": 12.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "neck_flexion_deg": {"value": 14.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_upper_arm_elevation_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_upper_arm_elevation_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_elbow_flexion_deg": {"value": 90.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_elbow_flexion_deg": {"value": 90.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_forearm_inclination_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_forearm_inclination_deg": {"value": 15.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_wrist_flexion_deg": {"value": 10.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_wrist_flexion_deg": {"value": 10.0, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_hand_closure_ratio": {"value": 0.1, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_hand_closure_ratio": {"value": 0.1, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "left_pinch_distance_ratio": {"value": 0.5, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null},
+      "right_pinch_distance_ratio": {"value": 0.5, "valid": true, "quality": 0.95, "source_points": [], "rejection_reason": null}
+    }}
+  ]
+}

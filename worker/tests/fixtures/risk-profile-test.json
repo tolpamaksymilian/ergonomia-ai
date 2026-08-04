@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "test-only-risk-profile-v1",
+  "profile_name": "Test only synthetic risk profile",
+  "profile_version": "1.0.0-test",
+  "status": "development",
+  "normative_method": null,
+  "description": "Synthetic thresholds used only by automated tests.",
+  "disclaimer": "Test only. Not for production. Not ergonomically validated.",
+  "metrics": {
+    "trunk_inclination_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1.2, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "neck_flexion_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "left_upper_arm_elevation_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "right_upper_arm_elevation_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "left_elbow_flexion_deg": {"enabled": true, "direction": "outside_range_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "preferred_range": {"minimum": 60, "maximum": 120}, "bands": [{"level": "critical", "minimum": null, "maximum": 30, "score": 3}, {"level": "high", "minimum": 30, "maximum": 60, "score": 2}, {"level": "low", "minimum": 60, "maximum": 120, "score": 0}, {"level": "moderate", "minimum": 120, "maximum": 150, "score": 1}, {"level": "high", "minimum": 150, "maximum": 170, "score": 2}, {"level": "critical", "minimum": 170, "maximum": null, "score": 3}]},
+    "right_elbow_flexion_deg": {"enabled": true, "direction": "outside_range_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "preferred_range": {"minimum": 60, "maximum": 120}, "bands": [{"level": "critical", "minimum": null, "maximum": 30, "score": 3}, {"level": "high", "minimum": 30, "maximum": 60, "score": 2}, {"level": "low", "minimum": 60, "maximum": 120, "score": 0}, {"level": "moderate", "minimum": 120, "maximum": 150, "score": 1}, {"level": "high", "minimum": 150, "maximum": 170, "score": 2}, {"level": "critical", "minimum": 170, "maximum": null, "score": 3}]},
+    "left_forearm_inclination_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "right_forearm_inclination_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "left_wrist_flexion_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "right_wrist_flexion_deg": {"enabled": true, "direction": "higher_is_worse", "weight": 1, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 20, "score": 0}, {"level": "moderate", "minimum": 20, "maximum": 40, "score": 1}, {"level": "high", "minimum": 40, "maximum": 60, "score": 2}, {"level": "critical", "minimum": 60, "maximum": null, "score": 3}]},
+    "left_hand_closure_ratio": {"enabled": true, "direction": "higher_is_worse", "weight": 0.8, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 0.25, "score": 0}, {"level": "moderate", "minimum": 0.25, "maximum": 0.5, "score": 1}, {"level": "high", "minimum": 0.5, "maximum": 0.75, "score": 2}, {"level": "critical", "minimum": 0.75, "maximum": null, "score": 3}]},
+    "right_hand_closure_ratio": {"enabled": true, "direction": "higher_is_worse", "weight": 0.8, "minimum_valid_ratio": 0.5, "bands": [{"level": "low", "minimum": null, "maximum": 0.25, "score": 0}, {"level": "moderate", "minimum": 0.25, "maximum": 0.5, "score": 1}, {"level": "high", "minimum": 0.5, "maximum": 0.75, "score": 2}, {"level": "critical", "minimum": 0.75, "maximum": null, "score": 3}]},
+    "left_pinch_distance_ratio": {"enabled": true, "direction": "lower_is_worse", "weight": 0.8, "minimum_valid_ratio": 0.5, "bands": [{"level": "critical", "minimum": null, "maximum": 0.1, "score": 3}, {"level": "high", "minimum": 0.1, "maximum": 0.2, "score": 2}, {"level": "moderate", "minimum": 0.2, "maximum": 0.4, "score": 1}, {"level": "low", "minimum": 0.4, "maximum": null, "score": 0}]},
+    "right_pinch_distance_ratio": {"enabled": true, "direction": "lower_is_worse", "weight": 0.8, "minimum_valid_ratio": 0.5, "bands": [{"level": "critical", "minimum": null, "maximum": 0.1, "score": 3}, {"level": "high", "minimum": 0.1, "maximum": 0.2, "score": 2}, {"level": "moderate", "minimum": 0.2, "maximum": 0.4, "score": 1}, {"level": "low", "minimum": 0.4, "maximum": null, "score": 0}]}
+  },
+  "zones": {
+    "neck": ["neck_flexion_deg"],
+    "trunk": ["trunk_inclination_deg"],
+    "left_upper_limb": ["left_upper_arm_elevation_deg", "left_elbow_flexion_deg", "left_forearm_inclination_deg", "left_wrist_flexion_deg"],
+    "right_upper_limb": ["right_upper_arm_elevation_deg", "right_elbow_flexion_deg", "right_forearm_inclination_deg", "right_wrist_flexion_deg"],
+    "left_hand": ["left_hand_closure_ratio", "left_pinch_distance_ratio"],
+    "right_hand": ["right_hand_closure_ratio", "right_pinch_distance_ratio"]
+  },
+  "summary_rule": {"minimum_sequence_seconds": 1.0, "minimum_exposure_ratio": 0.2, "percentile_for_summary": 95},
+  "overall": {
+    "minimum_data_coverage": 0.65,
+    "aggregation": "weighted_average_with_peak_guard",
+    "peak_guard": {"enabled": true, "minimum_level": "high", "minimum_exposure_ratio": 0.2},
+    "score_bands": [{"level": "low", "minimum": 0, "maximum": 0.25}, {"level": "moderate", "minimum": 0.25, "maximum": 0.5}, {"level": "high", "minimum": 0.5, "maximum": 0.75}, {"level": "critical", "minimum": 0.75, "maximum": 1}]
+  },
+  "key_frames": {"minimum_time_separation_seconds": 0.75}
+}
