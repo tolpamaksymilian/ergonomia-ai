@@ -1,4 +1,4 @@
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, ArrowRight } from "lucide-react";
 
 import { FeatureStatusBadge } from "@/components/project/feature-status-badge";
 import type { ProjectStage } from "@/config/project-status";
@@ -12,6 +12,7 @@ export function PipelineOverview({
 }) {
   return (
     <ol
+      aria-label="Etapy pipeline'u Ergonomia AI"
       className={
         compact
           ? "grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
@@ -37,10 +38,18 @@ export function PipelineOverview({
           </article>
 
           {index < stages.length - 1 && (
-            <ArrowDown
-              className="mx-auto my-1 size-4 text-slate-700 md:hidden"
-              aria-hidden="true"
-            />
+            <>
+              <ArrowDown
+                className="mx-auto my-1 size-4 text-slate-700 sm:hidden"
+                aria-hidden="true"
+              />
+              {index % 3 !== 2 && (
+                <ArrowRight
+                  className="absolute -right-3.5 top-1/2 z-10 hidden size-3.5 -translate-y-1/2 text-cyan-400/35 xl:block"
+                  aria-hidden="true"
+                />
+              )}
+            </>
           )}
         </li>
       ))}

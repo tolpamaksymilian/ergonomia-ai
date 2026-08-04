@@ -15,6 +15,7 @@ import { AnalysisAutoRefresh } from "@/components/analyses/analysis-auto-refresh
 import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
+import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
@@ -324,20 +325,9 @@ export default async function AnalysisDetailsPage({
           {analysis.processing_stage ===
             "ready-for-ergonomics" && (
               <div className="mt-6">
-                <section className="mb-6 flex items-start gap-4 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.07] p-5 sm:p-6">
-                  <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-emerald-300" />
-                  <div>
-                    <h2 className="text-lg font-semibold text-emerald-100">
-                      Analiza pozy została zakończona
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-300/80">
-                      Dane są gotowe do obliczenia metryk ergonomicznych.
-                      Automatyczne połączenie silnika metryk z kolejką jest
-                      nadal w realizacji, dlatego nie ma jeszcze końcowej
-                      oceny ryzyka ani raportu.
-                    </p>
-                  </div>
-                </section>
+                <div className="mb-6">
+                  <AnalysisAvailability />
+                </div>
 
                 <PoseResultsPreview
                   videoUrl={resultVideoUrl}

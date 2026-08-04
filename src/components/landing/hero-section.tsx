@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -17,13 +17,11 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import {
-  ErgonomicSkeleton,
-  type FocusMode,
-} from "@/components/three/ergonomic-skeleton";
+import { ErgonomicVisualization } from "@/components/landing/ergonomic-visualization";
+import type { AnalysisFocusMode } from "@/config/analysis-visualization";
 
 const focusModes: Array<{
-  id: FocusMode;
+  id: AnalysisFocusMode;
   label: string;
   icon: typeof ScanSearch;
 }> = [
@@ -49,24 +47,25 @@ export function HeroSection({
 }: {
   isAuthenticated: boolean;
 }) {
-  const [focusMode, setFocusMode] = useState<FocusMode>("full");
+  const [focusMode, setFocusMode] = useState<AnalysisFocusMode>("full");
+  const shouldReduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden px-5 pb-24 pt-32 sm:px-6 sm:pt-36">
+    <section className="relative overflow-hidden px-5 pb-20 pt-28 sm:px-6 sm:pb-24 sm:pt-36">
       <BackgroundEffects />
 
-      <div className="relative mx-auto grid min-h-[780px] max-w-7xl items-center gap-14 lg:grid-cols-[0.92fr_1.08fr] xl:gap-20">
+      <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:min-h-[780px] lg:grid-cols-[0.92fr_1.08fr] xl:gap-20">
         <motion.div
-          initial={{ opacity: 0, y: 28 }}
+          initial={shouldReduceMotion ? false : { opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.75, ease: "easeOut" }}
+          transition={{ duration: shouldReduceMotion ? 0 : 0.75, ease: "easeOut" }}
         >
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">
             <Sparkles className="size-4" />
             Analiza krótkich nagrań stanowiska pracy
           </div>
 
-          <h1 className="mt-8 max-w-4xl text-5xl font-bold leading-[1.03] tracking-[-0.045em] text-white sm:text-6xl xl:text-7xl">
+          <h1 className="mt-8 max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-white min-[420px]:text-5xl sm:text-6xl xl:text-7xl">
             Analiza ergonomii pracy{" "}
             <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-sky-300 bg-clip-text text-transparent">
               wspierana przez AI
@@ -86,7 +85,7 @@ export function HeroSection({
                   ? "/panel/analizy/nowa"
                   : "/logowanie"
               }
-              className="group flex items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/20 transition hover:-translate-y-0.5 hover:bg-emerald-300"
+              className="group flex items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/20 transition hover:-translate-y-0.5 hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 motion-reduce:transition-none"
             >
               {isAuthenticated
                 ? "Utwórz nową analizę"
@@ -96,7 +95,7 @@ export function HeroSection({
 
             <Link
               href={isAuthenticated ? "/o-projekcie" : "/rejestracja"}
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08]"
+              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 motion-reduce:transition-none"
             >
               {isAuthenticated ? (
                 <ScanLine className="size-5 text-cyan-300" />
@@ -138,22 +137,22 @@ export function HeroSection({
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0, scale: 0.97, y: 28 }}
+          initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.97, y: 28 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{
-            duration: 0.9,
-            delay: 0.15,
+            duration: shouldReduceMotion ? 0 : 0.9,
+            delay: shouldReduceMotion ? 0 : 0.15,
             ease: "easeOut",
           }}
           className="relative"
         >
           <div className="absolute inset-10 rounded-full bg-emerald-400/10 blur-[120px]" />
 
-          <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[#07111f]/90 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[#07111f]/90 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:rounded-[34px]">
             <PreviewHeader />
 
             <div className="border-b border-white/10 px-4 py-4 sm:px-5">
-              <div className="flex flex-wrap gap-3">
+              <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-3">
                 {focusModes.map((mode) => {
                   const Icon = mode.icon;
                   const active = focusMode === mode.id;
@@ -163,14 +162,15 @@ export function HeroSection({
                       key={mode.id}
                       type="button"
                       onClick={() => setFocusMode(mode.id)}
-                      className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                      aria-pressed={active}
+                      className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-[11px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:gap-2 sm:px-4 sm:text-sm motion-reduce:transition-none ${
                         active
                           ? "border border-emerald-400/25 bg-emerald-400/10 text-emerald-200 shadow-lg shadow-emerald-500/10"
                           : "border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
                       }`}
                     >
                       <Icon className="size-4" />
-                      {mode.label}
+                      <span className="min-w-0 leading-tight sm:leading-normal">{mode.label}</span>
                     </button>
                   );
                 })}
@@ -184,28 +184,10 @@ export function HeroSection({
 
               <CornerMarkers />
 
-              <ErgonomicSkeleton focusMode={focusMode} />
-
-              <AngleBadge className="left-[7%] top-[18%]" label="Szyja" value="pomiar 2D" color="emerald" />
-
-              <AngleBadge
-                className="left-[7%] top-[48%]"
-                label="Tułów"
-                value="pomiar 2D"
-                color="cyan"
-              />
-
-              <AngleBadge
-                className="right-[7%] top-[34%]"
-                label="Łokieć"
-                value="pomiar 2D"
-                color="amber"
-              />
-
-              <ZoomDetails />
+              <ErgonomicVisualization focusMode={focusMode} />
             </div>
 
-            <div className="grid gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
+            <div className="grid grid-cols-2 gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
               <Metric
                 icon={Crosshair}
                 label="Punkty ciała"
@@ -254,72 +236,11 @@ function PreviewHeader() {
 
       <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-200">
         <span className="relative flex size-2">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50 motion-reduce:animate-none" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
         </span>
         Pose V3.0
       </div>
-    </div>
-  );
-}
-
-function ZoomDetails() {
-  return (
-    <>
-      <div className="absolute bottom-24 left-5 z-20 hidden w-[180px] rounded-2xl border border-white/10 bg-slate-950/80 p-4 backdrop-blur-xl sm:block">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-          Zoom diagnostyczny
-        </p>
-        <p className="mt-2 text-sm font-semibold text-white">
-          Skupienie kamery na kluczowych strefach
-        </p>
-        <p className="mt-2 text-xs leading-5 text-slate-400">
-          Przełączaj widok między całą sylwetką, górną częścią ciała i prawym
-          ramieniem.
-        </p>
-      </div>
-
-      <div className="absolute bottom-24 right-5 z-20 hidden w-[180px] rounded-2xl border border-white/10 bg-slate-950/80 p-4 backdrop-blur-xl sm:block">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-          Metryki techniczne
-        </p>
-        <p className="mt-2 text-2xl font-bold text-cyan-300">14</p>
-        <p className="mt-2 text-xs leading-5 text-slate-400">
-          Surowe pomiary przygotowujące dane do przyszłej oceny ergonomicznej.
-        </p>
-      </div>
-    </>
-  );
-}
-
-function AngleBadge({
-  className,
-  label,
-  value,
-  color,
-}: {
-  className: string;
-  label: string;
-  value: string;
-  color: "emerald" | "cyan" | "amber";
-}) {
-  const styles = {
-    emerald:
-      "border-emerald-300/25 bg-emerald-400/10 text-emerald-200",
-    cyan:
-      "border-cyan-300/25 bg-cyan-400/10 text-cyan-200",
-    amber:
-      "border-amber-300/25 bg-amber-400/10 text-amber-200",
-  };
-
-  return (
-    <div
-      className={`pointer-events-none absolute z-20 hidden rounded-xl border px-3 py-2 shadow-xl backdrop-blur-md sm:block ${className} ${styles[color]}`}
-    >
-      <p className="text-[9px] uppercase tracking-[0.16em] opacity-65">
-        {label}
-      </p>
-      <p className="mt-0.5 text-sm font-bold">{value}</p>
     </div>
   );
 }

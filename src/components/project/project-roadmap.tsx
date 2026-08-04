@@ -77,14 +77,14 @@ export function ProjectRoadmap({
             aria-valuenow={progress}
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
+              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 motion-reduce:transition-none"
               style={{ width: `${progress}%` }}
             />
           </div>
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-3">
+      <div className="space-y-5">
         {groups.map((group) => {
           const items = stages.filter(
             (stage) => stage.status === group.status,
@@ -94,7 +94,7 @@ export function ProjectRoadmap({
           return (
             <section
               key={group.status}
-              className="min-w-0 rounded-[28px] border border-white/10 bg-white/[0.03] p-6"
+              className="min-w-0 rounded-[28px] border border-white/10 bg-white/[0.03] p-5 sm:p-6"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-start gap-3">
@@ -116,11 +116,17 @@ export function ProjectRoadmap({
                 </span>
               </div>
 
-              <ul className="mt-6 space-y-3">
+              <ul
+                className={`mt-6 grid gap-3 ${
+                  group.status === "in_progress"
+                    ? "md:grid-cols-3"
+                    : "sm:grid-cols-2 xl:grid-cols-3"
+                }`}
+              >
                 {items.map((item) => (
                   <li
                     key={item.id}
-                    className="rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4"
+                    className="min-w-0 rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <p className="min-w-0 flex-1 break-words font-semibold text-slate-100">
