@@ -6,12 +6,11 @@ import { useState } from "react";
 import {
   ArrowRight,
   BrainCircuit,
-  CheckCircle2,
   CircleDot,
-  Clock3,
   Crosshair,
-  Gauge,
   Hand,
+  ListChecks,
+  LogIn,
   ScanLine,
   ScanSearch,
   ShieldCheck,
@@ -45,7 +44,11 @@ const focusModes: Array<{
   },
 ];
 
-export function HeroSection() {
+export function HeroSection({
+  isAuthenticated,
+}: {
+  isAuthenticated: boolean;
+}) {
   const [focusMode, setFocusMode] = useState<FocusMode>("full");
 
   return (
@@ -60,64 +63,76 @@ export function HeroSection() {
         >
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">
             <Sparkles className="size-4" />
-            Inteligentna analiza ergonomii
+            Analiza krótkich nagrań stanowiska pracy
           </div>
 
           <h1 className="mt-8 max-w-4xl text-5xl font-bold leading-[1.03] tracking-[-0.045em] text-white sm:text-6xl xl:text-7xl">
-            Zobacz ryzyko, zanim stanie się{" "}
+            Analiza ergonomii pracy{" "}
             <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-sky-300 bg-clip-text text-transparent">
-              problemem.
+              wspierana przez AI
             </span>
           </h1>
 
           <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-300">
-            Analiza nagrań stanowisk pracy, wykrywanie sylwetki, pomiar kątów,
-            śledzenie czasu obciążających pozycji i konfigurowalna ocena ryzyka
-            ergonomicznego.
+            Prześlij krótkie nagranie stanowiska pracy. System wykryje
+            pracownika, przeanalizuje ruch ciała i dłoni oraz przygotuje dane
+            potrzebne do oceny obciążenia ergonomicznego.
           </p>
 
           <div className="mt-9 flex flex-wrap gap-4">
             <Link
-              href="/o-projekcie"
+              href={
+                isAuthenticated
+                  ? "/panel/analizy/nowa"
+                  : "/logowanie"
+              }
               className="group flex items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/20 transition hover:-translate-y-0.5 hover:bg-emerald-300"
             >
-              Poznaj projekt
+              {isAuthenticated
+                ? "Utwórz nową analizę"
+                : "Zaloguj się i rozpocznij"}
               <ArrowRight className="size-5 transition group-hover:translate-x-1" />
             </Link>
 
             <Link
-              href="/test-bazy"
+              href={isAuthenticated ? "/o-projekcie" : "/rejestracja"}
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08]"
             >
-              <ScanLine className="size-5 text-cyan-300" />
-              Status systemu
+              {isAuthenticated ? (
+                <ScanLine className="size-5 text-cyan-300" />
+              ) : (
+                <LogIn className="size-5 text-cyan-300" />
+              )}
+              {isAuthenticated ? "Jak działa system" : "Utwórz konto"}
             </Link>
           </div>
 
           <div className="mt-10 flex flex-wrap gap-x-7 gap-y-3 text-sm text-slate-400">
-            {[
-              "Analiza wideo",
-              "Edytowalne reguły",
-              "REBA i RULA",
-            ].map((item) => (
-              <span key={item} className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-emerald-400" />
-                {item}
-              </span>
-            ))}
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="size-4 text-emerald-400" />
+              Prywatne filmy
+            </span>
+            <span className="flex items-center gap-2">
+              <ScanSearch className="size-4 text-emerald-400" />
+              Pose Pipeline V3.0
+            </span>
+            <span className="flex items-center gap-2">
+              <ListChecks className="size-4 text-cyan-300" />
+              14 metryk technicznych
+            </span>
           </div>
 
           <div className="mt-12 grid gap-4 sm:grid-cols-2">
             <InfoCard
               icon={BrainCircuit}
-              title="Modele AI"
-              text="Sylwetka, dłonie, geometria i analiza czasowa jako osobne warstwy systemu."
+              title="Działa obecnie"
+              text="Wykrywanie pracownika, analiza ciała i dłoni, aktywny fragment oraz dane pozy."
             />
 
             <InfoCard
               icon={ShieldCheck}
-              title="Silnik oceny"
-              text="Wynik końcowy będzie liczony przez oddzielny, wersjonowany silnik reguł."
+              title="Rozwijany etap"
+              text="Silnik metryk działa lokalnie. Końcowa ocena ryzyka i raport nie są jeszcze dostępne."
             />
           </div>
         </motion.div>
@@ -171,28 +186,21 @@ export function HeroSection() {
 
               <ErgonomicSkeleton focusMode={focusMode} />
 
-              <AngleBadge
-                className="left-[7%] top-[18%]"
-                label="Kark"
-                value="18°"
-                color="emerald"
-              />
+              <AngleBadge className="left-[7%] top-[18%]" label="Szyja" value="pomiar 2D" color="emerald" />
 
               <AngleBadge
                 className="left-[7%] top-[48%]"
                 label="Tułów"
-                value="12°"
+                value="pomiar 2D"
                 color="cyan"
               />
 
               <AngleBadge
                 className="right-[7%] top-[34%]"
                 label="Łokieć"
-                value="96°"
+                value="pomiar 2D"
                 color="amber"
               />
-
-              <RiskCard />
 
               <ZoomDetails />
             </div>
@@ -200,27 +208,26 @@ export function HeroSection() {
             <div className="grid gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
               <Metric
                 icon={Crosshair}
-                label="Pewność"
-                value="96,8%"
+                label="Punkty ciała"
+                value="133"
               />
 
               <Metric
-                icon={Gauge}
-                label="REBA"
-                value="7"
-                variant="warning"
+                icon={ListChecks}
+                label="Metryki"
+                value="14"
               />
 
               <Metric
-                icon={Clock3}
-                label="Klatka"
-                value="01:24"
+                icon={Hand}
+                label="Dłonie"
+                value="Walidowane"
               />
 
               <Metric
                 icon={BrainCircuit}
                 label="Model"
-                value="RTMW"
+                value="RTMW + YOLOX"
               />
             </div>
           </div>
@@ -241,7 +248,7 @@ function PreviewHeader() {
         </p>
 
         <p className="mt-1 text-sm font-semibold text-white">
-          Digital posture detection
+          Techniczny podgląd danych pozy
         </p>
       </div>
 
@@ -250,7 +257,7 @@ function PreviewHeader() {
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
         </span>
-        Analiza aktywna
+        Pose V3.0
       </div>
     </div>
   );
@@ -274,36 +281,14 @@ function ZoomDetails() {
 
       <div className="absolute bottom-24 right-5 z-20 hidden w-[180px] rounded-2xl border border-white/10 bg-slate-950/80 p-4 backdrop-blur-xl sm:block">
         <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-          Punkty aktywne
+          Metryki techniczne
         </p>
-        <p className="mt-2 text-2xl font-bold text-cyan-300">16</p>
+        <p className="mt-2 text-2xl font-bold text-cyan-300">14</p>
         <p className="mt-2 text-xs leading-5 text-slate-400">
-          Wykrywane stawy i punkty orientacyjne używane do dalszej analizy.
+          Surowe pomiary przygotowujące dane do przyszłej oceny ergonomicznej.
         </p>
       </div>
     </>
-  );
-}
-
-function RiskCard() {
-  return (
-    <div className="absolute right-5 top-5 z-20 hidden w-[165px] rounded-2xl border border-amber-300/15 bg-slate-950/80 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl sm:block">
-      <p className="text-[10px] uppercase tracking-[0.17em] text-slate-500">
-        Poziom ryzyka
-      </p>
-
-      <p className="mt-2 text-lg font-bold text-amber-300">
-        Podwyższony
-      </p>
-
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full w-[67%] rounded-full bg-gradient-to-r from-yellow-300 to-amber-500" />
-      </div>
-
-      <p className="mt-2 text-[10px] text-slate-500">
-        Wynik REBA: 7
-      </p>
-    </div>
   );
 }
 
@@ -359,7 +344,7 @@ function Metric({
   value,
   variant = "default",
 }: {
-  icon: typeof Gauge;
+  icon: typeof Crosshair;
   label: string;
   value: string;
   variant?: "default" | "warning";

@@ -72,10 +72,9 @@ export default async function UserPanelPage() {
             </h1>
 
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Konto zostało poprawnie zalogowane. W
-              kolejnych etapach pojawi się tutaj możliwość
-              przesyłania filmów i tworzenia analiz
-              ergonomicznych.
+              Prześlij krótkie nagranie, aby uruchomić analizę pozy
+              pracownika. System przygotuje film wynikowy i dane pozy;
+              końcowa ocena ryzyka pozostaje w przygotowaniu.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -124,14 +123,17 @@ export default async function UserPanelPage() {
         <section className="mt-6 grid gap-5 md:grid-cols-2">
           <DashboardCard
             icon={LayoutDashboard}
-            title="Dashboard"
-            description="Podsumowanie analiz, poziomów ryzyka i ostatnich działań."
+            title="Ocena i raport"
+            description="Końcowa klasyfikacja ryzyka, wykresy i raport PDF są w przygotowaniu."
+            status="Planowane"
           />
 
           <DashboardCard
             icon={FileVideo}
             title="Analizy wideo"
-            description="Tworzenie nowej analizy oraz przeglądanie historii."
+            description="Tworzenie analizy, prywatny upload oraz przeglądanie wyników pozy są dostępne."
+            status="Dostępne"
+            available
           />
         </section>
       </div>
@@ -143,20 +145,36 @@ function DashboardCard({
   icon: Icon,
   title,
   description,
+  status,
+  available = false,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  status: string;
+  available?: boolean;
 }) {
   return (
-    <article className="rounded-[26px] border border-white/10 bg-white/[0.03] p-7 opacity-60">
+    <article
+      className={`rounded-[26px] border bg-white/[0.03] p-7 ${
+        available
+          ? "border-emerald-400/20"
+          : "border-white/10 opacity-60"
+      }`}
+    >
       <div className="flex items-center justify-between">
         <div className="flex size-12 items-center justify-center rounded-2xl bg-white/[0.05]">
           <Icon className="size-6 text-slate-400" />
         </div>
 
-        <span className="rounded-full bg-white/[0.05] px-3 py-1 text-xs text-slate-500">
-          W przygotowaniu
+        <span
+          className={`rounded-full px-3 py-1 text-xs ${
+            available
+              ? "bg-emerald-400/10 text-emerald-300"
+              : "bg-white/[0.05] text-slate-500"
+          }`}
+        >
+          {status}
         </span>
       </div>
 

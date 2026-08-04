@@ -180,6 +180,7 @@ export default async function AnalysisDetailsPage({
 
   const status = getStatusDetails(
     analysis.status,
+    analysis.processing_stage,
   );
 
   const StatusIcon = status.icon;
@@ -322,25 +323,40 @@ export default async function AnalysisDetailsPage({
           />
           {analysis.processing_stage ===
             "ready-for-ergonomics" && (
-            <div className="mt-6">
-              <PoseResultsPreview
-                videoUrl={resultVideoUrl}
-                thumbnailUrl={thumbnailUrl}
-                jsonUrl={resultJsonUrl}
-                poseModel={analysis.pose_model}
-                processedFrames={analysis.pose_processed_frames}
-                detectedFrames={analysis.pose_detected_frames}
-                averageConfidence={analysis.pose_average_confidence}
-                presenceRatio={analysis.pose_presence_ratio}
-                activeStartSeconds={analysis.active_segment_start_seconds}
-                activeEndSeconds={analysis.active_segment_end_seconds}
-                activeDurationSeconds={analysis.active_segment_duration_seconds}
-                trackingMethod={analysis.pose_tracking_method}
-                smoothingMethod={analysis.pose_smoothing_method}
-                errorMessage={resultAccessError}
-                expiresInMinutes={10}
-              />
-            </div>
+              <div className="mt-6">
+                <section className="mb-6 flex items-start gap-4 rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.07] p-5 sm:p-6">
+                  <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-emerald-300" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-emerald-100">
+                      Analiza pozy została zakończona
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-300/80">
+                      Dane są gotowe do obliczenia metryk ergonomicznych.
+                      Automatyczne połączenie silnika metryk z kolejką jest
+                      nadal w realizacji, dlatego nie ma jeszcze końcowej
+                      oceny ryzyka ani raportu.
+                    </p>
+                  </div>
+                </section>
+
+                <PoseResultsPreview
+                  videoUrl={resultVideoUrl}
+                  thumbnailUrl={thumbnailUrl}
+                  jsonUrl={resultJsonUrl}
+                  poseModel={analysis.pose_model}
+                  processedFrames={analysis.pose_processed_frames}
+                  detectedFrames={analysis.pose_detected_frames}
+                  averageConfidence={analysis.pose_average_confidence}
+                  presenceRatio={analysis.pose_presence_ratio}
+                  activeStartSeconds={analysis.active_segment_start_seconds}
+                  activeEndSeconds={analysis.active_segment_end_seconds}
+                  activeDurationSeconds={analysis.active_segment_duration_seconds}
+                  trackingMethod={analysis.pose_tracking_method}
+                  smoothingMethod={analysis.pose_smoothing_method}
+                  errorMessage={resultAccessError}
+                  expiresInMinutes={10}
+                />
+              </div>
           )}
         </div>
 
@@ -370,7 +386,7 @@ export default async function AnalysisDetailsPage({
             />
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <PipelineStep
               label="Film przesłany"
               completed={[
@@ -381,7 +397,7 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Szkielet RTMW"
+              label="Pose Pipeline V3.0"
               completed={
                 analysis.processing_stage ===
                   "ready-for-ergonomics" ||
@@ -405,10 +421,12 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Raport"
-              completed={
-                analysis.status === "completed"
-              }
+              label="Metryki ergonomiczne"
+              active={analysis.processing_stage === "ready-for-ergonomics"}
+            />
+
+            <PipelineStep
+              label="Ocena i raport — planowane"
             />
           </div>
         </section>
@@ -499,7 +517,26 @@ function PipelineStep({
 
 function getStatusDetails(
   status: string,
+  processingStage: string | null,
 ) {
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-ergonomics"
+  ) {
+    return {
+      label: "Poza gotowa do metryk",
+      description:
+        "Analiza pozy została zakończona. Dane są gotowe do obliczenia metryk ergonomicznych.",
+      icon: CheckCircle2,
+      animated: false,
+      containerClass:
+        "border-emerald-400/20 bg-emerald-400/[0.06]",
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      textClass: "text-emerald-300",
+    };
+  }
+
   switch (status) {
     case "uploading":
       return {
@@ -547,7 +584,7 @@ function getStatusDetails(
       return {
         label: "Analiza ukończona",
         description:
-          "Wyniki oraz pliki raportu są gotowe.",
+          "Przetwarzanie zostało zakończone. Zakres dostępnych wyników zależy od wdrożonych etapów systemu.",
         icon: CheckCircle2,
         animated: false,
         containerClass:

@@ -45,7 +45,7 @@ export async function SiteHeader() {
             </span>
 
             <span className="hidden truncate text-[10px] uppercase tracking-[0.22em] text-slate-500 sm:block">
-              Intelligent posture analysis
+              Analiza pozy i ruchu
             </span>
           </span>
         </Link>

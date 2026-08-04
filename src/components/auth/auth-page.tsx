@@ -41,7 +41,7 @@ export function AuthPage({
                 </span>
 
                 <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Posture intelligence
+                  Analiza pozy i ruchu
                 </span>
               </span>
             </Link>
@@ -54,9 +54,9 @@ export function AuthPage({
             </h1>
 
             <p className="mt-6 max-w-xl text-lg leading-8 text-slate-400">
-              Prywatny panel pozwoli przesyłać nagrania,
-              obserwować postęp analizy i przeglądać
-              wyniki oraz raporty.
+              Prywatny panel pozwala przesyłać nagrania,
+              obserwować postęp i przeglądać film wynikowy
+              oraz dane pozy pracownika.
             </p>
           </div>
 
@@ -64,19 +64,19 @@ export function AuthPage({
             <Benefit
               icon={BrainCircuit}
               title="Modułowa analiza AI"
-              description="Osobne modele dla sylwetki, dłoni, geometrii i wykrywania obiektów."
+              description="YOLOX-X, RTMW WholeBody i osobna walidacja dłoni pracują jako rozdzielone moduły."
             />
 
             <Benefit
               icon={ShieldCheck}
               title="Prywatność danych"
-              description="Filmy oraz wyniki będą dostępne wyłącznie dla właściciela i administratora."
+              description="Filmy oraz wyniki są dostępne wyłącznie dla właściciela i administratora."
             />
 
             <Benefit
               icon={CheckCircle2}
-              title="Konfigurowalne oceny"
-              description="REBA, RULA oraz reguły tworzone w panelu administratora."
+              title="Ocena rozwijana etapami"
+              description="Silnik metryk działa lokalnie, a końcowa ocena ryzyka i raport są w przygotowaniu."
             />
           </div>
         </section>

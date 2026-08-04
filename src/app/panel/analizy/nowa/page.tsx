@@ -60,7 +60,7 @@ export default async function NewAnalysisPage() {
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-400">
             Dodaj nagranie stanowiska pracy. Film zostanie
             zapisany w prywatnym magazynie i skierowany
-            do kolejki przyszłego workera AI.
+            do kolejki lokalnego workera AI.
           </p>
         </section>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   Download,
   FileJson,
@@ -50,13 +50,11 @@ export function PoseResultsPreview({
   errorMessage,
   expiresInMinutes = 10,
 }: PoseResultsPreviewProps) {
-  const activeVideoUrlRef = useRef<string | null>(videoUrl);
-  const activeThumbnailUrlRef = useRef<string | null>(thumbnailUrl);
-  const activeJsonUrlRef = useRef<string | null>(jsonUrl);
-
-  const activeVideoUrl = activeVideoUrlRef.current;
-  const activeThumbnailUrl = activeThumbnailUrlRef.current;
-  const activeJsonUrl = activeJsonUrlRef.current;
+  const [activeVideoUrl] = useState<string | null>(() => videoUrl);
+  const [activeThumbnailUrl] = useState<string | null>(
+    () => thumbnailUrl,
+  );
+  const [activeJsonUrl] = useState<string | null>(() => jsonUrl);
 
   const [playbackError, setPlaybackError] = useState(false);
 
@@ -85,7 +83,7 @@ export function PoseResultsPreview({
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.19em] text-emerald-300">
             <ShieldCheck className="size-4" />
-            Wynik RTMW Wholebody V2
+            Wynik Pose Pipeline V3.0
           </div>
 
           <h2 className="mt-3 text-2xl font-semibold text-white">
@@ -93,8 +91,8 @@ export function PoseResultsPreview({
           </h2>
 
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Film wynikowy zawiera tylko najdłuższy aktywny fragment z pracownikiem.
-            Punkty są śledzone dla jednej osoby i stabilizowane czasowo.
+            Film wynikowy zawiera aktywny fragment z głównym pracownikiem.
+            Punkty ciała są stabilizowane, a dłonie przechodzą osobną walidację.
           </p>
         </div>
 

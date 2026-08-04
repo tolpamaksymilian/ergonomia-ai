@@ -73,7 +73,8 @@ export default async function AnalysesPage({
       critical_events_count,
       error_message,
       created_at,
-      updated_at
+      updated_at,
+      processing_stage
     `)
     .order("created_at", {
       ascending: false,
@@ -295,6 +296,7 @@ export default async function AnalysesPage({
                   const status =
                     getStatusDetails(
                       analysis.status,
+                      analysis.processing_stage,
                     );
 
                   const StatusIcon =
@@ -486,7 +488,23 @@ type StatusDetails = {
 
 function getStatusDetails(
   status: string,
+  processingStage: string | null,
 ): StatusDetails {
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-ergonomics"
+  ) {
+    return {
+      label: "Poza gotowa",
+      icon: CheckCircle2,
+      animated: false,
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      badgeClass:
+        "bg-emerald-400/10 text-emerald-300",
+    };
+  }
+
   switch (status) {
     case "uploading":
       return {

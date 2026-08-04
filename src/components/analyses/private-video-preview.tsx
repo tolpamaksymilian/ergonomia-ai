@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   ExternalLink,
   FileVideo,
@@ -29,12 +29,9 @@ export function PrivateVideoPreview({
    * komponentu. Odświeżanie statusu analizy nie podmieni
    * źródła aktualnie odtwarzanego filmu.
    */
-  const activeSignedUrlRef = useRef<string | null>(
-    signedUrl,
+  const [activeSignedUrl] = useState<string | null>(
+    () => signedUrl,
   );
-
-  const activeSignedUrl =
-    activeSignedUrlRef.current;
 
   const [playbackError, setPlaybackError] =
     useState(false);
