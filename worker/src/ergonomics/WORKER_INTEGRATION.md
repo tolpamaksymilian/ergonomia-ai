@@ -48,12 +48,13 @@ w `worker/.env.example`. Obecna migracja i polityki Storage wymagają wartości
 
 ## Migracja
 
-Repozytorium przechowuje migracje w `src/lib/supabase/migrations`. Dla połączonej
-bazy można zastosować migrację przez `psql`, używając connection stringa ustawionego
+Repozytorium przechowuje migracje wyłącznie w `supabase/migrations`. Dla połączonej
+bazy można zastosować aktualną, samowystarczalną migrację Risk Workera (zawiera
+ona wymagany etap Ergonomics Workera), używając connection stringa ustawionego
 lokalnie poza repozytorium:
 
 ```powershell
-psql "$env:SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "src\lib\supabase\migrations\20260804213000_integrate_ergonomics_metrics_worker.sql"
+psql "$env:SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "supabase\migrations\20260806120000_integrate_risk_worker_v1.sql"
 ```
 
 Alternatywnie zawartość pliku można wykonać w Supabase SQL Editor. Migracja jest

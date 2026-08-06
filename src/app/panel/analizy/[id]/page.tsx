@@ -99,7 +99,16 @@ export default async function AnalysisDetailsPage({
       risk_error_message,
       risk_worker_id,
       risk_started_at,
-      risk_attempts
+      risk_attempts,
+      report_path,
+      report_version,
+      report_summary,
+      report_completed_at,
+      report_error_code,
+      report_error_message,
+      report_worker_id,
+      report_started_at,
+      report_attempts
     `)
     .eq("id", id)
     .maybeSingle();
@@ -202,6 +211,7 @@ export default async function AnalysisDetailsPage({
         "ready-for-ai",
         "ready-for-ergonomics",
         "ready-for-risk-assessment",
+        "ready-for-report",
       ].includes(
         analysis.processing_stage,
       )
@@ -358,6 +368,9 @@ export default async function AnalysisDetailsPage({
             "risk-processing",
             "risk-failed",
             "ready-for-report",
+            "report-processing",
+            "report-failed",
+            "completed",
           ].includes(analysis.processing_stage ?? "") && (
               <div className="mt-6">
                 {analysis.processing_stage === "ready-for-ergonomics" && (
@@ -371,6 +384,9 @@ export default async function AnalysisDetailsPage({
                   "risk-processing",
                   "risk-failed",
                   "ready-for-report",
+                  "report-processing",
+                  "report-failed",
+                  "completed",
                 ].includes(analysis.processing_stage ?? "") && (
                   <div className="mb-6">
                     <ErgonomicsMetricsCard
@@ -382,7 +398,12 @@ export default async function AnalysisDetailsPage({
                   </div>
                 )}
 
-                {analysis.processing_stage === "ready-for-report" &&
+                {[
+                  "ready-for-report",
+                  "report-processing",
+                  "report-failed",
+                  "completed",
+                ].includes(analysis.processing_stage ?? "") &&
                   analysis.risk_assessment_summary && (
                     <div className="mb-6">
                       <RiskAssessmentCard
@@ -411,6 +432,18 @@ export default async function AnalysisDetailsPage({
                   errorMessage={resultAccessError}
                   expiresInMinutes={10}
                 />
+
+                {analysis.processing_stage === "completed" &&
+                  analysis.report_path && (
+                    <div className="mt-6 flex justify-center sm:justify-end">
+                      <Link
+                        href={`/panel/analizy/${analysis.id}/raport`}
+                        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                      >
+                        Otwórz raport
+                      </Link>
+                    </div>
+                  )}
               </div>
           )}
         </div>
@@ -462,6 +495,9 @@ export default async function AnalysisDetailsPage({
                   "risk-processing",
                   "risk-failed",
                   "ready-for-report",
+                  "report-processing",
+                  "report-failed",
+                  "completed",
                 ].includes(analysis.processing_stage ?? "") ||
                 analysis.status === "completed"
               }
@@ -495,6 +531,9 @@ export default async function AnalysisDetailsPage({
                   "risk-processing",
                   "risk-failed",
                   "ready-for-report",
+                  "report-processing",
+                  "report-failed",
+                  "completed",
                 ].includes(analysis.processing_stage ?? "")
               }
               active={[
@@ -505,7 +544,12 @@ export default async function AnalysisDetailsPage({
 
             <PipelineStep
               label="Ocena ryzyka"
-              completed={analysis.processing_stage === "ready-for-report"}
+              completed={[
+                "ready-for-report",
+                "report-processing",
+                "report-failed",
+                "completed",
+              ].includes(analysis.processing_stage ?? "")}
               active={[
                 "ready-for-risk-assessment",
                 "risk-processing",
@@ -513,7 +557,12 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Raport — w przygotowaniu"
+              label="Raport analizy"
+              completed={analysis.processing_stage === "completed"}
+              active={[
+                "ready-for-report",
+                "report-processing",
+              ].includes(analysis.processing_stage ?? "")}
             />
           </div>
         </section>
@@ -608,6 +657,57 @@ function getStatusDetails(
 ) {
   if (
     status === "processing" &&
+    processingStage === "report-processing"
+  ) {
+    return {
+      label: "Raport w przygotowaniu",
+      description: "Przygotowujemy raport.",
+      icon: LoaderCircle,
+      animated: true,
+      containerClass:
+        "border-cyan-400/20 bg-cyan-400/[0.06]",
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      textClass: "text-cyan-300",
+    };
+  }
+
+  if (
+    status === "failed" &&
+    processingStage === "report-failed"
+  ) {
+    return {
+      label: "Błąd raportu",
+      description: "Nie udało się przygotować raportu.",
+      icon: XCircle,
+      animated: false,
+      containerClass:
+        "border-red-400/20 bg-red-400/[0.06]",
+      iconClass:
+        "bg-red-400/10 text-red-300",
+      textClass: "text-red-300",
+    };
+  }
+
+  if (
+    status === "completed" &&
+    processingStage === "completed"
+  ) {
+    return {
+      label: "Analiza zakończona",
+      description: "Analiza została zakończona.",
+      icon: CheckCircle2,
+      animated: false,
+      containerClass:
+        "border-emerald-400/20 bg-emerald-400/[0.06]",
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      textClass: "text-emerald-300",
+    };
+  }
+
+  if (
+    status === "processing" &&
     processingStage === "risk-processing"
   ) {
     return {
@@ -631,7 +731,7 @@ function getStatusDetails(
     return {
       label: "Ocena ryzyka gotowa",
       description:
-        "Ocena ryzyka została obliczona. Raport końcowy nie jest jeszcze generowany automatycznie.",
+        "Ocena ryzyka jest gotowa. Czekamy na raport.",
       icon: CheckCircle2,
       animated: false,
       containerClass:

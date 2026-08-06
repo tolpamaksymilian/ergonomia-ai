@@ -8,7 +8,10 @@ export type AnalysisProcessingStage =
   | "ready-for-risk-assessment"
   | "risk-processing"
   | "risk-failed"
-  | "ready-for-report";
+  | "ready-for-report"
+  | "report-processing"
+  | "report-failed"
+  | "completed";
 
 export type ErgonomicsMetricStatistics = {
   valid_frames: number;
@@ -102,4 +105,140 @@ export type RiskAnalysisMetadata = {
   risk_worker_id: string | null;
   risk_started_at: string | null;
   risk_attempts: number;
+};
+
+export type ReportRiskProfile = {
+  profile_id: string;
+  profile_name: string;
+  profile_version: string;
+  profile_status: RiskProfileStatus;
+  normative_method: string | null;
+};
+
+export type ReportRiskSummary = {
+  overall_level: RiskLevel;
+  overall_status: "classified" | "insufficient_data";
+  insufficient_data: boolean;
+  profile: ReportRiskProfile;
+  dominant_zones: string[];
+  dominant_metrics: string[];
+  key_frames_count: number;
+  valid_metric_ratio: number;
+};
+
+export type ReportBodyArea = {
+  area_id: string;
+  label: string;
+  level: RiskLevel;
+  insufficient_data: boolean;
+  coverage?: number;
+  active_metrics?: number;
+  metrics_with_sufficient_data?: number;
+};
+
+export type ReportMetricSummary = {
+  metric_name: string;
+  label: string;
+  unit: "deg" | "ratio";
+  level: RiskLevel;
+  valid_ratio?: number;
+  data_quality?: "sufficient" | "limited" | "insufficient";
+  statistics?: {
+    median?: number;
+    maximum?: number;
+    percentile_95?: number;
+    percentile?: number;
+    percentile_used?: number;
+  };
+  exposure?: {
+    total_valid_duration_seconds?: number;
+    moderate_duration_seconds?: number;
+    high_duration_seconds?: number;
+    critical_duration_seconds?: number;
+    moderate_exposure_ratio?: number;
+    high_exposure_ratio?: number;
+    critical_exposure_ratio?: number;
+  };
+};
+
+export type ReportKeyMoment = {
+  source_frame_index?: number;
+  output_frame_index?: number;
+  timestamp_seconds?: number;
+  metric_name: string;
+  metric_label: string;
+  area_id?: string;
+  area_label?: string;
+  value?: number;
+  level: RiskLevel;
+  quality?: number;
+  reason: string;
+};
+
+export type AnalysisReport = {
+  schema_version: "1.0";
+  generated_by: "Ergonomia AI Report Engine";
+  report_version: "analysis-report-v1.0";
+  generated_at: string;
+  analysis: {
+    analysis_id: string;
+    title: string;
+    analyzed_frames: number;
+    created_at?: string;
+    source_file_name?: string;
+    source_duration_seconds?: number;
+    source_width?: number;
+    source_height?: number;
+  };
+  processing: {
+    pose_pipeline_version?: string;
+    ergonomics_metrics_version: string;
+    risk_engine_version: string;
+    report_engine_version: string;
+  };
+  data_quality: {
+    frame_count: number;
+    valid_metric_ratio: number;
+    insufficient_data: boolean;
+    pose_presence_ratio?: number;
+    pose_processed_frames?: number;
+    pose_detected_frames?: number;
+    invalid_metric_values?: number;
+    rejection_reasons: Array<{
+      reason: string;
+      count: number;
+    }>;
+  };
+  risk_summary: ReportRiskSummary;
+  body_areas: ReportBodyArea[];
+  metric_summary: ReportMetricSummary[];
+  key_moments: ReportKeyMoment[];
+  observations: string[];
+  limitations: string[];
+  disclaimer: string;
+};
+
+export type ReportSummary = {
+  report_version: "analysis-report-v1.0";
+  analysis_id: string;
+  overall_level: RiskLevel;
+  insufficient_data: boolean;
+  valid_metric_ratio: number;
+  dominant_zone: string | null;
+  dominant_metric: string | null;
+  key_moments_count: number;
+  metric_count: number;
+  profile_status: RiskProfileStatus;
+};
+
+export type ReportAnalysisMetadata = {
+  report_path: string | null;
+  report_version: string | null;
+  report_summary: ReportSummary | null;
+  report_completed_at: string | null;
+  report_error_code: string | null;
+  report_error_message: string | null;
+  report_worker_id: string | null;
+  report_started_at: string | null;
+  report_attempts: number;
 };

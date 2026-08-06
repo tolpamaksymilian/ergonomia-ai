@@ -15,6 +15,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { requireUser } from "@/lib/auth/access";
+import { parseReportSummary } from "@/lib/analysis-report";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,10 @@ export default async function AnalysesPage({
       error_message,
       created_at,
       updated_at,
-      processing_stage
+      processing_stage,
+      risk_overall_level,
+      report_path,
+      report_summary
     `)
     .order("created_at", {
       ascending: false,
@@ -300,13 +304,26 @@ export default async function AnalysesPage({
                   const StatusIcon =
                     status.icon;
 
+                  const reportSummary =
+                    parseReportSummary(
+                      analysis.report_summary,
+                    );
+
+                  const riskSummaryLabel =
+                    reportSummary?.insufficient_data
+                      ? "Niewystarczające dane"
+                      : formatRiskLevel(
+                          analysis.risk_overall_level ??
+                            reportSummary?.overall_level ??
+                            null,
+                        );
+
                   return (
-                    <Link
+                    <article
                       key={analysis.id}
-                      href={`/panel/analizy/${analysis.id}`}
                       className="group overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] transition duration-300 hover:-translate-y-1 hover:border-emerald-400/25 hover:bg-white/[0.05]"
                     >
-                      <article className="p-6">
+                      <div className="p-6">
                         <div className="flex items-start justify-between gap-5">
                           <div className="flex min-w-0 items-start gap-4">
                             <div
@@ -323,7 +340,12 @@ export default async function AnalysesPage({
 
                             <div className="min-w-0">
                               <h2 className="truncate text-xl font-semibold transition group-hover:text-emerald-200">
-                                {analysis.title}
+                                <Link
+                                  href={`/panel/analizy/${analysis.id}`}
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                                >
+                                  {analysis.title}
+                                </Link>
                               </h2>
 
                               <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
@@ -339,6 +361,19 @@ export default async function AnalysesPage({
                             {status.label}
                           </span>
                         </div>
+
+                        {analysis.status === "completed" &&
+                          riskSummaryLabel && (
+                            <div className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] px-4 py-3 text-sm">
+                              <span className="text-slate-500">
+                                Ogólny poziom:
+                                {" "}
+                              </span>
+                              <span className="font-semibold text-emerald-200">
+                                {riskSummaryLabel}
+                              </span>
+                            </div>
+                          )}
 
                         <div className="mt-6 grid gap-3 sm:grid-cols-3">
                           <SmallMetric
@@ -395,12 +430,27 @@ export default async function AnalysesPage({
                             )}
                           </div>
 
-                          <span className="text-sm font-semibold text-emerald-300 transition group-hover:translate-x-1">
-                            Otwórz szczegóły →
-                          </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              href={`/panel/analizy/${analysis.id}`}
+                              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                            >
+                              Szczegóły
+                            </Link>
+
+                            {analysis.status === "completed" &&
+                              analysis.report_path && (
+                                <Link
+                                  href={`/panel/analizy/${analysis.id}/raport`}
+                                  className="rounded-xl bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                                >
+                                  Raport
+                                </Link>
+                              )}
+                          </div>
                         </div>
-                      </article>
-                    </Link>
+                      </div>
+                    </article>
                   );
                 })}
               </section>
@@ -488,6 +538,36 @@ function getStatusDetails(
   status: string,
   processingStage: string | null,
 ): StatusDetails {
+  if (
+    status === "processing" &&
+    processingStage === "report-processing"
+  ) {
+    return {
+      label: "Przygotowanie raportu",
+      icon: LoaderCircle,
+      animated: true,
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      badgeClass:
+        "bg-cyan-400/10 text-cyan-300",
+    };
+  }
+
+  if (
+    status === "failed" &&
+    processingStage === "report-failed"
+  ) {
+    return {
+      label: "Błąd raportu",
+      icon: XCircle,
+      animated: false,
+      iconClass:
+        "bg-red-400/10 text-red-300",
+      badgeClass:
+        "bg-red-400/10 text-red-300",
+    };
+  }
+
   if (
     status === "processing" &&
     processingStage === "risk-processing"
@@ -721,4 +801,21 @@ function Background() {
       />
     </div>
   );
+}
+
+function formatRiskLevel(value: string | null) {
+  switch (value) {
+    case "low":
+      return "niski";
+    case "moderate":
+      return "umiarkowany";
+    case "high":
+      return "wysoki";
+    case "critical":
+      return "krytyczny";
+    case "insufficient_data":
+      return "niewystarczające dane";
+    default:
+      return null;
+  }
 }

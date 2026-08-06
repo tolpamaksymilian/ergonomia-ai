@@ -47,18 +47,18 @@ Projekt łączy aplikację internetową, bazę danych Supabase oraz lokalne work
 - osobny Risk Worker,
 - automatyczny zapis `risk-assessment.json` w prywatnym Storage,
 - prezentacja technicznego wyniku ryzyka w panelu użytkownika,
+- Report Engine V1 i osobny Report Worker,
+- automatyczny zapis `analysis-report.json` w prywatnym Storage,
+- strona raportu, pobieranie JSON i drukowanie przez przeglądarkę,
+- zakończenie analizy stanem `completed` i postępem 100%,
 - panel użytkownika,
 - panel administratora,
 - strona projektu i autora.
 
-### W realizacji
+### Planowane
 
 - wykresy metryk,
 - obrazy kluczowych klatek,
-- raport końcowy.
-
-### Planowane
-
 - produkcyjny profil progów ergonomicznych,
 - panel konfiguracji progów,
 - eksport PDF,
@@ -81,7 +81,6 @@ flowchart LR
     D --> E[Ocena ryzyka]
     E --> F[Raport]
 
-    style F stroke-dasharray: 5 5
 ```
 
 ### 1. Preprocessing
@@ -133,6 +132,18 @@ Obsługuje:
 
 Po sukcesie analiza przechodzi do `ready-for-report`. Profil progów zawsze musi
 być wskazany jawnie i zatwierdzony przed zastosowaniem produkcyjnym.
+
+### 5. Report Engine V1
+
+Osobny Report Worker pobiera wyłącznie `ergonomics-metrics.json` oraz
+`risk-assessment.json`, porządkuje istniejące wyniki i zapisuje wersjonowany
+`analysis-report.json` w prywatnym Storage. Raport jest dostępny w panelu, można
+go pobrać jako JSON i wydrukować przy użyciu przeglądarki. Po poprawnym zapisie
+analiza otrzymuje `status = completed`, `processing_stage = completed` i
+`progress = 100`.
+
+Projekt nie generuje obecnie automatycznego pliku PDF. Opcja „Zapisz jako PDF”
+może być wybrana ręcznie w oknie drukowania przeglądarki.
 
 ---
 
@@ -326,14 +337,15 @@ supabase/migrations/
 
 Należy wykonać je chronologicznie w projekcie Supabase.
 
-Aktualną, samowystarczalną integrację Ergonomics i Risk Worker instaluje:
+Migracje Risk Workera i Report Workera należy wdrożyć chronologicznie:
 
 ```powershell
 npx.cmd supabase db push
 ```
 
-Supabase CLI odczyta plik
-`supabase/migrations/20260806120000_integrate_risk_worker_v1.sql`. Polecenie wymaga
+Supabase CLI odczyta kolejno pliki
+`supabase/migrations/20260806120000_integrate_risk_worker_v1.sql` oraz
+`supabase/migrations/20260806203000_integrate_report_worker_v1.sql`. Polecenie wymaga
 wcześniejszego `supabase link` do właściwego projektu i nie powinno być uruchamiane
 przeciw przypadkowej bazie.
 
@@ -444,8 +456,19 @@ progress = 97
 processing_stage = ready-for-report
 ```
 
-Status nie jest ustawiany na `completed`, ponieważ raport końcowy nie jest jeszcze
-generowany automatycznie.
+Następnie Report Worker automatycznie przygotowuje raport:
+
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\report_worker.py --once
+```
+
+Po sukcesie powstaje prywatny `analysis-report.json`, a stan końcowy to:
+
+```text
+status = completed
+progress = 100
+processing_stage = completed
+```
 
 ---
 
@@ -475,6 +498,12 @@ Zamiast trybu jednorazowego można uruchomić workery bez parametru `--once`.
 
 ```powershell
 .\worker\.venv\Scripts\python.exe .\worker\src\risk_worker.py
+```
+
+### Report Worker
+
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\report_worker.py
 ```
 
 Każdy worker powinien działać w osobnym terminalu.
@@ -602,7 +631,6 @@ Najbliższe etapy rozwoju:
 
 - wykresy metryk,
 - generowanie obrazów kluczowych klatek,
-- raport końcowy,
 - eksport PDF,
 - profile progów,
 - RULA i REBA,
@@ -620,5 +648,5 @@ Aktualna wersja koncentruje się na kompletnym przepływie:
 film → pozycja → metryki → ryzyko → raport
 ```
 
-Pierwsze cztery etapy są zintegrowane z kolejką aplikacji. Automatyczny pipeline
-kończy się obecnie na `ready-for-report`; raport pozostaje kolejnym etapem rozwoju.
+Wszystkie pokazane etapy są rozdzielone pomiędzy niezależne workery i zintegrowane
+z kolejką aplikacji. Report Worker kończy analizę po trwałym zapisaniu raportu.
