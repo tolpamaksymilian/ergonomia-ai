@@ -4,11 +4,18 @@ import {
   MonitorCog,
   Ruler,
   ShieldCheck,
+  Tag,
 } from "lucide-react";
 
 import { projectStatus } from "@/config/project-status";
+import { release } from "@/config/release";
 
 const versions = [
+  {
+    label: "Wersja aplikacji",
+    value: release.version,
+    icon: Tag,
+  },
   {
     label: "Pose Pipeline",
     value: projectStatus.versions.posePipeline,
@@ -38,7 +45,7 @@ const versions = [
 
 export function ProjectVersionCards() {
   return (
-    <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
       {versions.map((version) => {
         const Icon = version.icon;
 

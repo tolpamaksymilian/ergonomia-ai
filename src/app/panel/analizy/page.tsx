@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { AnalysesAutoRefresh } from "@/components/analyses/analyses-auto-refresh";
+import { getAnalysisStatusDefinition } from "@/config/analysis-status";
 import { requireUser } from "@/lib/auth/access";
 import { parseReportSummary } from "@/lib/analysis-report";
 
@@ -129,6 +131,16 @@ export default async function AnalysesPage({
           </Link>
 
           <div className="flex flex-wrap gap-3">
+            <AnalysesAutoRefresh
+              enabled={Boolean(
+                analyses?.some((analysis) =>
+                  getAnalysisStatusDefinition(
+                    analysis.status,
+                    analysis.processing_stage,
+                  ).active,
+                ),
+              )}
+            />
             <Link
               href="/panel"
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
@@ -535,208 +547,30 @@ type StatusDetails = {
 };
 
 function getStatusDetails(
-  status: string,
+  statusValue: string,
   processingStage: string | null,
 ): StatusDetails {
-  if (
-    status === "processing" &&
-    processingStage === "report-processing"
-  ) {
-    return {
-      label: "Przygotowanie raportu",
-      icon: LoaderCircle,
-      animated: true,
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      badgeClass:
-        "bg-cyan-400/10 text-cyan-300",
-    };
-  }
+  const definition = getAnalysisStatusDefinition(
+    statusValue,
+    processingStage,
+  );
+  const visual = {
+    neutral: { icon: Clock3, className: "bg-white/[0.06] text-slate-400" },
+    queued: { icon: Clock3, className: "bg-amber-400/10 text-amber-300" },
+    active: { icon: LoaderCircle, className: "bg-cyan-400/10 text-cyan-300" },
+    success: { icon: CheckCircle2, className: "bg-emerald-400/10 text-emerald-300" },
+    error: { icon: XCircle, className: "bg-red-400/10 text-red-300" },
+  }[definition.visualType];
 
-  if (
-    status === "failed" &&
-    processingStage === "report-failed"
-  ) {
-    return {
-      label: "Błąd raportu",
-      icon: XCircle,
-      animated: false,
-      iconClass:
-        "bg-red-400/10 text-red-300",
-      badgeClass:
-        "bg-red-400/10 text-red-300",
-    };
-  }
-
-  if (
-    status === "processing" &&
-    processingStage === "risk-processing"
-  ) {
-    return {
-      label: "Ocena ryzyka",
-      icon: LoaderCircle,
-      animated: true,
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      badgeClass:
-        "bg-cyan-400/10 text-cyan-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-report"
-  ) {
-    return {
-      label: "Ocena gotowa",
-      icon: CheckCircle2,
-      animated: false,
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      badgeClass:
-        "bg-emerald-400/10 text-emerald-300",
-    };
-  }
-
-  if (
-    status === "failed" &&
-    processingStage === "risk-failed"
-  ) {
-    return {
-      label: "Błąd oceny ryzyka",
-      icon: XCircle,
-      animated: false,
-      iconClass:
-        "bg-red-400/10 text-red-300",
-      badgeClass:
-        "bg-red-400/10 text-red-300",
-    };
-  }
-
-  if (
-    status === "processing" &&
-    processingStage === "ergonomics-processing"
-  ) {
-    return {
-      label: "Obliczanie metryk",
-      icon: LoaderCircle,
-      animated: true,
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      badgeClass:
-        "bg-cyan-400/10 text-cyan-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-risk-assessment"
-  ) {
-    return {
-      label: "Metryki gotowe",
-      icon: CheckCircle2,
-      animated: false,
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      badgeClass:
-        "bg-emerald-400/10 text-emerald-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-ergonomics"
-  ) {
-    return {
-      label: "Poza gotowa",
-      icon: CheckCircle2,
-      animated: false,
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      badgeClass:
-        "bg-emerald-400/10 text-emerald-300",
-    };
-  }
-
-  switch (status) {
-    case "uploading":
-      return {
-        label: "Przesyłanie",
-        icon: LoaderCircle,
-        animated: true,
-        iconClass:
-          "bg-cyan-400/10 text-cyan-300",
-        badgeClass:
-          "bg-cyan-400/10 text-cyan-300",
-      };
-
-    case "queued":
-      return {
-        label: "W kolejce",
-        icon: Clock3,
-        animated: false,
-        iconClass:
-          "bg-amber-400/10 text-amber-300",
-        badgeClass:
-          "bg-amber-400/10 text-amber-300",
-      };
-
-    case "processing":
-      return {
-        label: "Analiza w toku",
-        icon: LoaderCircle,
-        animated: true,
-        iconClass:
-          "bg-cyan-400/10 text-cyan-300",
-        badgeClass:
-          "bg-cyan-400/10 text-cyan-300",
-      };
-
-    case "completed":
-      return {
-        label: "Ukończona",
-        icon: CheckCircle2,
-        animated: false,
-        iconClass:
-          "bg-emerald-400/10 text-emerald-300",
-        badgeClass:
-          "bg-emerald-400/10 text-emerald-300",
-      };
-
-    case "failed":
-      return {
-        label: "Nieudana",
-        icon: XCircle,
-        animated: false,
-        iconClass:
-          "bg-red-400/10 text-red-300",
-        badgeClass:
-          "bg-red-400/10 text-red-300",
-      };
-
-    case "cancelled":
-      return {
-        label: "Anulowana",
-        icon: XCircle,
-        animated: false,
-        iconClass:
-          "bg-white/[0.06] text-slate-400",
-        badgeClass:
-          "bg-white/[0.06] text-slate-400",
-      };
-
-    default:
-      return {
-        label: "Robocza",
-        icon: Clock3,
-        animated: false,
-        iconClass:
-          "bg-white/[0.06] text-slate-400",
-        badgeClass:
-          "bg-white/[0.06] text-slate-400",
-      };
-  }
+  return {
+    label: definition.shortLabel,
+    icon: visual.icon,
+    animated: definition.visualType === "active",
+    iconClass: visual.className,
+    badgeClass: visual.className,
+  };
 }
+
 
 function formatBytes(
   bytes: number,

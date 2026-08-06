@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, Code2, Cpu, Factory, LineChart, ShieldCheck } fro
 
 import { AuthorPortrait } from "@/components/author/author-portrait";
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { authorProfile } from "@/config/author";
 
 export const metadata: Metadata = {
@@ -67,6 +68,7 @@ export default function AuthorPage() {
           </section>
         </div>
       </section>
+      <SiteFooter />
     </main>
   );
 }

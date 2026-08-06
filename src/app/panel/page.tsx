@@ -122,8 +122,9 @@ export default async function UserPanelPage() {
           <DashboardCard
             icon={LayoutDashboard}
             title="Ocena i raport"
-            description="Prezentacja oceny i raport są w przygotowaniu."
-            status="Planowane"
+            description="Po zakończeniu pipeline’u otworzysz techniczną ocenę i raport analizy."
+            status="Dostępne w wersji testowej"
+            available
           />
 
           <DashboardCard

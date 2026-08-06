@@ -53,4 +53,5 @@ worker/**/*.pyc
 
 # typescript
 *.tsbuildinfo
+.runtime/
 next-env.d.ts

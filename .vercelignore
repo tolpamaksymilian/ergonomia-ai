@@ -1,0 +1,11 @@
+/worker/
+/supabase/
+/.runtime/
+.env*
+!.env.example
+**/.env
+**/.venv/
+**/models/
+**/data/
+**/logs/
+**/outputs/

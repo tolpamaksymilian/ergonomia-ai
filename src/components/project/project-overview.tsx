@@ -5,6 +5,7 @@ import {
   BrainCircuit,
   Code2,
   Database,
+  FileText,
   FileWarning,
   Hand,
   ScanSearch,
@@ -15,8 +16,9 @@ import {
 import { PipelineOverview } from "@/components/project/pipeline-overview";
 import { ProjectVersionCards } from "@/components/project/project-version-cards";
 import { countProjectStages, projectStatus } from "@/config/project-status";
+import { release } from "@/config/release";
 
-const technologyIcons = [Code2, Database, ServerCog, ScanSearch, BrainCircuit, Hand, Box, ShieldCheck] as const;
+const technologyIcons = [Code2, Database, ServerCog, ScanSearch, BrainCircuit, Hand, Box, ShieldCheck, FileText] as const;
 
 export function ProjectOverview() {
   const counts = countProjectStages(projectStatus.stages);
@@ -42,6 +44,17 @@ export function ProjectOverview() {
             </p>
           </aside>
         </div>
+
+        <section className="mt-12 flex flex-col items-start justify-between gap-5 rounded-[26px] border border-cyan-300/15 bg-cyan-300/[0.05] p-6 sm:flex-row sm:items-center">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Aktualna wersja</p>
+            <h2 className="mt-2 text-2xl font-bold">v{release.version} · {release.statusLabel}</h2>
+            <p className="mt-2 text-sm text-slate-400">Pierwsza wersja z pełnym przepływem od filmu do raportu.</p>
+          </div>
+          <Link href="/#planowane-funkcje" className="min-h-11 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold transition hover:bg-white/[0.08]">
+            Planowane funkcje
+          </Link>
+        </section>
 
         <section className="mt-20" aria-labelledby="pipeline-heading">
           <SectionHeading eyebrow="Jak działa?" title="Pipeline od filmu do danych" id="pipeline-heading" />

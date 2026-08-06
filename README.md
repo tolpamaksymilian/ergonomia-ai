@@ -2,6 +2,8 @@
 
 System do analizy ergonomii pracy na podstawie krótkiego nagrania wideo.
 
+**Aktualna wersja: v0.2.1-beta.1 — pierwsza kompletna wersja testowa.**
+
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 
 > **Ważne:** system wspiera analizę i nie zastępuje oceny wykonanej przez specjalistę BHP lub ergonomii.
@@ -51,6 +53,8 @@ Projekt łączy aplikację internetową, bazę danych Supabase oraz lokalne work
 - automatyczny zapis `analysis-report.json` w prywatnym Storage,
 - strona raportu, pobieranie JSON i drukowanie przez przeglądarkę,
 - zakończenie analizy stanem `completed` i postępem 100%,
+- Pipeline Manager uruchamiający pięć workerów jednym poleceniem,
+- automatyczne odświeżanie statusu aktywnej analizy,
 - panel użytkownika,
 - panel administratora,
 - strona projektu i autora.
@@ -345,7 +349,8 @@ npx.cmd supabase db push
 
 Supabase CLI odczyta kolejno pliki
 `supabase/migrations/20260806120000_integrate_risk_worker_v1.sql` oraz
-`supabase/migrations/20260806203000_integrate_report_worker_v1.sql`. Polecenie wymaga
+`supabase/migrations/20260806203000_integrate_report_worker_v1.sql`, a następnie
+`supabase/migrations/20260806210500_finalize_pipeline_v021.sql`. Polecenie wymaga
 wcześniejszego `supabase link` do właściwego projektu i nie powinno być uruchamiane
 przeciw przypadkowej bazie.
 
@@ -363,6 +368,20 @@ notify pgrst, 'reload schema';
 ---
 
 ## 6. Uruchomienie aplikacji
+
+Najprostszy start kompletnego środowiska testowego na Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-test-environment.ps1
+```
+
+Zatrzymanie wyłącznie procesów zapisanych przez ten projekt:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\stop-test-environment.ps1
+```
+
+Alternatywnie aplikację można uruchomić osobno:
 
 ```powershell
 npm.cmd run dev
@@ -474,7 +493,20 @@ processing_stage = completed
 
 # Uruchamianie workerów w pętli
 
-Zamiast trybu jednorazowego można uruchomić workery bez parametru `--once`.
+Zalecany start całego pipeline’u:
+
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\pipeline_manager.py
+```
+
+Jedna pełna próba lub preflight:
+
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\pipeline_manager.py --once
+.\worker\.venv\Scripts\python.exe .\worker\src\pipeline_manager.py --check
+```
+
+Poniższe osobne komendy pozostają trybem diagnostycznym.
 
 ### Preprocessing
 
@@ -506,7 +538,7 @@ Zamiast trybu jednorazowego można uruchomić workery bez parametru `--once`.
 .\worker\.venv\Scripts\python.exe .\worker\src\report_worker.py
 ```
 
-Każdy worker powinien działać w osobnym terminalu.
+Pipeline Manager uruchamia każdy worker jako osobny proces i pilnuje ograniczonego restartu.
 
 ---
 
@@ -550,6 +582,7 @@ pose-thumbnail.jpg
 pose-keypoints.json
 ergonomics-metrics.json
 risk-assessment.json
+analysis-report.json
 ```
 
 Pliki użytkowników są przechowywane w prywatnych bucketach Supabase Storage.
@@ -635,6 +668,13 @@ Najbliższe etapy rozwoju:
 - profile progów,
 - RULA i REBA,
 - wdrożenie workerów na infrastrukturze produkcyjnej.
+- podgląd kluczowych momentów filmu,
+- automatyczne czyszczenie plików,
+- eksport danych i porównywanie analiz,
+- analiza kilku wariantów stanowiska,
+- panel konfiguracji progów,
+- skalowany manekin 3D oraz zakresy ruchu i zasięgi kończyn,
+- przyszła koncepcja projektowania stanowiska przed wykonaniem na podstawie zdjęcia lub modelu 3D.
 
 ---
 

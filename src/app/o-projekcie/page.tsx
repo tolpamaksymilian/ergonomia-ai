@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { ProjectOverview } from "@/components/project/project-overview";
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default function AboutProjectPage() {
     <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
       <SiteHeader />
       <ProjectOverview />
+      <SiteFooter />
     </main>
   );
 }

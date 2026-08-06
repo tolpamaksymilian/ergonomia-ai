@@ -8,18 +8,20 @@ import {
   FileVideo,
   LoaderCircle,
   TriangleAlert,
-  XCircle,
 } from "lucide-react";
 
-import { AnalysisAutoRefresh } from "@/components/analyses/analysis-auto-refresh";
+import { AnalysisLiveStatus } from "@/components/analyses/analysis-live-status";
 import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
 import { ErgonomicsMetricsCard } from "@/components/analyses/ergonomics-metrics-card";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
 import { RiskAssessmentCard } from "@/components/analyses/risk-assessment-card";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
+import { getSafeAnalysisErrorMessage } from "@/config/analysis-status";
 import { requireUser } from "@/lib/auth/access";
 import type { RiskAssessmentSummary } from "@/types/analysis";
+
+import { retryFailedAnalysisStage } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +35,7 @@ export default async function AnalysisDetailsPage({
   params,
 }: AnalysisDetailsPageProps) {
   const { id } = await params;
-  const { supabase } = await requireUser();
+  const { supabase, profile } = await requireUser();
 
   const { data: analysis, error } = await supabase
     .from("analyses")
@@ -43,6 +45,8 @@ export default async function AnalysisDetailsPage({
       description,
       status,
       progress,
+      attempts,
+      worker_id,
       source_video_path,
       source_file_name,
       source_mime_type,
@@ -200,36 +204,8 @@ export default async function AnalysisDetailsPage({
   const signedVideoErrorMessage =
     signedVideoError?.message ?? null;
 
-  const shouldRefresh =
-    analysis.status === "uploading" ||
-    analysis.status === "processing" ||
-    (
-      analysis.status === "queued" &&
-      [
-        null,
-        "queued",
-        "ready-for-ai",
-        "ready-for-ergonomics",
-        "ready-for-risk-assessment",
-        "ready-for-report",
-      ].includes(
-        analysis.processing_stage,
-      )
-    );
-
-  const status = getStatusDetails(
-    analysis.status,
-    analysis.processing_stage,
-  );
-
-  const StatusIcon = status.icon;
-
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#050b14] px-5 py-8 text-white sm:px-8">
-      <AnalysisAutoRefresh
-        enabled={shouldRefresh}
-      />
-
       <Background />
 
       <div className="relative mx-auto max-w-6xl">
@@ -286,39 +262,16 @@ export default async function AnalysisDetailsPage({
             </p>
           </div>
 
-          <aside
-            className={`rounded-[30px] border p-7 ${status.containerClass}`}
-          >
-            <div
-              className={`flex size-12 items-center justify-center rounded-2xl ${status.iconClass}`}
-            >
-              <StatusIcon
-                className={`size-6 ${
-                  status.animated
-                    ? "animate-spin"
-                    : ""
-                }`}
-              />
-            </div>
-
-            <p className="mt-6 text-xs uppercase tracking-[0.18em] text-slate-500">
-              Aktualny status
-            </p>
-
-            <p className={`mt-2 text-2xl font-bold ${status.textClass}`}>
-              {status.label}
-            </p>
-
-            <p className="mt-3 text-sm leading-6 text-slate-400">
-              {status.description}
-            </p>
-
-            {shouldRefresh && (
-              <p className="mt-5 text-xs text-slate-600">
-                Widok odświeża się automatycznie.
-              </p>
-            )}
-          </aside>
+          <AnalysisLiveStatus
+            analysisId={analysis.id}
+            initialState={{
+              status: analysis.status,
+              progress: analysis.progress,
+              processing_stage: analysis.processing_stage,
+              report_path: analysis.report_path,
+              updated_at: analysis.updated_at,
+            }}
+          />
         </section>
 
         <section className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -449,30 +402,10 @@ export default async function AnalysisDetailsPage({
         </div>
 
         <section className="mt-6 rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Postęp przetwarzania
-              </p>
-
-              <h2 className="mt-2 text-2xl font-semibold">
-                Pipeline analizy
-              </h2>
-            </div>
-
-            <p className="text-3xl font-bold text-cyan-300">
-              {analysis.progress}%
-            </p>
-          </div>
-
-          <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-[width]"
-              style={{
-                width: `${analysis.progress}%`,
-              }}
-            />
-          </div>
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+            Główne etapy
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold">Pipeline analizy</h2>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <PipelineStep
@@ -567,7 +500,7 @@ export default async function AnalysisDetailsPage({
           </div>
         </section>
 
-        {analysis.error_message && (
+        {analysis.status === "failed" && (
           <section className="mt-6 rounded-[28px] border border-red-400/20 bg-red-400/[0.07] p-6">
             <div className="flex items-start gap-4">
               <TriangleAlert className="mt-1 size-6 shrink-0 text-red-300" />
@@ -578,13 +511,26 @@ export default async function AnalysisDetailsPage({
                 </p>
 
                 <p className="mt-2 text-sm leading-6 text-red-200/75">
-                  {analysis.error_message}
+                  {getSafeAnalysisErrorMessage(analysis.processing_stage)}
                 </p>
 
-                {analysis.error_code && (
-                  <p className="mt-3 text-xs text-red-300/50">
-                    Kod: {analysis.error_code}
-                  </p>
+                {profile?.role === "admin" && (
+                  <div className="mt-4 border-t border-red-300/15 pt-4">
+                    <dl className="grid gap-2 text-xs text-red-100/70 sm:grid-cols-2">
+                      <div><dt className="text-red-300/50">Kod</dt><dd>{analysis.error_code ?? "—"}</dd></div>
+                      <div><dt className="text-red-300/50">Etap</dt><dd>{analysis.processing_stage ?? "—"}</dd></div>
+                      <div><dt className="text-red-300/50">Liczba prób</dt><dd>{analysis.attempts ?? 0}</dd></div>
+                      <div><dt className="text-red-300/50">Worker</dt><dd>{analysis.report_worker_id ?? analysis.risk_worker_id ?? analysis.worker_id ?? "zwolniony"}</dd></div>
+                    </dl>
+                    <form action={retryFailedAnalysisStage.bind(null, analysis.id)} className="mt-4">
+                      <button
+                        type="submit"
+                        className="rounded-xl border border-red-300/25 bg-red-300/10 px-4 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-300/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                      >
+                        Ponów bieżący etap
+                      </button>
+                    </form>
+                  </div>
                 )}
               </div>
             </div>
@@ -649,267 +595,6 @@ function PipelineStep({
       </span>
     </div>
   );
-}
-
-function getStatusDetails(
-  status: string,
-  processingStage: string | null,
-) {
-  if (
-    status === "processing" &&
-    processingStage === "report-processing"
-  ) {
-    return {
-      label: "Raport w przygotowaniu",
-      description: "Przygotowujemy raport.",
-      icon: LoaderCircle,
-      animated: true,
-      containerClass:
-        "border-cyan-400/20 bg-cyan-400/[0.06]",
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      textClass: "text-cyan-300",
-    };
-  }
-
-  if (
-    status === "failed" &&
-    processingStage === "report-failed"
-  ) {
-    return {
-      label: "Błąd raportu",
-      description: "Nie udało się przygotować raportu.",
-      icon: XCircle,
-      animated: false,
-      containerClass:
-        "border-red-400/20 bg-red-400/[0.06]",
-      iconClass:
-        "bg-red-400/10 text-red-300",
-      textClass: "text-red-300",
-    };
-  }
-
-  if (
-    status === "completed" &&
-    processingStage === "completed"
-  ) {
-    return {
-      label: "Analiza zakończona",
-      description: "Analiza została zakończona.",
-      icon: CheckCircle2,
-      animated: false,
-      containerClass:
-        "border-emerald-400/20 bg-emerald-400/[0.06]",
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      textClass: "text-emerald-300",
-    };
-  }
-
-  if (
-    status === "processing" &&
-    processingStage === "risk-processing"
-  ) {
-    return {
-      label: "Ocena techniczna w toku",
-      description:
-        "Trwa techniczna ocena ryzyka na podstawie obliczonych metryk.",
-      icon: LoaderCircle,
-      animated: true,
-      containerClass:
-        "border-cyan-400/20 bg-cyan-400/[0.06]",
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      textClass: "text-cyan-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-report"
-  ) {
-    return {
-      label: "Ocena ryzyka gotowa",
-      description:
-        "Ocena ryzyka jest gotowa. Czekamy na raport.",
-      icon: CheckCircle2,
-      animated: false,
-      containerClass:
-        "border-emerald-400/20 bg-emerald-400/[0.06]",
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      textClass: "text-emerald-300",
-    };
-  }
-
-  if (
-    status === "failed" &&
-    processingStage === "risk-failed"
-  ) {
-    return {
-      label: "Błąd oceny ryzyka",
-      description:
-        "Nie udało się ukończyć etapu Risk Engine. Wyniki pozy i metryk ergonomicznych zostały zachowane.",
-      icon: XCircle,
-      animated: false,
-      containerClass:
-        "border-red-400/20 bg-red-400/[0.06]",
-      iconClass:
-        "bg-red-400/10 text-red-300",
-      textClass: "text-red-300",
-    };
-  }
-
-  if (
-    status === "processing" &&
-    processingStage === "ergonomics-processing"
-  ) {
-    return {
-      label: "Obliczanie metryk",
-      description: "Obliczamy metryki ergonomiczne.",
-      icon: LoaderCircle,
-      animated: true,
-      containerClass:
-        "border-cyan-400/20 bg-cyan-400/[0.06]",
-      iconClass:
-        "bg-cyan-400/10 text-cyan-300",
-      textClass: "text-cyan-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-risk-assessment"
-  ) {
-    return {
-      label: "Metryki gotowe",
-      description: "Metryki są gotowe. Kolejny etap to ocena ryzyka.",
-      icon: CheckCircle2,
-      animated: false,
-      containerClass:
-        "border-emerald-400/20 bg-emerald-400/[0.06]",
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      textClass: "text-emerald-300",
-    };
-  }
-
-  if (
-    status === "queued" &&
-    processingStage === "ready-for-ergonomics"
-  ) {
-    return {
-      label: "Poza gotowa do metryk",
-      description: "Pozycja została wykryta. Czekamy na obliczenie metryk.",
-      icon: CheckCircle2,
-      animated: false,
-      containerClass:
-        "border-emerald-400/20 bg-emerald-400/[0.06]",
-      iconClass:
-        "bg-emerald-400/10 text-emerald-300",
-      textClass: "text-emerald-300",
-    };
-  }
-
-  switch (status) {
-    case "uploading":
-      return {
-        label: "Przesyłanie filmu",
-        description:
-          "Film jest aktualnie przesyłany do prywatnego magazynu.",
-        icon: LoaderCircle,
-        animated: true,
-        containerClass:
-          "border-cyan-400/20 bg-cyan-400/[0.06]",
-        iconClass:
-          "bg-cyan-400/10 text-cyan-300",
-        textClass: "text-cyan-300",
-      };
-
-    case "queued":
-      return {
-        label: "Oczekuje w kolejce",
-        description:
-          "Film został zapisany i czeka na uruchomienie workera AI.",
-        icon: Clock3,
-        animated: false,
-        containerClass:
-          "border-amber-300/20 bg-amber-400/[0.06]",
-        iconClass:
-          "bg-amber-400/10 text-amber-300",
-        textClass: "text-amber-300",
-      };
-
-    case "processing":
-      return {
-        label: "Analiza w toku",
-        description:
-          "Worker AI analizuje nagranie i zapisuje wyniki.",
-        icon: LoaderCircle,
-        animated: true,
-        containerClass:
-          "border-cyan-400/20 bg-cyan-400/[0.06]",
-        iconClass:
-          "bg-cyan-400/10 text-cyan-300",
-        textClass: "text-cyan-300",
-      };
-
-    case "completed":
-      return {
-        label: "Analiza ukończona",
-        description:
-          "Przetwarzanie zostało zakończone. Zakres dostępnych wyników zależy od wdrożonych etapów systemu.",
-        icon: CheckCircle2,
-        animated: false,
-        containerClass:
-          "border-emerald-400/20 bg-emerald-400/[0.06]",
-        iconClass:
-          "bg-emerald-400/10 text-emerald-300",
-        textClass: "text-emerald-300",
-      };
-
-    case "failed":
-      return {
-        label: "Analiza nieudana",
-        description:
-          "Podczas przesyłania albo przetwarzania wystąpił błąd.",
-        icon: XCircle,
-        animated: false,
-        containerClass:
-          "border-red-400/20 bg-red-400/[0.06]",
-        iconClass:
-          "bg-red-400/10 text-red-300",
-        textClass: "text-red-300",
-      };
-
-    case "cancelled":
-      return {
-        label: "Anulowano",
-        description:
-          "Operacja została anulowana przez użytkownika.",
-        icon: XCircle,
-        animated: false,
-        containerClass:
-          "border-slate-400/20 bg-white/[0.035]",
-        iconClass:
-          "bg-white/[0.06] text-slate-400",
-        textClass: "text-slate-300",
-      };
-
-    default:
-      return {
-        label: "Wersja robocza",
-        description:
-          "Analiza nie została jeszcze uruchomiona.",
-        icon: Clock3,
-        animated: false,
-        containerClass:
-          "border-white/10 bg-white/[0.035]",
-        iconClass:
-          "bg-white/[0.06] text-slate-400",
-        textClass: "text-slate-300",
-      };
-  }
 }
 
 function formatBytes(

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { HeroSection } from "@/components/landing/hero-section";
 import { HomeProjectSections } from "@/components/project/home-project-sections";
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
@@ -20,7 +21,8 @@ export default async function HomePage() {
     <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
       <SiteHeader />
       <HeroSection isAuthenticated={Boolean(user)} />
-      <HomeProjectSections />
+      <HomeProjectSections isAuthenticated={Boolean(user)} />
+      <SiteFooter />
     </main>
   );
 }

@@ -87,7 +87,7 @@ export function HeroSection({
             </Link>
 
             <Link
-              href="/o-projekcie"
+              href="#jak-to-dziala"
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 motion-reduce:transition-none"
             >
               <ScanSearch className="size-5 text-cyan-300" />
@@ -331,7 +331,7 @@ function AnalysisRegionControls({
                 type="button"
                 onClick={() => onRegionSelect(item.id)}
                 aria-pressed={active}
-                className={`flex min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-[10px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:text-[11px] motion-reduce:transition-none ${
+                className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-[10px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:text-[11px] motion-reduce:transition-none ${
                   active
                     ? "border-cyan-300/30 bg-cyan-400/15 text-cyan-100"
                     : "border-white/[0.07] bg-white/[0.035] text-slate-400 hover:bg-white/[0.08] hover:text-slate-200"

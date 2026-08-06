@@ -61,10 +61,15 @@ const stages = [
   { id: "pdf", title: "PDF", description: "Eksport końcowego raportu.", status: "planned", group: "reporting" },
   { id: "rula", title: "RULA", description: "Planowana metoda oceny kończyn górnych.", status: "planned", group: "reporting" },
   { id: "reba", title: "REBA", description: "Planowana metoda oceny całego ciała.", status: "planned", group: "reporting" },
-  { id: "worker-hosting", title: "Hosting workera", description: "Uruchomienie workerów poza komputerem lokalnym.", status: "planned", group: "infrastructure" },
-  { id: "automatic-workers", title: "Automatyczne uruchamianie workerów", description: "Nadzorowane uruchamianie pełnego łańcucha workerów.", status: "planned", group: "infrastructure" },
+  { id: "pipeline-manager", title: "Pipeline Manager", description: "Jeden nadzorowany start pełnego łańcucha workerów.", status: "completed", group: "infrastructure" },
+  { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa MVP", description: "Kompletny przepływ v0.2.1-beta.1 gotowy do testów.", status: "completed", group: "infrastructure" },
+  { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
-  { id: "validation-tests", title: "Testy walidacyjne", description: "Większy zestaw zróżnicowanych nagrań.", status: "planned", group: "infrastructure" },
+  { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
+  { id: "result-presentation", title: "Prezentacja wyników", description: "Dalsze upraszczanie i rozwój wizualnej prezentacji wyników.", status: "in_progress", group: "reporting" },
+  { id: "comparison", title: "Porównywanie analiz", description: "Porównanie wariantów tego samego stanowiska.", status: "planned", group: "reporting" },
+  { id: "workstation-simulator", title: "Symulator stanowiska", description: "Przyszła koncepcja projektowania stanowiska ze zdjęcia lub modelu 3D.", status: "planned", group: "reporting" },
 ] as const satisfies readonly ProjectStage[];
 
 export const projectStageGroups: ReadonlyArray<{
@@ -91,6 +96,12 @@ export const projectStatus = {
     finalReport: "Dostępny jako JSON i widok panelu",
   },
   stages,
+  mvpStages: stages.filter((stage) => [
+    "upload", "preprocessing", "pose-v3", "hands", "metrics-engine",
+    "ergonomics-worker", "risk-engine", "risk-worker", "report-engine",
+    "report-worker", "report-json", "report-page", "report-completion",
+    "pipeline-manager", "live-status", "beta-release",
+  ].includes(stage.id)),
   publicWorkflow: [
     { id: "upload", title: "Prześlij film", description: "Nagranie trafia do prywatnego magazynu i kolejki.", status: "completed", group: "foundation" },
     { id: "analysis", title: "System analizuje ruch", description: "Modele wykrywają sylwetkę, ciało i dłonie.", status: "completed", group: "vision" },

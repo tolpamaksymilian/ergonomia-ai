@@ -82,6 +82,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
           completedAt={analysis.report_completed_at}
           downloadUrl={downloadAccess.data?.signedUrl ?? null}
         />
+        <p className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-5 py-4 text-sm text-amber-100 print:border-slate-300 print:bg-transparent print:text-slate-700">
+          Wersja testowa. Wyniki wymagają weryfikacji przez specjalistę.
+        </p>
         <ReportOverview report={report} />
         <ReportBodyAreas report={report} />
         <ReportMetrics report={report} />

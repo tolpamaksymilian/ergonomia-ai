@@ -1,7 +1,22 @@
 export type AnalysisProcessingStage =
   | "queued"
+  | "claimed"
+  | "claimed-for-preprocessing"
+  | "downloading-source"
+  | "preprocessing-video"
+  | "saving-preprocessing-results"
   | "ready-for-ai"
   | "pose-claimed"
+  | "downloading-for-pose"
+  | "downloading-for-pose-v3"
+  | "initializing-pose-inference"
+  | "pose-inference"
+  | "pose-inference-active-segment-v3"
+  | "pose-v3-rendering-validated-results"
+  | "uploading-pose-results"
+  | "uploading-pose-results-v3"
+  | "saving-pose-results"
+  | "saving-pose-results-v3"
   | "ready-for-ergonomics"
   | "ergonomics-processing"
   | "ergonomics-failed"
@@ -11,6 +26,7 @@ export type AnalysisProcessingStage =
   | "ready-for-report"
   | "report-processing"
   | "report-failed"
+  | "processing-failed"
   | "completed";
 
 export type ErgonomicsMetricStatistics = {
