@@ -1,6 +1,6 @@
 # Risk Engine V1
 
-Risk Engine V1 jest niezależną, działającą lokalnie warstwą interpretacji danych. Odczytuje `ergonomics-metrics.json` oraz **jawnie wskazany** profil progów i zapisuje `risk-assessment.json`. Nie łączy się z Supabase, nie korzysta z GPU i nie zmienia statusu analizy.
+Risk Engine V1 jest niezależną warstwą interpretacji danych. Odczytuje `ergonomics-metrics.json` oraz **jawnie wskazany** profil progów i zapisuje `risk-assessment.json`. Sam silnik nie łączy się z Supabase, nie korzysta z GPU i nie zmienia statusu analizy. Połączenie z kolejką realizuje osobny, cienki `risk_worker.py`.
 
 Silnik wykonuje techniczny screening. Nie jest diagnozą, certyfikacją ani automatyczną decyzją BHP. Nie implementuje RULA, REBA ani innej metody normatywnej. Profil używany produkcyjnie musi zostać przygotowany i zatwierdzony przez kompetentnego ergonomistę lub specjalistę BHP.
 
@@ -99,6 +99,60 @@ Publiczne API Pythona:
 from worker.src.risk import process_risk_document, process_risk_file
 ```
 
+## Integracja z kolejką
+
+Risk Worker atomowo przejmuje wyłącznie analizy w stanie
+`ready-for-risk-assessment`, pobiera wskazany `ergonomics-metrics.json`, wywołuje
+publiczne API silnika bez subprocessu i zapisuje wynik w prywatnym Storage:
+
+```text
+{user_id}/{analysis_id}/results/risk-assessment.json
+```
+
+Pełne klatki pozostają w Storage. W `analyses.risk_assessment_summary` zapisywane
+jest tylko małe podsumowanie potrzebne panelowi. Sukces ustawia
+`processing_stage = ready-for-report` i `progress = 97`; nie ustawia analizy jako
+ukończonej, ponieważ automatyczny raport nie jest jeszcze wdrożony.
+
+Worker wymaga `RISK_PROFILE_PATH`. Nie istnieje ukryty fallback ani profil
+produkcyjny w repozytorium. Ścieżka względna jest liczona od katalogu `worker/`.
+Profil musi być dostępny lokalnie przed startem procesu; brak pliku, błędny JSON,
+nieobsługiwana wersja albo niepoprawne pasma zatrzymują worker z czytelnym błędem
+konfiguracji, zanim przejmie analizę.
+
+```powershell
+worker\.venv\Scripts\python.exe worker\src\risk_worker.py --once
+worker\.venv\Scripts\python.exe worker\src\risk_worker.py
+```
+
+Ponowienie wyłącznie etapu ryzyka, z zachowaniem wyników Pose i Ergonomics:
+
+```sql
+select public.retry_risk_analysis('ANALYSIS_UUID'::uuid);
+```
+
+RPC przyjmuje analizę `risk-failed`, ukończony etap `ready-for-report` albo zadanie
+pozostające w `risk-processing` dłużej niż 30 minut. Czyści wyłącznie wynik i błędy
+Risk Engine, zachowuje `ergonomics_metrics_path` i zwiększa licznik prób przy
+następnym atomowym przejęciu.
+
+Migrację instaluje Supabase CLI uruchomione z katalogu głównego repozytorium:
+
+```powershell
+npx.cmd supabase db push
+```
+
+Plik migracji: `supabase/migrations/20260806120000_integrate_risk_worker_v1.sql`.
+Zawiera również idempotentny prerequisite etapu ergonomicznego, ponieważ jego
+wcześniejszy plik znajdował się poza katalogiem używanym przez Supabase CLI.
+
+Log rotacyjny trafia do `worker/logs/risk-worker.log`. Pliki robocze są usuwane,
+chyba że `KEEP_WORKER_FILES=true`.
+
+Stabilne kody błędów obejmują brak lub uszkodzone wejście, brak lub błędny profil,
+błąd wykonania Risk Engine, uploadu oraz atomowego zakończenia RPC. Błąd etapu risk
+nie czyści wyników Pose Pipeline ani Ergonomics Metrics Engine.
+
 ## Testy
 
 ```powershell
@@ -115,5 +169,5 @@ worker\.venv\Scripts\python.exe -m pytest `
 - wynik zależy od jakości pomiarów wejściowych i zatwierdzonego profilu;
 - `quality` nie jest prawdopodobieństwem ani dokładnością modelu;
 - fixture testowy nie posiada wartości normatywnej;
-- brak RULA, REBA, raportu PDF oraz automatycznej integracji z kolejką;
+- brak RULA, REBA, raportu PDF oraz produkcyjnego profilu progów;
 - ostateczna interpretacja wymaga przeglądu specjalisty.

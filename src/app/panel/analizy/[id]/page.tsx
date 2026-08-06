@@ -16,8 +16,10 @@ import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-butt
 import { ErgonomicsMetricsCard } from "@/components/analyses/ergonomics-metrics-card";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
+import { RiskAssessmentCard } from "@/components/analyses/risk-assessment-card";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
 import { requireUser } from "@/lib/auth/access";
+import type { RiskAssessmentSummary } from "@/types/analysis";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +84,22 @@ export default async function AnalysisDetailsPage({
       ergonomics_metrics_summary,
       ergonomics_completed_at,
       ergonomics_error_code,
-      ergonomics_error_message
+      ergonomics_error_message,
+      risk_assessment_path,
+      risk_assessment_version,
+      risk_profile_id,
+      risk_profile_version,
+      risk_profile_status,
+      risk_processed_frames,
+      risk_valid_metric_ratio,
+      risk_overall_level,
+      risk_assessment_summary,
+      risk_completed_at,
+      risk_error_code,
+      risk_error_message,
+      risk_worker_id,
+      risk_started_at,
+      risk_attempts
     `)
     .eq("id", id)
     .maybeSingle();
@@ -184,6 +201,7 @@ export default async function AnalysisDetailsPage({
         "queued",
         "ready-for-ai",
         "ready-for-ergonomics",
+        "ready-for-risk-assessment",
       ].includes(
         analysis.processing_stage,
       )
@@ -337,6 +355,9 @@ export default async function AnalysisDetailsPage({
             "ergonomics-processing",
             "ready-for-risk-assessment",
             "ergonomics-failed",
+            "risk-processing",
+            "risk-failed",
+            "ready-for-report",
           ].includes(analysis.processing_stage ?? "") && (
               <div className="mt-6">
                 {analysis.processing_stage === "ready-for-ergonomics" && (
@@ -345,7 +366,12 @@ export default async function AnalysisDetailsPage({
                   </div>
                 )}
 
-                {analysis.processing_stage === "ready-for-risk-assessment" && (
+                {[
+                  "ready-for-risk-assessment",
+                  "risk-processing",
+                  "risk-failed",
+                  "ready-for-report",
+                ].includes(analysis.processing_stage ?? "") && (
                   <div className="mb-6">
                     <ErgonomicsMetricsCard
                       version={analysis.ergonomics_metrics_version}
@@ -355,6 +381,18 @@ export default async function AnalysisDetailsPage({
                     />
                   </div>
                 )}
+
+                {analysis.processing_stage === "ready-for-report" &&
+                  analysis.risk_assessment_summary && (
+                    <div className="mb-6">
+                      <RiskAssessmentCard
+                        summary={
+                          analysis.risk_assessment_summary as RiskAssessmentSummary
+                        }
+                        completedAt={analysis.risk_completed_at}
+                      />
+                    </div>
+                  )}
 
                 <PoseResultsPreview
                   videoUrl={resultVideoUrl}
@@ -403,7 +441,7 @@ export default async function AnalysisDetailsPage({
             />
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <PipelineStep
               label="Film przesłany"
               completed={[
@@ -421,6 +459,9 @@ export default async function AnalysisDetailsPage({
                   "ergonomics-processing",
                   "ergonomics-failed",
                   "ready-for-risk-assessment",
+                  "risk-processing",
+                  "risk-failed",
+                  "ready-for-report",
                 ].includes(analysis.processing_stage ?? "") ||
                 analysis.status === "completed"
               }
@@ -449,7 +490,12 @@ export default async function AnalysisDetailsPage({
             <PipelineStep
               label="Metryki ergonomiczne"
               completed={
-                analysis.processing_stage === "ready-for-risk-assessment"
+                [
+                  "ready-for-risk-assessment",
+                  "risk-processing",
+                  "risk-failed",
+                  "ready-for-report",
+                ].includes(analysis.processing_stage ?? "")
               }
               active={[
                 "ready-for-ergonomics",
@@ -458,7 +504,16 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Ocena ryzyka — w przygotowaniu"
+              label="Ocena ryzyka"
+              completed={analysis.processing_stage === "ready-for-report"}
+              active={[
+                "ready-for-risk-assessment",
+                "risk-processing",
+              ].includes(analysis.processing_stage ?? "")}
+            />
+
+            <PipelineStep
+              label="Raport — w przygotowaniu"
             />
           </div>
         </section>
@@ -551,6 +606,60 @@ function getStatusDetails(
   status: string,
   processingStage: string | null,
 ) {
+  if (
+    status === "processing" &&
+    processingStage === "risk-processing"
+  ) {
+    return {
+      label: "Ocena techniczna w toku",
+      description:
+        "Trwa techniczna ocena ryzyka na podstawie obliczonych metryk.",
+      icon: LoaderCircle,
+      animated: true,
+      containerClass:
+        "border-cyan-400/20 bg-cyan-400/[0.06]",
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      textClass: "text-cyan-300",
+    };
+  }
+
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-report"
+  ) {
+    return {
+      label: "Ocena ryzyka gotowa",
+      description:
+        "Ocena ryzyka została obliczona. Raport końcowy nie jest jeszcze generowany automatycznie.",
+      icon: CheckCircle2,
+      animated: false,
+      containerClass:
+        "border-emerald-400/20 bg-emerald-400/[0.06]",
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      textClass: "text-emerald-300",
+    };
+  }
+
+  if (
+    status === "failed" &&
+    processingStage === "risk-failed"
+  ) {
+    return {
+      label: "Błąd oceny ryzyka",
+      description:
+        "Nie udało się ukończyć etapu Risk Engine. Wyniki pozy i metryk ergonomicznych zostały zachowane.",
+      icon: XCircle,
+      animated: false,
+      containerClass:
+        "border-red-400/20 bg-red-400/[0.06]",
+      iconClass:
+        "bg-red-400/10 text-red-300",
+      textClass: "text-red-300",
+    };
+  }
+
   if (
     status === "processing" &&
     processingStage === "ergonomics-processing"

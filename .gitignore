@@ -30,8 +30,13 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
+.env
+.env.local
+.env.*.local
 .env*
+!.env.example
+!worker/.env.example
 
 # Python AI worker
 worker/.venv/
@@ -49,7 +54,3 @@ worker/**/*.pyc
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-.vercel
-.env*
-!worker/.env.example

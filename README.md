@@ -43,25 +43,24 @@ Projekt łączy aplikację internetową, bazę danych Supabase oraz lokalne work
 - Ergonomics Metrics Engine V1,
 - Ergonomics Worker,
 - zapis metryk w Supabase i Storage,
-- niezależny Risk Engine V1,
+- Risk Engine V1,
+- osobny Risk Worker,
+- automatyczny zapis `risk-assessment.json` w prywatnym Storage,
+- prezentacja technicznego wyniku ryzyka w panelu użytkownika,
 - panel użytkownika,
 - panel administratora,
 - strona projektu i autora.
 
 ### W realizacji
 
-- integracja Risk Engine z kolejką,
-- Risk Worker,
-- automatyczny zapis `risk-assessment.json`,
-- prezentacja ryzyka w panelu użytkownika,
 - wykresy metryk,
-- kluczowe klatki analizy.
+- obrazy kluczowych klatek,
+- raport końcowy.
 
 ### Planowane
 
 - produkcyjny profil progów ergonomicznych,
 - panel konfiguracji progów,
-- raport końcowy,
 - eksport PDF,
 - metody RULA i REBA,
 - hosting workerów,
@@ -82,7 +81,6 @@ flowchart LR
     D --> E[Ocena ryzyka]
     E --> F[Raport]
 
-    style E stroke-dasharray: 5 5
     style F stroke-dasharray: 5 5
 ```
 
@@ -120,7 +118,8 @@ Każda metryka zawiera również informację o jakości, poprawności i przyczyn
 
 ### 4. Risk Engine V1
 
-Risk Engine działa obecnie jako niezależny moduł.
+Risk Engine zachowuje niezależny kontrakt obliczeniowy, a osobny Risk Worker łączy
+go z kolejką, prywatnym Storage i ograniczonym podsumowaniem w bazie.
 
 Obsługuje:
 
@@ -132,7 +131,8 @@ Obsługuje:
 - wynik `insufficient_data`,
 - zabezpieczenie przed pominięciem krótkiego, ale wysokiego ryzyka.
 
-Moduł nie jest jeszcze podłączony do głównej kolejki analiz.
+Po sukcesie analiza przechodzi do `ready-for-report`. Profil progów zawsze musi
+być wskazany jawnie i zatwierdzony przed zastosowaniem produkcyjnym.
 
 ---
 
@@ -208,9 +208,10 @@ ergonomia-ai/
 │   │   ├── ergonomics/
 │   │   ├── pose_v3/
 │   │   ├── risk/
-│   │   ├── main.py
-│   │   ├── pose_worker.py
-│   │   └── ergonomics_worker.py
+    │   │   ├── main.py
+    │   │   ├── pose_worker.py
+    │   │   ├── ergonomics_worker.py
+    │   │   └── risk_worker.py
 │   │
 │   ├── tests/
 │   ├── models/
@@ -293,6 +294,8 @@ ANALYSIS_RESULTS_BUCKET=analysis-results
 
 WORKER_ID=local-worker-01
 ERGONOMICS_WORKER_ID=local-ergonomics-worker-01
+RISK_WORKER_ID=local-risk-worker-01
+RISK_PROFILE_PATH=profiles/risk-profile.json
 
 WORKER_POLL_INTERVAL_SECONDS=10
 WORKER_LOG_LEVEL=INFO
@@ -322,6 +325,17 @@ supabase/migrations/
 ```
 
 Należy wykonać je chronologicznie w projekcie Supabase.
+
+Aktualną, samowystarczalną integrację Ergonomics i Risk Worker instaluje:
+
+```powershell
+npx.cmd supabase db push
+```
+
+Supabase CLI odczyta plik
+`supabase/migrations/20260806120000_integrate_risk_worker_v1.sql`. Polecenie wymaga
+wcześniejszego `supabase link` do właściwego projektu i nie powinno być uruchamiane
+przeciw przypadkowej bazie.
 
 Można je uruchomić:
 
@@ -414,16 +428,24 @@ ready-for-risk-assessment
 
 ---
 
-## Aktualny koniec automatycznego pipeline’u
+## 5. Techniczna ocena ryzyka
 
-Obecnie automatyczny proces kończy się na:
+Po wskazaniu jawnego, zatwierdzonego profilu uruchom:
 
-```text
-progress = 90
-processing_stage = ready-for-risk-assessment
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\risk_worker.py --once
 ```
 
-Risk Engine działa, ale nie jest jeszcze automatycznie uruchamiany przez kolejkę.
+Po zakończeniu powstaje prywatny plik `risk-assessment.json`, a analiza przechodzi
+do etapu:
+
+```text
+progress = 97
+processing_stage = ready-for-report
+```
+
+Status nie jest ustawiany na `completed`, ponieważ raport końcowy nie jest jeszcze
+generowany automatycznie.
 
 ---
 
@@ -447,6 +469,12 @@ Zamiast trybu jednorazowego można uruchomić workery bez parametru `--once`.
 
 ```powershell
 .\worker\.venv\Scripts\python.exe .\worker\src\ergonomics_worker.py
+```
+
+### Risk Worker
+
+```powershell
+.\worker\.venv\Scripts\python.exe .\worker\src\risk_worker.py
 ```
 
 Każdy worker powinien działać w osobnym terminalu.
@@ -572,11 +600,8 @@ Więcej informacji znajduje się na stronie:
 
 Najbliższe etapy rozwoju:
 
-- podłączenie Risk Engine do kolejki,
-- utworzenie Risk Workera,
-- prezentacja wyników ryzyka,
 - wykresy metryk,
-- wybór kluczowych klatek,
+- generowanie obrazów kluczowych klatek,
 - raport końcowy,
 - eksport PDF,
 - profile progów,
@@ -595,4 +620,5 @@ Aktualna wersja koncentruje się na kompletnym przepływie:
 film → pozycja → metryki → ryzyko → raport
 ```
 
-Pierwsze trzy etapy są już zintegrowane z kolejką aplikacji. Ocena ryzyka działa jako niezależny moduł i jest przygotowywana do integracji.
+Pierwsze cztery etapy są zintegrowane z kolejką aplikacji. Automatyczny pipeline
+kończy się obecnie na `ready-for-report`; raport pozostaje kolejnym etapem rozwoju.

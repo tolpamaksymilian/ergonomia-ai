@@ -53,7 +53,7 @@ export function ProjectOverview() {
         <section className="mt-20" aria-labelledby="working-heading">
           <SectionHeading eyebrow="Co już działa?" title="Gotowe moduły i ich wersje" id="working-heading" />
           <p className="mt-5 max-w-3xl text-slate-400">
-            {counts.completed} etapy są gotowe. Risk Engine działa niezależnie, a podłączenie go do kolejki jest w realizacji.
+            {counts.completed} etapy są gotowe. Risk Engine działa jako osobny moduł obliczeniowy i jest podłączony do kolejki przez dedykowany worker.
           </p>
           <div className="mt-8">
             <ProjectVersionCards />

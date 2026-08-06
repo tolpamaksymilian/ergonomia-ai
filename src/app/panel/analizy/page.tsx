@@ -490,6 +490,51 @@ function getStatusDetails(
 ): StatusDetails {
   if (
     status === "processing" &&
+    processingStage === "risk-processing"
+  ) {
+    return {
+      label: "Ocena ryzyka",
+      icon: LoaderCircle,
+      animated: true,
+      iconClass:
+        "bg-cyan-400/10 text-cyan-300",
+      badgeClass:
+        "bg-cyan-400/10 text-cyan-300",
+    };
+  }
+
+  if (
+    status === "queued" &&
+    processingStage === "ready-for-report"
+  ) {
+    return {
+      label: "Ocena gotowa",
+      icon: CheckCircle2,
+      animated: false,
+      iconClass:
+        "bg-emerald-400/10 text-emerald-300",
+      badgeClass:
+        "bg-emerald-400/10 text-emerald-300",
+    };
+  }
+
+  if (
+    status === "failed" &&
+    processingStage === "risk-failed"
+  ) {
+    return {
+      label: "Błąd oceny ryzyka",
+      icon: XCircle,
+      animated: false,
+      iconClass:
+        "bg-red-400/10 text-red-300",
+      badgeClass:
+        "bg-red-400/10 text-red-300",
+    };
+  }
+
+  if (
+    status === "processing" &&
     processingStage === "ergonomics-processing"
   ) {
     return {
