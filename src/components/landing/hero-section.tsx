@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   ArrowRight,
-  BrainCircuit,
   Check,
   CircleDot,
   Crosshair,
+  FileCheck2,
   Hand,
   Info,
   ListChecks,
@@ -56,21 +56,20 @@ export function HeroSection({
     useState<AnalysisRegionId | null>(null);
   const activeRegion = hoveredRegion ?? selectedRegion;
   return (
-    <section className="relative overflow-hidden px-5 pb-20 pt-28 sm:px-6 sm:pb-24 sm:pt-36">
+    <section className="relative overflow-hidden px-5 pb-16 pt-28 sm:px-6 sm:pb-20 sm:pt-36">
       <BackgroundEffects />
 
-      <div className="relative mx-auto grid max-w-7xl gap-12 lg:min-h-[720px] lg:grid-cols-[0.9fr_1.1fr] lg:items-start xl:gap-16">
-        <div className="lg:pt-20">
+      <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.86fr_1.14fr] lg:items-center xl:gap-16">
+        <div>
           <h1 className="max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-white min-[420px]:text-5xl sm:text-6xl">
             Sprawdź ergonomię pracy na podstawie{" "}
             <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-sky-300 bg-clip-text text-transparent">
-              krótkiego filmu
+              filmu
             </span>
           </h1>
 
           <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-300">
-            System wykrywa pozycję pracownika, analizuje ruch i porządkuje dane
-            potrzebne do dalszej oceny.
+            System analizuje ruch, oblicza metryki postawy i przygotowuje czytelny raport.
           </p>
 
           <div className="mt-9 flex flex-wrap gap-4">
@@ -91,7 +90,7 @@ export function HeroSection({
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 motion-reduce:transition-none"
             >
               <ScanSearch className="size-5 text-cyan-300" />
-              Jak to działa
+              Zobacz, jak to działa
             </Link>
           </div>
         </div>
@@ -155,14 +154,14 @@ export function HeroSection({
             <div className="grid grid-cols-2 gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
               <Metric
                 icon={Crosshair}
-                label="Punkty ciała"
-                value="133"
+                label="Analiza"
+                value="Sylwetka i ruch"
               />
 
               <Metric
                 icon={ListChecks}
                 label="Metryki"
-                value="14"
+                value="14 pomiarów"
               />
 
               <Metric
@@ -172,9 +171,9 @@ export function HeroSection({
               />
 
               <Metric
-                icon={BrainCircuit}
-                label="Model"
-                value="RTMW + YOLOX"
+                icon={FileCheck2}
+                label="Wynik"
+                value="Raport"
               />
             </div>
           </div>

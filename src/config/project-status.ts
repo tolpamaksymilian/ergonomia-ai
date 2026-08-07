@@ -26,6 +26,12 @@ export type ProjectMetricGroup = {
   description: string;
 };
 
+export type PublicProjectPlan = {
+  id: string;
+  title: string;
+  description: string;
+};
+
 const stages = [
   { id: "next-app", title: "Aplikacja Next.js", description: "Interfejs i bezpieczne widoki serwerowe.", status: "completed", group: "foundation" },
   { id: "auth", title: "Supabase Auth", description: "Konta, sesje i role użytkowników.", status: "completed", group: "foundation" },
@@ -105,7 +111,7 @@ export const projectStatus = {
   publicWorkflow: [
     { id: "upload", title: "Prześlij film", description: "Nagranie trafia do prywatnego magazynu i kolejki.", status: "completed", group: "foundation" },
     { id: "analysis", title: "System analizuje ruch", description: "Modele wykrywają sylwetkę, ciało i dłonie.", status: "completed", group: "vision" },
-    { id: "results", title: "Otrzymujesz wyniki", description: "System porządkuje metryki potrzebne do dalszej oceny.", status: "completed", group: "metrics" },
+    { id: "results", title: "Otrzymujesz raport", description: "Wyniki, poziom ryzyka i ograniczenia trafiają do jednego widoku.", status: "completed", group: "reporting" },
   ] satisfies readonly ProjectStage[],
   fullPipeline: [
     { id: "pipeline-film", title: "Film", description: "Krótkie nagranie stanowiska.", status: "completed", group: "foundation" },
@@ -118,11 +124,27 @@ export const projectStatus = {
     { id: "pipeline-report", title: "Raport V1", description: "Wersjonowany JSON, widok panelu i drukowanie w przeglądarce.", status: "completed", group: "reporting" },
   ] satisfies readonly ProjectStage[],
   metricGroups: [
-    { name: "Tułów i szyja", description: "Pochylenie tułowia oraz ustawienie szyi." },
-    { name: "Ramiona i łokcie", description: "Ułożenie ramion, łokci i przedramion." },
-    { name: "Nadgarstki i dłonie", description: "Nadgarstki, zamknięcie dłoni i chwyt." },
-    { name: "Czas utrzymywania pozycji", description: "Ekspozycja liczona przez niezależny Risk Engine." },
+    { name: "Sylwetka i ruch", description: "Pozycja ciała oraz zmiany ruchu w kolejnych klatkach." },
+    { name: "Kąty i metryki", description: "Pomiary tułowia, szyi, ramion i kończyn." },
+    { name: "Dłonie i nadgarstki", description: "Ułożenie nadgarstków, zamknięcie dłoni i chwyt." },
+    { name: "Ryzyko i raport", description: "Techniczna klasyfikacja oraz uporządkowane podsumowanie." },
   ] satisfies readonly ProjectMetricGroup[],
+  publicPlans: [
+    { id: "charts", title: "Wykresy i kluczowe momenty", description: "Podgląd zmian kątów i najważniejszych fragmentów filmu." },
+    { id: "pdf", title: "Raport PDF", description: "Dokument gotowy do pobrania i archiwizacji." },
+    { id: "methods", title: "RULA i REBA", description: "Rozszerzenie analizy o popularne metody ergonomiczne." },
+    { id: "simulator", title: "Symulator stanowiska", description: "Wirtualny manekin do sprawdzania zasięgów przed budową stanowiska." },
+  ] satisfies readonly PublicProjectPlan[],
+  publicTechnologies: [
+    "Next.js",
+    "Supabase",
+    "Python",
+    "PyTorch",
+    "YOLOX-X",
+    "RTMW",
+    "MediaPipe",
+    "Three.js",
+  ],
   metricNames: [
     "Pochylenie tułowia", "Zgięcie szyi", "Elewacja lewego ramienia", "Elewacja prawego ramienia",
     "Zgięcie lewego łokcia", "Zgięcie prawego łokcia", "Pochylenie lewego przedramienia", "Pochylenie prawego przedramienia",
@@ -145,8 +167,8 @@ export const projectStatus = {
     "Zasłonięte części ciała mogą pozostać niewidoczne.",
     "Kadr, światło i ubranie wpływają na jakość danych.",
     "Niewiarygodne punkty są odrzucane, a nie uzupełniane.",
-    "System wspiera analizę i nie zastępuje oceny specjalisty.",
   ],
+  disclaimer: "System wspiera analizę i nie zastępuje oceny specjalisty.",
 } as const;
 
 export function calculateProjectProgress(items: readonly ProjectStage[]) {

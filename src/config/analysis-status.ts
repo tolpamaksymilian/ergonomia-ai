@@ -42,7 +42,7 @@ const stageDefinitions = {
   "risk-processing": status("Ocena techniczna w toku", "Risk Engine", "Risk Engine interpretuje metryki według jawnego profilu rozwojowego.", 92, "active", true),
   "ready-for-report": status("Ocena gotowa", "Gotowe do raportu", "Ocena techniczna jest gotowa i czeka na przygotowanie raportu.", 97, "queued", true),
   "report-processing": status("Raport w przygotowaniu", "Raport", "Porządkujemy istniejące wyniki w raport analizy.", 98, "active", true),
-  completed: status("Analiza zakończona", "Ukończona", "Pełny przepływ zakończył się, a raport jest dostępny.", 100, "success", false, false, true, true),
+  completed: status("Analiza gotowa", "Gotowa", "Raport jest dostępny.", 100, "success", false, false, true, true),
   "processing-failed": status("Błąd przetwarzania", "Błąd etapu", "Nie udało się przygotować filmu lub wykryć pozycji.", 0, "error", false, true, true),
   "ergonomics-failed": status("Błąd metryk", "Błąd metryk", "Nie udało się obliczyć metryk ergonomicznych. Wyniki pozy zostały zachowane.", 75, "error", false, true, true),
   "risk-failed": status("Błąd oceny ryzyka", "Błąd oceny", "Nie udało się ocenić ryzyka. Wyniki pozy i metryk zostały zachowane.", 90, "error", false, true, true),

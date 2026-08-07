@@ -7,8 +7,9 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
+  title: { absolute: "Ergonomia AI — analiza ergonomii na podstawie filmu" },
   description:
-    "System wspierający analizę ergonomii stanowiska pracy na podstawie krótkiego nagrania wideo.",
+    "Analiza ruchu, metryki postawy i raport ergonomiczny na podstawie krótkiego nagrania.",
 };
 
 export default async function HomePage() {

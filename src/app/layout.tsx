@@ -14,11 +14,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Ergonomia AI — analiza pozy i ruchu pracownika",
+    default: "Ergonomia AI — analiza ergonomii na podstawie filmu",
     template: "%s | Ergonomia AI",
   },
   description:
-    "System wspierający analizę ergonomii stanowiska pracy na podstawie krótkiego nagrania wideo.",
+    "Analiza ruchu, metryki postawy i raport ergonomiczny na podstawie krótkiego nagrania.",
 };
 
 export default function RootLayout({
