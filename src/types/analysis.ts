@@ -232,6 +232,51 @@ export type AnalysisReport = {
   observations: string[];
   limitations: string[];
   disclaimer: string;
+  holding_activity?: {
+    external_load_known?: boolean;
+    left?: ReportHandActivity;
+    right?: ReportHandActivity;
+    bimanual?: {
+      likely_holding_seconds?: number;
+      episode_count?: number;
+    };
+  };
+  hand_activity?: AnalysisReport["holding_activity"];
+  movement_features?: Record<string, ReportMovementFeature>;
+  posture_duration?: Record<string, number | string | null>;
+  pose_quality?: Record<string, unknown>;
+};
+
+export type ReportHandActivity = {
+  valid_observation_seconds?: number;
+  likely_holding_seconds?: number;
+  static_holding_seconds?: number;
+  longest_holding_seconds?: number;
+  holding_ratio?: number;
+  holding_episode_count?: number;
+  holding_detected?: "likely" | "not_detected" | "unknown";
+  unclassified_object_possible?: boolean;
+  object_interactions?: Array<{
+    object_class: string;
+    holding_seconds: number;
+    confidence: number | null;
+  }>;
+};
+
+export type ReportMovementFeature = {
+  valid_frames?: number;
+  invalid_frames?: number;
+  movement_range?: number;
+  range_of_motion?: number;
+  median_absolute_velocity?: number;
+  percentile_95_absolute_velocity?: number;
+  peak_absolute_velocity?: number;
+  repetition_count?: number;
+  cycle_count?: number;
+  reversal_count?: number;
+  cycles_per_minute?: number;
+  longest_stable_posture_seconds?: number;
+  valid_exposure_seconds?: number;
 };
 
 export type ReportSummary = {

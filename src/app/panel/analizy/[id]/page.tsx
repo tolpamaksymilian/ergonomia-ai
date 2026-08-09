@@ -17,7 +17,9 @@ import { PrivateVideoPreview } from "@/components/analyses/private-video-preview
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
 import { RiskAssessmentCard } from "@/components/analyses/risk-assessment-card";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
+import { AnalysisReviewWorkspace } from "@/components/analyses/review/analysis-review-workspace";
 import { getSafeAnalysisErrorMessage } from "@/config/analysis-status";
+import { normalizeAnalysisReview } from "@/lib/analysis-review/normalize";
 import { requireUser } from "@/lib/auth/access";
 import type { RiskAssessmentSummary } from "@/types/analysis";
 
@@ -203,6 +205,75 @@ export default async function AnalysisDetailsPage({
 
   const signedVideoErrorMessage =
     signedVideoError?.message ?? null;
+
+  if (analysis.status === "completed") {
+    const resultsBucket = supabase.storage.from("analysis-results");
+    const emptyAccess = { data: null, error: null };
+    const [
+      poseFile,
+      ergonomicsFile,
+      riskFile,
+      reportFile,
+      ergonomicsDownload,
+      riskDownload,
+      reportDownload,
+    ] = await Promise.all([
+      analysis.result_json_path ? resultsBucket.download(analysis.result_json_path) : emptyAccess,
+      analysis.ergonomics_metrics_path ? resultsBucket.download(analysis.ergonomics_metrics_path) : emptyAccess,
+      analysis.risk_assessment_path ? resultsBucket.download(analysis.risk_assessment_path) : emptyAccess,
+      analysis.report_path ? resultsBucket.download(analysis.report_path) : emptyAccess,
+      analysis.ergonomics_metrics_path
+        ? resultsBucket.createSignedUrl(analysis.ergonomics_metrics_path, resultUrlLifetimeSeconds, { download: "ergonomics-metrics.json" })
+        : emptyAccess,
+      analysis.risk_assessment_path
+        ? resultsBucket.createSignedUrl(analysis.risk_assessment_path, resultUrlLifetimeSeconds, { download: "risk-assessment.json" })
+        : emptyAccess,
+      analysis.report_path
+        ? resultsBucket.createSignedUrl(analysis.report_path, resultUrlLifetimeSeconds, { download: "analysis-report.json" })
+        : emptyAccess,
+    ]);
+    const [poseDocument, ergonomicsDocument, riskDocument, reportDocument] = await Promise.all([
+      parseStorageJson(poseFile.data),
+      parseStorageJson(ergonomicsFile.data),
+      parseStorageJson(riskFile.data),
+      parseStorageJson(reportFile.data),
+    ]);
+    const sourceDurationSeconds = finiteNumber(analysis.source_duration_seconds);
+    const model = normalizeAnalysisReview({
+      analysisId: analysis.id,
+      pose: poseDocument,
+      ergonomics: ergonomicsDocument,
+      risk: riskDocument,
+      report: reportDocument,
+      fallbackDurationSeconds: sourceDurationSeconds,
+      fallbackProcessedFrames: analysis.pose_processed_frames,
+    });
+
+    return (
+      <AnalysisReviewWorkspace
+        model={model}
+        analysis={{
+          id: analysis.id,
+          title: analysis.title,
+          description: analysis.description,
+          createdAt: analysis.created_at,
+          sourceFileName: analysis.source_file_name,
+          sourceDurationSeconds,
+          sourceWidth: analysis.source_width,
+          sourceHeight: analysis.source_height,
+        }}
+        urls={{
+          overlay: resultVideoUrl,
+          original: signedVideoUrl,
+          thumbnail: thumbnailUrl,
+          poseJson: resultJsonUrl,
+          ergonomicsJson: ergonomicsDownload.data?.signedUrl ?? null,
+          riskJson: riskDownload.data?.signedUrl ?? null,
+          reportJson: reportDownload.data?.signedUrl ?? null,
+        }}
+      />
+    );
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#050b14] px-5 py-8 text-white sm:px-8">
@@ -641,4 +712,18 @@ function Background() {
       <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-cyan-500/[0.07] blur-[170px]" />
     </div>
   );
+}
+
+async function parseStorageJson(file: Blob | null): Promise<unknown> {
+  if (!file || file.size === 0) return null;
+  try {
+    return JSON.parse(await file.text()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function finiteNumber(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isFinite(numeric) ? numeric : null;
 }

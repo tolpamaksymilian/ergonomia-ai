@@ -1,17 +1,15 @@
-import { Clock3, FileWarning, ScanLine } from "lucide-react";
+import { Activity, Clock3, FileWarning, Hand, ScanLine, ShieldCheck } from "lucide-react";
 
-import type {
-  AnalysisReport,
-  ReportMetricSummary,
-  RiskLevel,
-} from "@/types/analysis";
+import { METRIC_DEFINITIONS } from "@/lib/analysis-review/config";
+import { formatAngle, formatDuration, formatPercentage, formatRatio, formatTimestamp, UNKNOWN_VALUE } from "@/lib/analysis-review/formatters";
+import type { AnalysisReport, ReportMetricSummary, RiskLevel } from "@/types/analysis";
 
 const levelLabels: Record<RiskLevel, string> = {
   low: "Niskie",
   moderate: "Umiarkowane",
   high: "Wysokie",
-  critical: "Bardzo wysokie",
-  insufficient_data: "Brak danych",
+  critical: "Krytyczne",
+  insufficient_data: "Niewystarczające dane",
 };
 
 const limitationLabels: Record<string, string> = {
@@ -19,7 +17,7 @@ const limitationLabels: Record<string, string> = {
   occluded_body_parts_may_be_missing: "Zasłonięte części ciała mogą nie dostarczać danych.",
   result_is_technical_screening: "Wynik jest technicznym screeningiem, a nie diagnozą.",
   specialist_review_required: "Wynik wymaga interpretacji przez kompetentnego specjalistę.",
-  development_profile_used: "Użyty profil ma status rozwojowy.",
+  development_profile_used: "Użyty profil klasyfikacji ma status rozwojowy.",
   production_profile_not_used: "Nie użyto zatwierdzonego profilu produkcyjnego.",
   result_depends_on_recording_quality: "Wynik zależy od jakości nagrania, kadru i oświetlenia.",
   external_load_not_measured: "Nagranie nie dostarcza pełnej informacji o obciążeniu zewnętrznym.",
@@ -27,159 +25,68 @@ const limitationLabels: Record<string, string> = {
   reba_not_calculated: "Raport nie zawiera oceny REBA.",
   frame_timestamps_replaced_with_fps_fallback: "Czas ekspozycji wykorzystał jawny fallback FPS.",
   exposure_timing_unavailable: "Dla części ekspozycji nie było wiarygodnej osi czasu.",
+  low_hand_visibility: "Widoczność dłoni była ograniczona.",
+  body_occlusion: "Części sylwetki były okresowo zasłonięte.",
+  high_motion_blur: "Nagranie zawiera fragmenty rozmazane ruchem.",
+  holding_uncertain: "Klasyfikacja chwytu zawiera okresy ograniczonej jakości.",
 };
 
 export function ReportBodyAreas({ report }: { report: AnalysisReport }) {
-  return (
-    <section className="report-card rounded-[26px] border border-white/10 bg-white/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white">
-      <h2 className="text-xl font-semibold text-white print:text-black">Obszary ciała</h2>
-      {report.body_areas.length ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {report.body_areas.map((area) => (
-            <article key={area.area_id} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold text-slate-100 print:text-black">{area.label}</h3>
-                <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 print:border-slate-400 print:text-black">
-                  {levelLabels[area.level]}
-                </span>
-              </div>
-              {area.coverage !== undefined && (
-                <p className="mt-3 text-xs text-slate-500 print:text-slate-700">
-                  Pokrycie danych: {formatPercent(area.coverage)}
-                </p>
-              )}
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-4 text-sm text-slate-500">Brak obszarów możliwych do podsumowania.</p>
-      )}
-    </section>
-  );
+  return <ReportSection title="Obszary ciała" icon={ScanLine}>
+    {report.body_areas.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{report.body_areas.map((area) => <article key={area.area_id} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-slate-100 print:text-black">{area.label}</h3><span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase text-slate-300 print:border-slate-400 print:text-black">{levelLabels[area.level]}</span></div>{area.coverage !== undefined && <p className="mt-3 text-xs text-slate-500 print:text-slate-700">Pokrycie danych: {formatPercentage(area.coverage)}</p>}</article>)}</div> : <Empty text="Brak obszarów możliwych do podsumowania." />}
+  </ReportSection>;
 }
 
 export function ReportMetrics({ report }: { report: AnalysisReport }) {
-  return (
-    <section className="report-card overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.035] print:border-slate-300 print:bg-white">
-      <div className="p-6 sm:p-7">
-        <h2 className="text-xl font-semibold text-white print:text-black">Najważniejsze metryki</h2>
-        <p className="mt-2 text-sm text-slate-500 print:text-slate-700">
-          Podsumowania istniejących wyników. Pełna seria klatkowa pozostaje w pliku metryk.
-        </p>
-      </div>
-      {report.metric_summary.length ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-left text-sm print:min-w-0">
-            <thead className="border-y border-white/[0.08] bg-slate-950/55 text-xs uppercase tracking-wide text-slate-500 print:border-slate-300 print:bg-white print:text-slate-700">
-              <tr>
-                <th className="px-6 py-3 font-medium">Metryka</th>
-                <th className="px-4 py-3 font-medium">Poziom</th>
-                <th className="px-4 py-3 font-medium">Mediana</th>
-                <th className="px-4 py-3 font-medium">Maksimum</th>
-                <th className="px-4 py-3 font-medium">Pokrycie</th>
-                <th className="px-6 py-3 font-medium">Ekspozycja wysoka</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.07] print:divide-slate-300">
-              {report.metric_summary.map((metric) => (
-                <MetricRow key={metric.metric_name} metric={metric} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-6 pb-6 text-sm text-slate-500">Brak metryk możliwych do zestawienia.</p>
-      )}
-    </section>
-  );
+  return <ReportSection title="Postawa ciała i metryki" icon={Activity}>
+    <p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">Wartości techniczne są prezentowane oddzielnie od klasyfikacji Risk Engine.</p>
+    {report.metric_summary.length ? <div className="overflow-x-auto"><table className="w-full min-w-[660px] text-left text-sm"><thead className="text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 pr-4">Metryka</th><th className="pb-3 pr-4">Poziom Risk Engine</th><th className="pb-3 pr-4">Mediana</th><th className="pb-3 pr-4">Maksimum</th><th className="pb-3">Pokrycie</th></tr></thead><tbody className="divide-y divide-white/[0.07] print:divide-slate-200">{report.metric_summary.map((metric) => <tr key={metric.metric_name}><td className="py-3 pr-4 font-medium text-slate-200 print:text-black">{metric.label}</td><td className="py-3 pr-4 text-slate-400 print:text-slate-700">{levelLabels[metric.level]}</td><td className="py-3 pr-4 text-slate-400 print:text-slate-700">{formatMetric(metric, metric.statistics?.median)}</td><td className="py-3 pr-4 text-slate-400 print:text-slate-700">{formatMetric(metric, metric.statistics?.maximum)}</td><td className="py-3 text-slate-400 print:text-slate-700">{formatPercentage(metric.valid_ratio)}</td></tr>)}</tbody></table></div> : <Empty text="Brak metryk możliwych do przedstawienia." />}
+  </ReportSection>;
 }
 
-function MetricRow({ metric }: { metric: ReportMetricSummary }) {
-  return (
-    <tr className="report-card print:text-black">
-      <td className="px-6 py-4 font-medium text-slate-200 print:text-black">{metric.label}</td>
-      <td className="px-4 py-4 text-slate-400 print:text-black">{levelLabels[metric.level]}</td>
-      <td className="px-4 py-4 text-slate-400 print:text-black">{formatMeasurement(metric.statistics?.median, metric.unit)}</td>
-      <td className="px-4 py-4 text-slate-400 print:text-black">{formatMeasurement(metric.statistics?.maximum, metric.unit)}</td>
-      <td className="px-4 py-4 text-slate-400 print:text-black">{metric.valid_ratio === undefined ? "—" : formatPercent(metric.valid_ratio)}</td>
-      <td className="px-6 py-4 text-slate-400 print:text-black">{formatExposure(metric)}</td>
-    </tr>
-  );
+export function ReportHands({ report }: { report: AnalysisReport }) {
+  const activity = report.holding_activity ?? report.hand_activity;
+  if (!activity) return <ReportSection title="Dłonie i chwyt" icon={Hand}><Empty text="Brak danych Holding V2 dla tej wersji analizy." /></ReportSection>;
+  return <ReportSection title="Dłonie i chwyt" icon={Hand}>
+    <div className="grid gap-4 md:grid-cols-3">
+      {(["left", "right"] as const).map((side) => { const hand = activity[side]; return <article key={side} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-5 print:border-slate-300 print:bg-white"><h3 className="font-semibold text-slate-100 print:text-black">{side === "left" ? "Lewa dłoń" : "Prawa dłoń"}</h3>{hand ? <dl className="mt-4 grid grid-cols-2 gap-3"><Datum label="Obserwacja" value={formatDuration(hand.valid_observation_seconds)} /><Datum label="Czas chwytu" value={formatDuration(hand.likely_holding_seconds)} /><Datum label="Udział chwytu" value={formatPercentage(hand.holding_ratio)} /><Datum label="Najdłuższy chwyt" value={formatDuration(hand.longest_holding_seconds)} /><Datum label="Chwyt statyczny" value={formatDuration(hand.static_holding_seconds)} /><Datum label="Epizody" value={hand.holding_episode_count?.toString() ?? UNKNOWN_VALUE} /></dl> : <Empty text="Brak danych." />}</article>; })}
+      <article className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-5 print:border-slate-300 print:bg-white"><h3 className="font-semibold text-slate-100 print:text-black">Oburącz</h3><dl className="mt-4 grid grid-cols-2 gap-3"><Datum label="Czas chwytu" value={formatDuration(activity.bimanual?.likely_holding_seconds)} /><Datum label="Epizody" value={activity.bimanual?.episode_count?.toString() ?? UNKNOWN_VALUE} /></dl></article>
+    </div>
+    <p className="mt-4 text-xs text-slate-500 print:text-slate-700">System nie estymuje siły ani masy przedmiotu.</p>
+  </ReportSection>;
+}
+
+export function ReportMovement({ report }: { report: AnalysisReport }) {
+  const movement = report.movement_features ? Object.entries(report.movement_features) : [];
+  const posture = report.posture_duration ? Object.entries(report.posture_duration).filter(([, value]) => typeof value === "number") : [];
+  return <ReportSection title="Czas ekspozycji, ruch i powtarzalność" icon={Clock3}>
+    {!movement.length && !posture.length ? <Empty text="Brak danych movement V2 dla tej wersji analizy." /> : <>
+      {posture.length > 0 && <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{posture.map(([name, value]) => <Datum key={name} label={postureLabel(name)} value={formatDuration(value as number)} card />)}</div>}
+      {movement.length > 0 && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{movement.map(([name, item]) => <article key={name} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><h3 className="text-sm font-semibold text-slate-100 print:text-black">{METRIC_DEFINITIONS[name as keyof typeof METRIC_DEFINITIONS]?.label ?? name}</h3><dl className="mt-4 grid grid-cols-2 gap-3"><Datum label="Zakres ruchu" value={name.endsWith("_deg") ? formatAngle(item.range_of_motion ?? item.movement_range) : formatRatio(item.range_of_motion ?? item.movement_range)} /><Datum label="Cykle" value={item.cycle_count?.toString() ?? UNKNOWN_VALUE} /><Datum label="Prędkość medianowa" value={item.median_absolute_velocity !== undefined ? `${item.median_absolute_velocity.toFixed(1)}/s` : UNKNOWN_VALUE} /><Datum label="Stabilna postawa" value={formatDuration(item.longest_stable_posture_seconds)} /></dl></article>)}</div>}
+    </>}
+  </ReportSection>;
 }
 
 export function ReportKeyMoments({ report }: { report: AnalysisReport }) {
-  return (
-    <section className="report-card rounded-[26px] border border-white/10 bg-white/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white">
-      <h2 className="flex items-center gap-2 text-xl font-semibold text-white print:text-black">
-        <ScanLine className="size-5 text-cyan-300 print:text-black" aria-hidden="true" />
-        Kluczowe momenty
-      </h2>
-      {report.key_moments.length ? (
-        <ol className="mt-5 grid gap-3 sm:grid-cols-2">
-          {report.key_moments.map((moment, index) => (
-            <li key={`${moment.source_frame_index ?? "frame"}-${moment.metric_name}-${index}`} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-slate-100 print:text-black">{moment.metric_label}</span>
-                <span className="text-xs text-slate-500 print:text-slate-700">{levelLabels[moment.level]}</span>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-slate-400 print:text-slate-700">{moment.reason}</p>
-              <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500 print:text-slate-700">
-                {moment.source_frame_index !== undefined && <span>Klatka {moment.source_frame_index}</span>}
-                {moment.timestamp_seconds !== undefined && (
-                  <span className="inline-flex items-center gap-1"><Clock3 className="size-3" aria-hidden="true" />{formatSeconds(moment.timestamp_seconds)}</span>
-                )}
-                {moment.area_label && <span>{moment.area_label}</span>}
-              </div>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="mt-4 text-sm text-slate-500">Risk Engine nie wskazał kandydatów kluczowych momentów.</p>
-      )}
-    </section>
-  );
+  return <ReportSection title="Kluczowe momenty" icon={Clock3}>
+    {report.key_moments.length ? <div className="grid gap-3 sm:grid-cols-2">{report.key_moments.map((moment, index) => <article key={`${moment.metric_name}-${moment.timestamp_seconds ?? index}`} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><div className="flex items-start justify-between gap-3"><time className="font-mono text-sm font-semibold text-cyan-300 print:text-black">{formatTimestamp(moment.timestamp_seconds)}</time><span className="text-[10px] font-semibold uppercase text-slate-500">{levelLabels[moment.level]}</span></div><h3 className="mt-3 font-semibold text-slate-100 print:text-black">{moment.metric_label}</h3><p className="mt-2 text-sm leading-6 text-slate-400 print:text-slate-700">{moment.reason}</p>{moment.value !== undefined && <p className="mt-2 text-sm font-semibold text-slate-300 print:text-black">{moment.metric_name.endsWith("_deg") ? formatAngle(moment.value) : formatRatio(moment.value)}</p>}</article>)}</div> : <Empty text="Raport nie zawiera kluczowych momentów." />}
+  </ReportSection>;
+}
+
+export function ReportQuality({ report }: { report: AnalysisReport }) {
+  return <ReportSection title="Jakość analizy" icon={ShieldCheck}>
+    <p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">Jakość oznacza pokrycie nagrania wiarygodnymi danymi, nie dokładność systemu.</p>
+    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Datum label="Poprawne metryki" value={formatPercentage(report.data_quality.valid_metric_ratio)} card /><Datum label="Obecność pozy" value={formatPercentage(report.data_quality.pose_presence_ratio)} card /><Datum label="Przetworzone klatki" value={report.data_quality.pose_processed_frames?.toString() ?? UNKNOWN_VALUE} card /><Datum label="Odrzucone wartości" value={report.data_quality.invalid_metric_values?.toString() ?? UNKNOWN_VALUE} card /></dl>
+  </ReportSection>;
 }
 
 export function ReportLimitations({ report }: { report: AnalysisReport }) {
-  return (
-    <section className="report-card rounded-[26px] border border-amber-300/15 bg-amber-300/[0.045] p-6 sm:p-7 print:border-slate-300 print:bg-white">
-      <h2 className="flex items-center gap-2 text-xl font-semibold text-amber-100 print:text-black">
-        <FileWarning className="size-5" aria-hidden="true" />
-        Ograniczenia
-      </h2>
-      <ul className="mt-5 grid gap-2 text-sm leading-6 text-amber-50/70 sm:grid-cols-2 print:text-slate-700">
-        {report.limitations.map((limitation) => (
-          <li key={limitation} className="flex items-start gap-2">
-            <span className="mt-2 size-1.5 shrink-0 rounded-full bg-amber-300 print:bg-black" />
-            {limitationLabels[limitation] ?? limitation}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-6 border-t border-amber-200/10 pt-5 font-semibold text-amber-100 print:border-slate-300 print:text-black">
-        {report.disclaimer}
-      </p>
-    </section>
-  );
+  return <ReportSection title="Ograniczenia" icon={FileWarning} className="report-break-before"><ul className="space-y-2">{report.limitations.map((item) => <li key={item} className="flex gap-3 text-sm leading-6 text-slate-400 print:text-slate-700"><span aria-hidden="true">—</span>{limitationLabels[item] ?? humanize(item)}</li>)}</ul><p className="mt-6 border-t border-white/10 pt-5 text-sm font-medium text-slate-300 print:border-slate-300 print:text-black">Wynik ma charakter wspierający i nie zastępuje oceny specjalisty.</p></ReportSection>;
 }
 
-function formatPercent(value: number) {
-  return new Intl.NumberFormat("pl-PL", { style: "percent", maximumFractionDigits: 1 }).format(value);
-}
-
-function formatMeasurement(value: number | undefined, unit: "deg" | "ratio") {
-  if (value === undefined) return "—";
-  const formatted = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 2 }).format(value);
-  return unit === "deg" ? `${formatted}°` : formatted;
-}
-
-function formatExposure(metric: ReportMetricSummary) {
-  const ratio = Math.max(
-    metric.exposure?.high_exposure_ratio ?? 0,
-    metric.exposure?.critical_exposure_ratio ?? 0,
-  );
-  return metric.exposure ? formatPercent(ratio) : "—";
-}
-
-function formatSeconds(value: number) {
-  return `${new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 2 }).format(value)} s`;
-}
+function ReportSection({ title, icon: Icon, className = "", children }: { title: string; icon: typeof Activity; className?: string; children: React.ReactNode }) { return <section className={`report-card rounded-[26px] border border-white/10 bg-white/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white ${className}`}><h2 className="mb-5 flex items-center gap-2 text-xl font-semibold text-white print:text-black"><Icon className="size-5 text-cyan-300 print:text-black" aria-hidden="true" />{title}</h2>{children}</section>; }
+function Datum({ label, value, card = false }: { label: string; value: string; card?: boolean }) { return <div className={card ? "report-card rounded-xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white" : ""}><dt className="text-[9px] uppercase tracking-wider text-slate-500">{label}</dt><dd className="mt-1 text-sm font-semibold text-slate-200 print:text-black">{value}</dd></div>; }
+function Empty({ text }: { text: string }) { return <p className="rounded-xl border border-dashed border-white/10 px-5 py-7 text-center text-sm text-slate-500 print:border-slate-300">{text}</p>; }
+function formatMetric(metric: ReportMetricSummary, value: number | undefined) { return metric.unit === "deg" ? formatAngle(value) : formatRatio(value); }
+function humanize(value: string) { return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()); }
+function postureLabel(value: string) { return ({ trunk_posture_hold: "Tułów", neck_posture_hold: "Szyja", left_arm_elevation_hold: "Lewe ramię", right_arm_elevation_hold: "Prawe ramię", left_wrist_posture_hold: "Lewy nadgarstek", right_wrist_posture_hold: "Prawy nadgarstek" } as Record<string, string>)[value] ?? value; }

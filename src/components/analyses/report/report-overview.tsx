@@ -50,7 +50,7 @@ export function ReportOverview({ report }: ReportOverviewProps) {
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
       <section className={`report-card rounded-[26px] border p-6 sm:p-7 print:border-slate-300 print:bg-white print:text-black ${presentation.className}`}>
         <p className="text-xs font-semibold uppercase tracking-[0.18em] opacity-70">
-          Ogólny wynik techniczny
+          Ocena Risk Engine
         </p>
         <div className="mt-5 flex items-center gap-3">
           <Icon className="size-7" aria-hidden="true" />
