@@ -17,6 +17,7 @@ def smooth_body_sequence(
     maximum_gap_frames: int = 2,
     median_window: int = 3,
     ema_alpha: float = 0.72,
+    interpolation_allowed: list[np.ndarray] | None = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     if not points:
         return [], [], []
@@ -24,6 +25,13 @@ def smooth_body_sequence(
     score_array = np.stack(scores, axis=0).astype(np.float32)
     frame_count, joint_count = score_array.shape
     interpolated = np.zeros((frame_count, joint_count), dtype=bool)
+    allowed = (
+        np.stack(interpolation_allowed, axis=0).astype(bool)
+        if interpolation_allowed is not None
+        else np.ones((frame_count, joint_count), dtype=bool)
+    )
+    if allowed.shape != (frame_count, joint_count):
+        raise ValueError("interpolation_allowed must match frame/joint dimensions")
     diagonal = max(1.0, float(np.hypot(frame_width, frame_height)))
 
     for joint in range(joint_count):
@@ -51,6 +59,7 @@ def smooth_body_sequence(
                 and visible[before]
                 and visible[after]
                 and safe_states
+                and bool(np.all(allowed[start : end + 1, joint]))
                 and float(np.linalg.norm(point_array[after, joint] - point_array[before, joint]))
                 / diagonal
                 <= 0.20 * (gap + 1)

@@ -1,4 +1,4 @@
-"""Run the real Pose V0.3 pipeline for a local video without Supabase."""
+"""Run the real Pose V0.4 pipeline for a local video without Supabase."""
 
 from __future__ import annotations
 
@@ -31,12 +31,20 @@ from pose_worker import (  # noqa: E402
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lokalna walidacja Ergonomia AI Worker V0.3 bez Supabase."
+        description="Lokalna walidacja Ergonomia AI Worker V0.4 bez Supabase."
     )
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
     parser.add_argument("--output", required=True, help="Katalog wynikowy.")
     parser.add_argument("--debug-overlay", action="store_true")
+    parser.add_argument("--angles", action="store_true", help="Pokaż kąty metryk na overlayu.")
+    parser.add_argument("--objects", action="store_true", help="Pokaż śledzone obiekty w trybie QA.")
     parser.add_argument("--no-hands", action="store_true")
+    parser.add_argument("--no-holding", action="store_true")
+    parser.add_argument(
+        "--save-frames",
+        action="store_true",
+        help="Zapisz do 20 automatycznie wybranych klatek QA.",
+    )
     parser.add_argument("--ergonomics", action="store_true")
     return parser.parse_args()
 
@@ -54,8 +62,14 @@ def main() -> int:
     settings = replace(
         settings,
         draw_hands=settings.draw_hands and not arguments.no_hands,
-        holding_enabled=settings.holding_enabled and not arguments.no_hands,
+        holding_enabled=(
+            settings.holding_enabled
+            and not arguments.no_hands
+            and not arguments.no_holding
+        ),
         debug_overlay=bool(arguments.debug_overlay),
+        draw_angles=settings.draw_angles or bool(arguments.angles),
+        draw_objects=settings.draw_objects or bool(arguments.objects),
         keep_worker_files=True,
     )
     logger = configure_logging()
@@ -111,6 +125,13 @@ def main() -> int:
             output_directory / "ergonomics-metrics.json",
         )
     diagnostics = json.loads(result.diagnostics_path.read_text(encoding="utf-8"))
+    summary_path = output_directory / "validation-summary.txt"
+    summary_path.write_text(
+        _validation_summary(input_path, fps, frame_count, diagnostics),
+        encoding="utf-8",
+    )
+    if arguments.save_frames:
+        _save_selected_frames(result.video_path, output_directory, diagnostics)
     _print_summary(input_path, fps, frame_count, diagnostics)
     print(f"OUTPUT={output_directory}")
     print(f"WORKER_VERSION={WORKER_VERSION}")
@@ -160,6 +181,70 @@ def _print_summary(
         else None
     )
     print(f"total_seconds={runtime} processing_fps={processing_fps:.3f}" if processing_fps else f"total_seconds={runtime}")
+
+
+def _validation_summary(
+    video_path: Path,
+    fps: float,
+    frame_count: int,
+    diagnostics: dict[str, object],
+) -> str:
+    tracking = diagnostics.get("tracking", {})
+    body = diagnostics.get("body", {})
+    hands = diagnostics.get("hands", {})
+    holding = diagnostics.get("holding", {})
+    quality = diagnostics.get("quality", {})
+    runtime = diagnostics.get("runtime_breakdown_seconds", {})
+    warnings = quality.get("warning_codes", []) if isinstance(quality, dict) else []
+    lines = [
+        "ERGONOMIA AI — LOCAL VALIDATION V0.4",
+        f"VIDEO\nfile={video_path.name} fps={fps:.3f} frames={frame_count}",
+        "TRACKING\n" + json.dumps(tracking, ensure_ascii=False, indent=2),
+        "BODY\n" + json.dumps(body, ensure_ascii=False, indent=2),
+    ]
+    for side in ("left", "right"):
+        value = hands.get(side, {}) if isinstance(hands, dict) else {}
+        lines.append(f"{side.upper()} HAND\n" + json.dumps(value, ensure_ascii=False, indent=2))
+    lines.extend(
+        [
+            "HOLDING\n" + json.dumps(holding, ensure_ascii=False, indent=2),
+            "QUALITY\n" + json.dumps(quality, ensure_ascii=False, indent=2),
+            "RUNTIME\n" + json.dumps(runtime, ensure_ascii=False, indent=2),
+            "WARNINGS\n" + ("\n".join(str(item) for item in warnings) if warnings else "none"),
+        ]
+    )
+    return "\n\n".join(lines) + "\n"
+
+
+def _save_selected_frames(
+    overlay_path: Path,
+    output_directory: Path,
+    diagnostics: dict[str, object],
+) -> None:
+    raw_indices = diagnostics.get("worst_frame_indices", [])
+    indices = [
+        value
+        for value in raw_indices
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    ][:20]
+    if not indices:
+        return
+    selected = set(indices)
+    frames_directory = output_directory / "qa-frames"
+    frames_directory.mkdir(parents=True, exist_ok=True)
+    capture = cv2.VideoCapture(str(overlay_path))
+    try:
+        index = 0
+        while selected:
+            success, frame = capture.read()
+            if not success or frame is None:
+                break
+            if index in selected:
+                cv2.imwrite(str(frames_directory / f"frame-{index:06d}.jpg"), frame)
+                selected.remove(index)
+            index += 1
+    finally:
+        capture.release()
 
 
 if __name__ == "__main__":

@@ -134,15 +134,76 @@ def build_analysis_report(
     hand_activity = _hand_activity(ergonomics)
     if hand_activity is not None:
         report["hand_activity"] = hand_activity
+        report["holding_activity"] = hand_activity
+    movement = _movement_features(ergonomics)
+    if movement is not None:
+        report["movement_features"] = movement
+    source_quality = _source_quality(ergonomics)
+    if source_quality is not None:
+        report["pose_quality"] = source_quality
+    posture_duration = ergonomics.get("posture_duration")
+    if isinstance(posture_duration, Mapping):
+        report["posture_duration"] = dict(posture_duration)
     report["limitations"] = list(
         dict.fromkeys(
             [
                 *report["limitations"],
                 *_pose_quality_limitations(ergonomics),
+                *_text_list(ergonomics.get("quality_limitations")),
             ]
         )
     )
     return report
+
+
+def _movement_features(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:
+    source = ergonomics.get("movement_features")
+    if not isinstance(source, Mapping):
+        return None
+    fields = (
+        "valid_frames",
+        "invalid_frames",
+        "movement_range",
+        "median_absolute_velocity",
+        "percentile_95_absolute_velocity",
+        "repetition_count",
+        "repetition_frequency_per_minute",
+        "cycle_count",
+        "reversal_count",
+        "cycles_per_minute",
+        "range_of_motion",
+        "peak_absolute_velocity",
+        "longest_stable_posture_seconds",
+        "valid_exposure_seconds",
+    )
+    output: dict[str, Any] = {}
+    for metric_name, raw in source.items():
+        if not isinstance(metric_name, str) or not isinstance(raw, Mapping):
+            continue
+        item: dict[str, Any] = {}
+        for field in fields:
+            value = raw.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                item[field] = value
+                continue
+            number = finite_number(value)
+            if number is not None and number >= 0.0:
+                item[field] = round(number, 6)
+        if item:
+            output[metric_name] = item
+    return output or None
+
+
+def _source_quality(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:
+    source = ergonomics.get("source_quality_summary")
+    if not isinstance(source, Mapping):
+        return None
+    allowed = {"tracking", "body", "hands", "quality", "warning_codes"}
+    return {
+        key: value
+        for key, value in source.items()
+        if key in allowed and isinstance(value, (Mapping, list, str, int, float))
+    } or None
 
 
 def _hand_activity(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:

@@ -1,5 +1,31 @@
 # Worker changelog
 
+## 0.4.0-beta.1
+
+### Improved
+
+- global biomechanical validation and person-specific body scale
+- independent limb tracking, occlusion reasoning and confirmed reacquisition
+- hand assignment, palm/finger stability and adaptive ROI
+- overlay continuity and metric robustness without carrying missing measurements
+
+### Added
+
+- Pose Graph and limb state machines
+- optional relative-depth soft reasoning
+- Holding V2 with hysteresis, release, episode merge and bimanual evidence
+- lightweight object motion association
+- non-normative color-coded geometric overlay and angle labels
+- render transitions with a hard long-line safety guard
+- hierarchical Quality V2 diagnostics and warning codes
+- local validation summary, optional QA frames and diagnostics comparison tool
+
+### Limitations
+
+- no force, object weight or muscle-load estimation
+- no normative risk claim in overlay colors
+- 2D occlusion reasoning remains heuristic and requires real-video QA
+
 ## 0.3.0-beta.1
 
 ### Improved

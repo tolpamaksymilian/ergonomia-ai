@@ -1,6 +1,6 @@
 # Ergonomics Metrics Engine V1
 
-Moduł odczytuje plik `pose-keypoints.json` w schemacie Pose Pipeline V3.0 lub V3.1 i tworzy
+Moduł odczytuje plik `pose-keypoints.json` w schemacie Pose Pipeline V3.0, V3.1 lub V4.0 i tworzy
 `ergonomics-metrics.json` z surowymi pomiarami geometrycznymi dla każdej klatki
 aktywnego fragmentu. Nie wykonuje punktacji RULA/REBA, progów ostrzegawczych,
 zapisu do Supabase ani interpolacji metryk.
@@ -12,10 +12,10 @@ Obsługiwane wejście ma `schema_version: "3.0"` albo `"3.1"`. Punkty ciała są
 133. Próg jakości pochodzi z `configuration.keypoint_threshold`; przy jego braku
 stosowana jest wartość V3.0 `0.78`.
 
-Punkty dłoni pochodzą wyłącznie z zatwierdzonego wyniku V3.0:
+Punkty dłoni pochodzą wyłącznie z zatwierdzonego wyniku pipeline'u dłoni V3/V4:
 `frames[].left_hand/right_hand.landmarks_2d`. Dłoń jest używana tylko, gdy
 `visible` ma wartość `true`. Silnik nie wraca do punktów dłoni RTMW zapisanych w
-`raw_keypoints`. Klatka dłoni oznaczona przez V3.0 jako `interpolated` jest już
+`raw_keypoints`. Klatka dłoni oznaczona jako `interpolated` jest już
 zatwierdzonym wynikiem źródłowego pipeline'u; silnik nie tworzy żadnej dodatkowej
 interpolacji.
 

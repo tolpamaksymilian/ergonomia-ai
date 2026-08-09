@@ -103,16 +103,23 @@ def movement_features(
     if len(samples) < 3:
         return {
             "cycle_count": 0,
+            "reversal_count": 0,
             "mean_cycle_seconds": None,
             "cycles_per_minute": None,
             "movement_range": None,
+            "range_of_motion": None,
             "mean_absolute_rate_per_second": None,
+            "median_absolute_velocity": None,
+            "percentile_95_absolute_velocity": None,
+            "peak_absolute_velocity": None,
+            "longest_stable_posture_seconds": None,
             "valid_exposure_seconds": round(valid_duration, 6),
             "longest_valid_sequence_seconds": round(max(valid_sequence_durations, default=0.0), 6),
             "valid_sequence_count": len(valid_sequence_durations),
         }
     values = np.asarray([sample[1] for sample in samples], dtype=float)
     cycle_count = 0
+    reversal_count = 0
     cycle_durations: list[float] = []
     rates: list[float] = []
     elapsed = 0.0
@@ -128,17 +135,8 @@ def movement_features(
         elapsed += float(times_segment[-1] - times_segment[0])
         if len(segment) < 3:
             continue
-        derivative = np.diff(values_segment)
-        epsilon = max(1e-6, float(np.ptp(values_segment)) * 0.03)
-        signs = np.sign(np.where(np.abs(derivative) >= epsilon, derivative, 0.0))
-        turning_points: list[int] = []
-        previous_sign = 0.0
-        for index, sign in enumerate(signs, start=1):
-            if sign == 0.0:
-                continue
-            if previous_sign and sign != previous_sign:
-                turning_points.append(index - 1)
-            previous_sign = sign
+        turning_points = _prominent_turning_points(times_segment, values_segment)
+        reversal_count += len(turning_points)
         cycle_count += (len(turning_points) + 1) // 2 if turning_points else 0
         cycle_durations.extend(
             float(times_segment[turning_points[index + 2]] - times_segment[turning_points[index]])
@@ -147,8 +145,12 @@ def movement_features(
             and times_segment[turning_points[index + 2]] > times_segment[turning_points[index]]
         )
     mean_rate = float(np.mean(rates)) if rates else None
+    rate_values = np.asarray(rates, dtype=float)
+    stable_seconds = _longest_stable_duration(sample_segments, rate_values)
+    movement_range = float(np.ptp(values))
     return {
         "cycle_count": cycle_count,
+        "reversal_count": reversal_count,
         "mean_cycle_seconds": (
             round(float(np.mean(cycle_durations)), 6) if cycle_durations else None
         ),
@@ -157,14 +159,88 @@ def movement_features(
             if cycle_count > 0 and elapsed > 0.0
             else None
         ),
-        "movement_range": round(float(np.ptp(values)), 6),
+        "movement_range": round(movement_range, 6),
+        "range_of_motion": round(movement_range, 6),
         "mean_absolute_rate_per_second": (
             round(mean_rate, 6) if mean_rate is not None else None
+        ),
+        "median_absolute_velocity": (
+            round(float(np.median(rate_values)), 6) if rate_values.size else None
+        ),
+        "percentile_95_absolute_velocity": (
+            round(float(np.percentile(rate_values, 95)), 6)
+            if rate_values.size
+            else None
+        ),
+        "peak_absolute_velocity": (
+            round(float(np.max(rate_values)), 6) if rate_values.size else None
+        ),
+        "longest_stable_posture_seconds": (
+            round(stable_seconds, 6) if stable_seconds is not None else None
         ),
         "valid_exposure_seconds": round(valid_duration, 6),
         "longest_valid_sequence_seconds": round(max(valid_sequence_durations, default=0.0), 6),
         "valid_sequence_count": len(valid_sequence_durations),
     }
+
+
+def _prominent_turning_points(
+    times: np.ndarray,
+    values: np.ndarray,
+) -> list[int]:
+    """Return alternating peaks/valleys with data-scaled prominence and time."""
+
+    if values.size < 3:
+        return []
+    span = float(np.ptp(values))
+    prominence = max(1e-6, span * 0.08)
+    raw = [
+        index
+        for index in range(1, values.size - 1)
+        if (
+            (values[index] > values[index - 1] and values[index] >= values[index + 1])
+            or (values[index] < values[index - 1] and values[index] <= values[index + 1])
+        )
+    ]
+    accepted: list[int] = []
+    for index in raw:
+        local_prominence = min(
+            abs(float(values[index] - values[index - 1])),
+            abs(float(values[index] - values[index + 1])),
+        )
+        if local_prominence < prominence:
+            continue
+        if accepted and float(times[index] - times[accepted[-1]]) < 0.15:
+            previous = accepted[-1]
+            if abs(float(values[index] - np.median(values))) > abs(
+                float(values[previous] - np.median(values))
+            ):
+                accepted[-1] = index
+            continue
+        accepted.append(index)
+    return accepted
+
+
+def _longest_stable_duration(
+    segments: list[list[tuple[float, float]]],
+    rates: np.ndarray,
+) -> float | None:
+    if rates.size == 0:
+        return None
+    # A data-adaptive motion plateau, not an ergonomic or normative threshold.
+    threshold = float(np.percentile(rates, 35))
+    longest = 0.0
+    for segment in segments:
+        start: float | None = None
+        for previous, current in zip(segment, segment[1:]):
+            delta = current[0] - previous[0]
+            rate = abs(current[1] - previous[1]) / delta if delta > 1e-9 else math.inf
+            if rate <= threshold + 1e-12:
+                start = previous[0] if start is None else start
+                longest = max(longest, current[0] - start)
+            else:
+                start = None
+    return longest
 
 
 def frame_durations(timestamps: list[float | None]) -> list[float]:

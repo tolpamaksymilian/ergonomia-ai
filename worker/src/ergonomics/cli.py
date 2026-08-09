@@ -12,7 +12,7 @@ from .processor import InputSchemaError, process_pose_file
 
 def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Oblicza surowe metryki ergonomiczne z pose-keypoints.json V3.0."
+        description="Oblicza surowe metryki ergonomiczne z pose-keypoints.json V3/V4."
     )
     parser.add_argument("input_pose_json", type=Path, help="Wejściowy pose-keypoints.json")
     parser.add_argument("output_metrics_json", type=Path, help="Docelowy ergonomics-metrics.json")

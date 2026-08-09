@@ -213,11 +213,31 @@ class MediaPipeHandEngine:
         if callable(close_method):
             close_method()
 
-    def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list[_Candidate]:
+    def detect(
+        self,
+        frame_bgr: np.ndarray,
+        timestamp_ms: int,
+        roi_xyxy: tuple[int, int, int, int] | None = None,
+    ) -> list[_Candidate]:
         safe_timestamp = max(self._last_timestamp_ms + 1, int(timestamp_ms))
         self._last_timestamp_ms = safe_timestamp
 
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        frame_height, frame_width = frame_bgr.shape[:2]
+        offset_x = 0
+        offset_y = 0
+        selected = frame_bgr
+        if roi_xyxy is not None:
+            x1, y1, x2, y2 = roi_xyxy
+            x1 = int(np.clip(x1, 0, frame_width))
+            x2 = int(np.clip(x2, 0, frame_width))
+            y1 = int(np.clip(y1, 0, frame_height))
+            y2 = int(np.clip(y2, 0, frame_height))
+            if x2 <= x1 or y2 <= y1:
+                return []
+            selected = frame_bgr[y1:y2, x1:x2]
+            offset_x, offset_y = x1, y1
+
+        rgb = cv2.cvtColor(selected, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect_for_video(image, safe_timestamp)
 
@@ -225,14 +245,20 @@ class MediaPipeHandEngine:
         world_landmarks = list(getattr(result, "hand_world_landmarks", []) or [])
         handedness = list(getattr(result, "handedness", []) or [])
 
-        height, width = frame_bgr.shape[:2]
+        height, width = selected.shape[:2]
         candidates: list[_Candidate] = []
         for index, landmarks in enumerate(hand_landmarks):
             if len(landmarks) != HAND_POINT_COUNT:
                 continue
 
             points_px = np.asarray(
-                [[float(item.x) * width, float(item.y) * height] for item in landmarks],
+                [
+                    [
+                        float(item.x) * width + offset_x,
+                        float(item.y) * height + offset_y,
+                    ]
+                    for item in landmarks
+                ],
                 dtype=np.float32,
             )
             if not np.isfinite(points_px).all():

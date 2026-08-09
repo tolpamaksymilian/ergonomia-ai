@@ -15,7 +15,7 @@ from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, Rejecti
 from .temporal import frame_durations, movement_features, reject_isolated_metric_spikes
 
 
-SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1"})
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
@@ -88,12 +88,25 @@ def _body_point(
         return PointSample(name, None, 0.0, coordinate_reason)
     if isinstance(diagnostic, dict) and diagnostic.get("valid") is False:
         reason_code = diagnostic.get("reason")
+        reason_codes = diagnostic.get("rejection_reasons")
+        if not isinstance(reason_code, str) and isinstance(reason_codes, list):
+            reason_code = next(
+                (item for item in reason_codes if isinstance(item, str)),
+                None,
+            )
+        occlusion_state = diagnostic.get("occlusion_state")
         reason: RejectionReason = (
             "low_keypoint_quality"
             if reason_code == "LOW_CONFIDENCE"
             else "missing_keypoint"
             if reason_code in {"TRACK_LOST", "TRACK_REACQUIRING", "OCCLUDED"}
-            else "invalid_coordinate"
+            or occlusion_state in {
+                "OCCLUDED",
+                "OCCLUDED_BY_BODY",
+                "OUT_OF_FRAME",
+                "UNKNOWN",
+            }
+            else "geometry_validation_failed"
         )
         return PointSample(name, coordinates, 0.0, reason)
     if score is None or not 0.0 <= score <= 1.0 or score < threshold:
@@ -212,6 +225,48 @@ def summarize_metric(results: list[MetricResult]) -> dict[str, int | float | Non
     }
 
 
+def compute_overlay_metrics_from_frame(
+    frame: dict[str, Any],
+    *,
+    quality_threshold: float = DEFAULT_KEYPOINT_QUALITY_THRESHOLD,
+) -> dict[str, dict[str, object]]:
+    """Compute the same 14 raw metrics for the render layer.
+
+    This public helper deliberately reuses the Metrics Engine parser and
+    dependency graph so overlay colours/labels cannot drift from the data
+    written by the ergonomics stage.
+    """
+    if not isinstance(frame, dict):
+        raise TypeError("frame must be a dictionary")
+    if not 0.0 <= quality_threshold <= 1.0:
+        raise ValueError("quality_threshold must be in range 0..1")
+    pose = _parse_frame(frame, quality_threshold)
+    metrics = compute_frame_metrics(pose)
+    body_quality = frame.get("body_quality")
+    bones = (
+        body_quality.get("bones")
+        if isinstance(body_quality, dict) and isinstance(body_quality.get("bones"), dict)
+        else {}
+    )
+    invalid_bones = {
+        name
+        for name, diagnostic in bones.items()
+        if isinstance(diagnostic, dict) and diagnostic.get("valid") is False
+    }
+    for name, dependency in METRIC_DEPENDENCIES.items():
+        required_bones = dependency.get("required_bones", [])
+        if (
+            metrics[name].valid
+            and isinstance(required_bones, list)
+            and any(bone in invalid_bones for bone in required_bones)
+        ):
+            metrics[name] = MetricResult.rejected(
+                metrics[name].source_points,
+                "dependency_invalid",
+            )
+    return {name: metrics[name].to_dict() for name in METRIC_NAMES}
+
+
 def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise InputSchemaError("Główny element wejściowego JSON musi być obiektem.")
@@ -292,6 +347,21 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
         output_frames,
         frame_durations(timestamps),
     )
+    movement_summary = {
+        name: movement_features(metric_series[name], timestamps)
+        for name in METRIC_NAMES
+    }
+    source_summary = (
+        document.get("summary")
+        if isinstance(document.get("summary"), dict)
+        else None
+    )
+    holding_activity = (
+        source_summary.get("holding")
+        if isinstance(source_summary, dict)
+        and isinstance(source_summary.get("holding"), dict)
+        else None
+    )
 
     return {
         "schema_version": "1.0",
@@ -306,27 +376,57 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
             "body_keypoint_quality_threshold": threshold,
             "quality_aggregation": "minimum_required_point_quality",
             "dependency_graph": METRIC_DEPENDENCIES,
-            "temporal_validation": "metric_specific_isolated_spike_rejection-v1",
+            "temporal_validation": "metric_specific_dt_aware_outlier_rejection-v2",
+            "movement_features": "prominence-and-duration-v2",
+            "normative_thresholds_applied": False,
         },
         "summary": {name: summarize_metric(metric_series[name]) for name in METRIC_NAMES},
-        "movement_features": {
-            name: movement_features(metric_series[name], timestamps)
-            for name in METRIC_NAMES
+        "movement_features": movement_summary,
+        "posture_duration": {
+            "trunk_posture_hold": movement_summary["trunk_inclination_deg"].get(
+                "longest_stable_posture_seconds"
+            ),
+            "neck_posture_hold": movement_summary["neck_flexion_deg"].get(
+                "longest_stable_posture_seconds"
+            ),
+            "left_arm_elevation_hold": movement_summary[
+                "left_upper_arm_elevation_deg"
+            ].get("longest_stable_posture_seconds"),
+            "right_arm_elevation_hold": movement_summary[
+                "right_upper_arm_elevation_deg"
+            ].get("longest_stable_posture_seconds"),
+            "left_wrist_posture_hold": movement_summary[
+                "left_wrist_flexion_deg"
+            ].get("longest_stable_posture_seconds"),
+            "right_wrist_posture_hold": movement_summary[
+                "right_wrist_flexion_deg"
+            ].get("longest_stable_posture_seconds"),
+            "definition": "data-adaptive stable plateau; no risk threshold applied",
         },
         "holding_metric_exposure": holding_metric_exposure,
-        "hand_activity": (
-            document.get("summary", {}).get("holding")
-            if isinstance(document.get("summary"), dict)
-            and isinstance(document.get("summary", {}).get("holding"), dict)
-            else None
-        ),
-        "source_quality_summary": (
-            document.get("summary")
-            if isinstance(document.get("summary"), dict)
-            else None
-        ),
+        "hand_activity": holding_activity,
+        "holding_activity": holding_activity,
+        "source_quality_summary": source_summary,
+        "quality_limitations": _quality_limitations(source_summary),
         "frames": output_frames,
     }
+
+
+def _quality_limitations(summary: dict[str, Any] | None) -> list[str]:
+    if summary is None:
+        return []
+    quality = summary.get("quality")
+    warnings = quality.get("warning_codes") if isinstance(quality, dict) else None
+    if not isinstance(warnings, list):
+        return []
+    mapping = {
+        "EXCESSIVE_HAND_OCCLUSION": "low_hand_visibility",
+        "EXCESSIVE_LIMB_OCCLUSION": "body_occlusion",
+        "LOW_BODY_COVERAGE": "frequent_out_of_frame_or_low_body_coverage",
+        "HIGH_MOTION_BLUR": "high_motion_blur",
+        "HOLDING_LOW_CONFIDENCE": "holding_uncertain",
+    }
+    return list(dict.fromkeys(mapping[code] for code in warnings if code in mapping))
 
 
 def _holding_metric_exposure(
@@ -362,7 +462,10 @@ def _holding_metric_exposure(
             if not isinstance(side_activity, dict):
                 continue
             observed_holding_data = True
-            if side_activity.get("state") != "LIKELY_HOLDING":
+            if side_activity.get("state") not in {
+                "LIKELY_HOLDING",
+                "LIKELY_HOLDING_UNKNOWN_OBJECT",
+            }:
                 continue
             holding_seconds += duration
             metrics = frame.get("metrics")
