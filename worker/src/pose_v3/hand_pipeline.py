@@ -4,6 +4,7 @@ import math
 import os
 import urllib.request
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +21,14 @@ else:
 
 
 HandSide = Literal["left", "right"]
+
+
+class HandTrackingState(StrEnum):
+    TRACKED = "HAND_TRACKED"
+    PARTIAL = "HAND_PARTIAL"
+    OCCLUDED = "HAND_OCCLUDED"
+    LOST = "HAND_LOST"
+    REACQUIRING = "HAND_REACQUIRING"
 
 HAND_LANDMARKER_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -79,6 +88,9 @@ class HandPipelineConfig:
     median_window: int = 3
     smoothing_alpha: float = 0.62
     bone_projection_strength: float = 0.42
+    edge_margin_ratio: float = 0.02
+    reacquire_confirm_frames: int = 2
+    fingertip_smoothing_alpha: float = 0.52
 
 
 @dataclass
@@ -113,6 +125,14 @@ class ValidatedHandFrame:
     reject_reasons: list[str]
     handedness_label: str | None
     handedness_score: float
+    tracking_state: str = HandTrackingState.LOST.value
+    point_validity: np.ndarray = field(
+        default_factory=lambda: np.zeros((HAND_POINT_COUNT,), dtype=bool)
+    )
+    point_reasons: tuple[str | None, ...] = field(
+        default_factory=lambda: ("HAND_LOST",) * HAND_POINT_COUNT
+    )
+    segment_validity: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -306,6 +326,7 @@ def assign_hands_to_body(
     body_threshold: float,
     config: HandPipelineConfig,
     timestamp_seconds: float,
+    previous_palm_centers: dict[HandSide, np.ndarray] | None = None,
 ) -> dict[HandSide, RawHandFrame]:
     result: dict[HandSide, RawHandFrame] = {
         "left": RawHandFrame(None, timestamp_seconds, bool(candidates)),
@@ -346,6 +367,15 @@ def assign_hands_to_body(
                 handedness_penalty = config.handedness_soft_penalty * candidate.handedness_score
 
             assignment_score = root_distance_ratio + handedness_penalty
+            if previous_palm_centers is not None and side in previous_palm_centers:
+                current_center = np.mean(
+                    candidate.points_px[[0, 5, 9, 13, 17]], axis=0
+                )
+                temporal_distance = float(
+                    np.linalg.norm(current_center - previous_palm_centers[side])
+                    / max(forearm, 1.0)
+                )
+                assignment_score += 0.35 * temporal_distance
             observation = HandObservation(
                 points_px=candidate.points_px.copy(),
                 world_points=candidate.world_points.copy(),
@@ -496,9 +526,15 @@ def _validate_raw_frames(
             current_scale = max(observation.palm_scale, 1.0)
             normalization_scale = max(1.0, (previous_scale + current_scale) / 2.0)
             displacements = np.linalg.norm(points - previous_points, axis=1) / normalization_scale / gap
-            max_velocity = float(np.max(displacements))
             median_velocity = float(np.median(displacements))
-            if max_velocity > config.max_joint_velocity_palm_ratio:
+            velocity_outliers = displacements > config.max_joint_velocity_palm_ratio
+            critical_palm_outlier = bool(
+                np.any(velocity_outliers[[0, 5, 9, 13, 17]])
+            )
+            if (
+                critical_palm_outlier
+                or int(np.count_nonzero(velocity_outliers)) > config.max_bone_outliers
+            ):
                 reasons.append("excessive_joint_velocity")
             if median_velocity > config.max_median_joint_velocity_palm_ratio:
                 reasons.append("excessive_hand_translation")
@@ -707,7 +743,19 @@ def stabilize_hand_track(
                 handedness_scores[frame_index] = observation.handedness_score
 
     points = _temporal_median(points, visible, config.median_window)
-    points = _bidirectional_ema(points, visible, config.smoothing_alpha)
+    layered = points.copy()
+    layers = (
+        ((0,), min(0.88, config.smoothing_alpha + 0.12)),
+        ((1, 5, 9, 13, 17), config.smoothing_alpha),
+        ((2, 6, 10, 14, 18), max(0.12, config.smoothing_alpha - 0.05)),
+        ((3, 7, 11, 15, 19), max(0.10, config.smoothing_alpha - 0.08)),
+        ((4, 8, 12, 16, 20), config.fingertip_smoothing_alpha),
+    )
+    for indices, alpha in layers:
+        layered[:, indices, :] = _bidirectional_ema(
+            points[:, indices, :], visible, alpha
+        )
+    points = layered
 
     for frame_index in range(frame_count):
         if not visible[frame_index]:
@@ -773,6 +821,163 @@ def stabilize_hand_track(
     return HandPipelineResult(frames=output_frames, summary=summary)
 
 
+def enhance_hand_track(
+    result: HandPipelineResult,
+    *,
+    frame_width: int,
+    frame_height: int,
+    config: HandPipelineConfig,
+) -> HandPipelineResult:
+    """Adds edge-aware point/segment validity and confirmed reacquisition."""
+    output: list[ValidatedHandFrame] = []
+    state = HandTrackingState.LOST
+    confirmation = 0
+    margin_x = max(2.0, frame_width * config.edge_margin_ratio)
+    margin_y = max(2.0, frame_height * config.edge_margin_ratio)
+    reject_counts = dict(result.summary.reject_reason_counts)
+
+    for frame in result.frames:
+        if not frame.visible:
+            state = HandTrackingState.LOST
+            confirmation = 0
+            output.append(
+                ValidatedHandFrame(
+                    visible=False,
+                    interpolated=False,
+                    points_px=np.zeros_like(frame.points_px),
+                    world_points=np.zeros_like(frame.world_points),
+                    quality=0.0,
+                    reject_reasons=frame.reject_reasons,
+                    handedness_label=frame.handedness_label,
+                    handedness_score=frame.handedness_score,
+                    tracking_state=state.value,
+                )
+            )
+            continue
+
+        point_validity = np.ones((HAND_POINT_COUNT,), dtype=bool)
+        point_reasons: list[str | None] = [None] * HAND_POINT_COUNT
+        for index, point in enumerate(frame.points_px):
+            x, y = float(point[0]), float(point[1])
+            if not math.isfinite(x) or not math.isfinite(y):
+                point_validity[index] = False
+                point_reasons[index] = "INVALID_COORDINATE"
+            elif x < 0.0 or y < 0.0 or x >= frame_width or y >= frame_height:
+                point_validity[index] = False
+                point_reasons[index] = "OUT_OF_FRAME"
+            elif (
+                x <= margin_x
+                or x >= frame_width - margin_x
+                or y <= margin_y
+                or y >= frame_height - margin_y
+            ):
+                point_validity[index] = False
+                point_reasons[index] = "EDGE_UNCERTAIN"
+
+        palm_scale = _palm_scale(frame.points_px)
+        segment_validity: dict[str, bool] = {}
+        for first, second in HAND_EDGES:
+            key = f"{first}-{second}"
+            valid = bool(point_validity[first] and point_validity[second])
+            if valid:
+                length_ratio = float(
+                    np.linalg.norm(frame.points_px[second] - frame.points_px[first])
+                    / max(palm_scale, 1.0)
+                )
+                if not 0.035 <= length_ratio <= 1.05:
+                    valid = False
+                    point_validity[second] = False
+                    point_reasons[second] = "FINGER_SEGMENT_OUTLIER"
+            segment_validity[key] = valid
+
+        invalid_count = int(np.count_nonzero(~point_validity))
+        palm_valid_count = int(np.count_nonzero(point_validity[[0, 5, 9, 13, 17]]))
+        accepted = palm_valid_count >= 4
+        target_state = (
+            HandTrackingState.PARTIAL
+            if accepted and invalid_count
+            else HandTrackingState.TRACKED
+            if accepted
+            else HandTrackingState.OCCLUDED
+        )
+
+        if state in {HandTrackingState.LOST, HandTrackingState.REACQUIRING}:
+            confirmation += 1
+            if confirmation < config.reacquire_confirm_frames:
+                state = HandTrackingState.REACQUIRING
+                accepted = False
+            else:
+                state = target_state
+                confirmation = 0
+        else:
+            state = target_state
+
+        if not accepted:
+            reason = (
+                "HAND_REACQUIRING"
+                if state == HandTrackingState.REACQUIRING
+                else "HAND_OCCLUDED"
+            )
+            reject_counts[reason] = reject_counts.get(reason, 0) + 1
+            point_validity[:] = False
+            point_reasons = [reason] * HAND_POINT_COUNT
+            segment_validity = {key: False for key in segment_validity}
+
+        output.append(
+            ValidatedHandFrame(
+                visible=accepted,
+                interpolated=frame.interpolated if accepted else False,
+                points_px=frame.points_px.copy() if accepted else np.zeros_like(frame.points_px),
+                world_points=(
+                    frame.world_points.copy() if accepted else np.zeros_like(frame.world_points)
+                ),
+                quality=(
+                    frame.quality * (1.0 - invalid_count / HAND_POINT_COUNT)
+                    if accepted
+                    else 0.0
+                ),
+                reject_reasons=(
+                    frame.reject_reasons
+                    if accepted
+                    else [
+                        "hand_reacquiring"
+                        if state == HandTrackingState.REACQUIRING
+                        else "hand_occluded"
+                    ]
+                ),
+                handedness_label=frame.handedness_label,
+                handedness_score=frame.handedness_score,
+                tracking_state=state.value,
+                point_validity=point_validity,
+                point_reasons=tuple(point_reasons),
+                segment_validity=segment_validity,
+            )
+        )
+
+    valid_frames = sum(1 for frame in output if frame.visible)
+    total = len(output)
+    mean_quality = (
+        float(np.mean([frame.quality for frame in output if frame.visible]))
+        if valid_frames
+        else 0.0
+    )
+    summary = HandTrackSummary(
+        side=result.summary.side,
+        total_frames=total,
+        detected_frames=result.summary.detected_frames,
+        valid_frames=valid_frames,
+        interpolated_frames=sum(
+            1 for frame in output if frame.visible and frame.interpolated
+        ),
+        rejected_frames=total - valid_frames,
+        detected_ratio=result.summary.detected_ratio,
+        valid_ratio=valid_frames / total if total else 0.0,
+        mean_quality=mean_quality,
+        reject_reason_counts=reject_counts,
+    )
+    return HandPipelineResult(output, summary)
+
+
 def draw_validated_hand(
     image: np.ndarray,
     frame: ValidatedHandFrame,
@@ -784,10 +989,23 @@ def draw_validated_hand(
         return
     points = frame.points_px
     for first, second in HAND_EDGES:
+        if frame.segment_validity and not frame.segment_validity.get(
+            f"{first}-{second}", False
+        ):
+            continue
+        if frame.point_validity.size == HAND_POINT_COUNT and not (
+            frame.point_validity[first] and frame.point_validity[second]
+        ):
+            continue
         first_point = tuple(np.round(points[first]).astype(int))
         second_point = tuple(np.round(points[second]).astype(int))
         cv2.line(image, first_point, second_point, color, thickness, cv2.LINE_AA)
-    for point in points:
+    for index, point in enumerate(points):
+        if (
+            frame.point_validity.size == HAND_POINT_COUNT
+            and not frame.point_validity[index]
+        ):
+            continue
         cv2.circle(image, tuple(np.round(point).astype(int)), radius, color, -1, cv2.LINE_AA)
 
 
@@ -802,6 +1020,9 @@ def serialize_hand_frame(frame: ValidatedHandFrame) -> dict[str, Any]:
             "landmarks_2d": None,
             "world_landmarks_3d": None,
             "reject_reasons": frame.reject_reasons,
+            "tracking_state": frame.tracking_state,
+            "point_validity": frame.point_validity.astype(bool).tolist(),
+            "point_reasons": list(frame.point_reasons),
         }
     return {
         "visible": True,
@@ -812,6 +1033,10 @@ def serialize_hand_frame(frame: ValidatedHandFrame) -> dict[str, Any]:
         "landmarks_2d": np.round(frame.points_px, 2).tolist(),
         "world_landmarks_3d": np.round(frame.world_points, 6).tolist(),
         "reject_reasons": [],
+        "tracking_state": frame.tracking_state,
+        "point_validity": frame.point_validity.astype(bool).tolist(),
+        "point_reasons": list(frame.point_reasons),
+        "segment_validity": frame.segment_validity,
     }
 
 

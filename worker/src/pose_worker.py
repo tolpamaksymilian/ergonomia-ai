@@ -32,10 +32,39 @@ from pose_v3.hand_pipeline import (
     RawHandFrame,
     assign_hands_to_body,
     draw_validated_hand,
+    enhance_hand_track,
     resolve_hand_model_path,
     serialize_hand_frame,
     serialize_hand_summary,
     stabilize_hand_track,
+)
+from pose_v3.body_validation import (
+    BODY_BONES,
+    BodyValidationConfig,
+    BodyValidator,
+    serialize_body_validation,
+)
+from pose_v3.hand_object import (
+    HoldingConfig,
+    HoldingState,
+    ObjectDetection,
+    analyze_bimanual_holding,
+    analyze_holding_track,
+)
+from pose_v3.hand_object.holding import (
+    serialize_holding_frame,
+    serialize_holding_summary,
+)
+from pose_v3.quality import (
+    analyze_image_quality,
+    build_frame_quality,
+    summarize_quality,
+)
+from pose_v3.smoothing import smooth_body_sequence
+from pose_v3.tracking import (
+    PersonTrackingStateMachine,
+    TrackingConfig,
+    TrackingState,
 )
 
 
@@ -44,14 +73,32 @@ ENV_PATH = WORKER_DIRECTORY / ".env"
 DATA_DIRECTORY = WORKER_DIRECTORY / "data" / "pose-jobs"
 LOG_DIRECTORY = WORKER_DIRECTORY / "logs"
 
-QUALITY_VERSION = "pose-v3.0"
+WORKER_VERSION = "0.3.0-beta.1"
+QUALITY_VERSION = "pose-v3.1"
 TRACKING_METHOD = (
-    "coco-yolox-strict-bbox-anatomy-iou-primary-person-v3"
+    "coco-yolox-geometry-identity-state-machine-v4"
 )
 HAND_TRACKING_METHOD = (
-    "mediapipe-video-offline-geometry-mad-bidirectional-v1"
+    "mediapipe-video-offline-chain-state-bidirectional-v2"
 )
-SMOOTHING_METHOD = "confidence-aware-one-euro-body-v1+offline-hand-v1"
+SMOOTHING_METHOD = "offline-bidirectional-body-v2+offline-hand-v2"
+
+COCO_CLASS_NAMES = (
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
+    "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
+    "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+    "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
+    "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
+    "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+)
+HAND_RELEVANT_COCO_CLASSES = frozenset(
+    {24, 25, 26, 27, 28, 29, 32, 34, 35, 38, 39, 40, 41, 42, 43, 44, 45, 64, 65, 66, 67, 73, 76}
+)
 
 BODY_POINT_COUNT = 23
 KEYPOINT_COUNT = 133
@@ -162,11 +209,14 @@ class PoseWorkerSettings:
 
     track_min_iou: float
     track_max_center_jump_ratio: float
-    max_track_gap_frames: int
 
-    one_euro_min_cutoff: float
-    one_euro_beta: float
-    one_euro_d_cutoff: float
+    body_reacquire_confirm_frames: int
+    body_lost_after_missing_frames: int
+    body_edge_margin_ratio: float
+    body_max_joint_velocity_bbox_ratio: float
+    body_max_joint_acceleration_bbox_ratio: float
+    body_bone_log_tolerance: float
+    body_max_interpolation_gap_frames: int
 
     hand_model_path: Path
     hand_detection_confidence: float
@@ -193,9 +243,16 @@ class PoseWorkerSettings:
     hand_median_window: int
     hand_smoothing_alpha: float
     hand_bone_projection_strength: float
+    hand_reacquire_confirm_frames: int
+
+    holding_enabled: bool
+    holding_min_confirmation_seconds: float
+    holding_release_confirmation_seconds: float
+    holding_max_unknown_gap_seconds: float
 
     draw_hands: bool
     draw_face: bool
+    debug_overlay: bool
     progress_update_interval_frames: int
     output_crf: int
 
@@ -230,6 +287,7 @@ class PoseProcessingResult:
     video_path: Path
     json_path: Path
     thumbnail_path: Path
+    diagnostics_path: Path
     processed_frames: int
     detected_frames: int
     average_confidence: float
@@ -237,167 +295,6 @@ class PoseProcessingResult:
     active_segment: ActiveSegment
     left_hand_summary: HandTrackSummary
     right_hand_summary: HandTrackSummary
-
-
-class LowPassFilter:
-    def __init__(self) -> None:
-        self.initialized = False
-        self.value = 0.0
-
-    def reset(self, value: float) -> float:
-        self.initialized = True
-        self.value = float(value)
-        return self.value
-
-    def apply(self, value: float, alpha: float) -> float:
-        if not self.initialized:
-            return self.reset(value)
-
-        self.value = alpha * float(value) + (1.0 - alpha) * self.value
-        return self.value
-
-
-class OneEuroFilter1D:
-    def __init__(
-        self,
-        min_cutoff: float,
-        beta: float,
-        d_cutoff: float,
-    ) -> None:
-        self.min_cutoff = min_cutoff
-        self.beta = beta
-        self.d_cutoff = d_cutoff
-        self.x_filter = LowPassFilter()
-        self.dx_filter = LowPassFilter()
-        self.previous_raw_value: float | None = None
-        self.previous_timestamp: float | None = None
-
-    @staticmethod
-    def _alpha(cutoff: float, delta_time: float) -> float:
-        safe_cutoff = max(1e-4, cutoff)
-        safe_delta = max(1e-4, delta_time)
-        tau = 1.0 / (2.0 * math.pi * safe_cutoff)
-        return 1.0 / (1.0 + tau / safe_delta)
-
-    def reset(self, value: float, timestamp: float) -> float:
-        self.previous_raw_value = float(value)
-        self.previous_timestamp = float(timestamp)
-        self.dx_filter.reset(0.0)
-        return self.x_filter.reset(value)
-
-    def apply(self, value: float, timestamp: float) -> float:
-        if self.previous_timestamp is None or self.previous_raw_value is None:
-            return self.reset(value, timestamp)
-
-        delta_time = max(1e-4, timestamp - self.previous_timestamp)
-        derivative = (float(value) - self.previous_raw_value) / delta_time
-
-        filtered_derivative = self.dx_filter.apply(
-            derivative,
-            self._alpha(self.d_cutoff, delta_time),
-        )
-
-        dynamic_cutoff = self.min_cutoff + self.beta * abs(filtered_derivative)
-        filtered_value = self.x_filter.apply(
-            value,
-            self._alpha(dynamic_cutoff, delta_time),
-        )
-
-        self.previous_raw_value = float(value)
-        self.previous_timestamp = float(timestamp)
-        return filtered_value
-
-
-class KeypointSmoother:
-    def __init__(
-        self,
-        threshold: float,
-        max_gap_frames: int,
-        min_cutoff: float,
-        beta: float,
-        d_cutoff: float,
-    ) -> None:
-        self.threshold = threshold
-        self.max_gap_frames = max_gap_frames
-        self.filters = [
-            (
-                OneEuroFilter1D(min_cutoff, beta, d_cutoff),
-                OneEuroFilter1D(min_cutoff, beta, d_cutoff),
-            )
-            for _ in range(KEYPOINT_COUNT)
-        ]
-        self.last_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
-        self.last_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
-        self.missing_frames = np.full(
-            (KEYPOINT_COUNT,),
-            max_gap_frames + 1,
-            dtype=np.int32,
-        )
-
-    def update(
-        self,
-        points: np.ndarray,
-        scores: np.ndarray,
-        timestamp: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        output_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
-        output_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
-
-        usable_count = min(KEYPOINT_COUNT, points.shape[0], scores.shape[0])
-
-        for index in range(KEYPOINT_COUNT):
-            is_valid = (
-                index < usable_count
-                and float(scores[index]) >= self.threshold
-                and np.isfinite(points[index]).all()
-            )
-
-            if is_valid:
-                x_filter, y_filter = self.filters[index]
-
-                if self.missing_frames[index] > self.max_gap_frames:
-                    filtered_x = x_filter.reset(float(points[index, 0]), timestamp)
-                    filtered_y = y_filter.reset(float(points[index, 1]), timestamp)
-                else:
-                    filtered_x = x_filter.apply(float(points[index, 0]), timestamp)
-                    filtered_y = y_filter.apply(float(points[index, 1]), timestamp)
-
-                output_points[index] = (filtered_x, filtered_y)
-                output_scores[index] = float(scores[index])
-
-                self.last_points[index] = output_points[index]
-                self.last_scores[index] = output_scores[index]
-                self.missing_frames[index] = 0
-                continue
-
-            self.missing_frames[index] += 1
-
-            if (
-                self.missing_frames[index] <= self.max_gap_frames
-                and self.last_scores[index] >= self.threshold
-            ):
-                decay = 0.82 ** int(self.missing_frames[index])
-                output_points[index] = self.last_points[index]
-                output_scores[index] = self.last_scores[index] * decay
-
-        return output_points, output_scores
-
-    def update_missing(self) -> tuple[np.ndarray, np.ndarray]:
-        output_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
-        output_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
-
-        for index in range(KEYPOINT_COUNT):
-            self.missing_frames[index] += 1
-
-            if (
-                self.missing_frames[index] <= self.max_gap_frames
-                and self.last_scores[index] >= self.threshold
-            ):
-                decay = 0.82 ** int(self.missing_frames[index])
-                output_points[index] = self.last_points[index]
-                output_scores[index] = self.last_scores[index] * decay
-
-        return output_points, output_scores
 
 
 def get_required_environment_variable(name: str) -> str:
@@ -424,8 +321,8 @@ def parse_boolean(value: str | None, default: bool = False) -> bool:
     }
 
 
-def load_settings() -> PoseWorkerSettings:
-    if not ENV_PATH.exists():
+def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
+    if require_supabase and not ENV_PATH.exists():
         raise RuntimeError(f"Nie znaleziono konfiguracji: {ENV_PATH}")
 
     load_dotenv(ENV_PATH)
@@ -437,16 +334,22 @@ def load_settings() -> PoseWorkerSettings:
 
     if model_mode != "performance":
         raise RuntimeError(
-            "Pose Pipeline V3.0 korzysta z modelu performance. "
+            "Pose Pipeline V3.1 korzysta z modelu performance. "
             "Ustaw POSE_MODEL_MODE=performance."
         )
 
     settings = PoseWorkerSettings(
-        supabase_url=get_required_environment_variable(
-            "SUPABASE_URL"
+        supabase_url=(
+            get_required_environment_variable("SUPABASE_URL")
+            if require_supabase
+            else os.getenv("SUPABASE_URL", "https://local.invalid").strip()
+            or "https://local.invalid"
         ),
-        supabase_secret_key=get_required_environment_variable(
-            "SUPABASE_SECRET_KEY"
+        supabase_secret_key=(
+            get_required_environment_variable("SUPABASE_SECRET_KEY")
+            if require_supabase
+            else os.getenv("SUPABASE_SECRET_KEY", "local-not-used").strip()
+            or "local-not-used"
         ),
         source_bucket=os.getenv(
             "ANALYSIS_BUCKET",
@@ -591,29 +494,26 @@ def load_settings() -> PoseWorkerSettings:
                 "0.30",
             )
         ),
-        max_track_gap_frames=int(
-            os.getenv(
-                "POSE_MAX_TRACK_GAP_FRAMES",
-                "9",
-            )
+        body_reacquire_confirm_frames=int(
+            os.getenv("POSE_BODY_REACQUIRE_CONFIRM_FRAMES", "3")
         ),
-        one_euro_min_cutoff=float(
-            os.getenv(
-                "POSE_ONE_EURO_MIN_CUTOFF",
-                "1.0",
-            )
+        body_lost_after_missing_frames=int(
+            os.getenv("POSE_BODY_LOST_AFTER_MISSING_FRAMES", "2")
         ),
-        one_euro_beta=float(
-            os.getenv(
-                "POSE_ONE_EURO_BETA",
-                "0.035",
-            )
+        body_edge_margin_ratio=float(
+            os.getenv("POSE_BODY_EDGE_MARGIN_RATIO", "0.025")
         ),
-        one_euro_d_cutoff=float(
-            os.getenv(
-                "POSE_ONE_EURO_D_CUTOFF",
-                "1.0",
-            )
+        body_max_joint_velocity_bbox_ratio=float(
+            os.getenv("POSE_BODY_MAX_JOINT_VELOCITY_BBOX_RATIO", "0.38")
+        ),
+        body_max_joint_acceleration_bbox_ratio=float(
+            os.getenv("POSE_BODY_MAX_JOINT_ACCELERATION_BBOX_RATIO", "0.55")
+        ),
+        body_bone_log_tolerance=float(
+            os.getenv("POSE_BODY_BONE_LOG_TOLERANCE", "0.42")
+        ),
+        body_max_interpolation_gap_frames=int(
+            os.getenv("POSE_BODY_MAX_INTERPOLATION_GAP_FRAMES", "2")
         ),
         hand_model_path=resolve_hand_model_path(
             WORKER_DIRECTORY,
@@ -691,6 +591,21 @@ def load_settings() -> PoseWorkerSettings:
         hand_bone_projection_strength=float(
             os.getenv("POSE_HAND_BONE_PROJECTION_STRENGTH", "0.42")
         ),
+        hand_reacquire_confirm_frames=int(
+            os.getenv("POSE_HAND_REACQUIRE_CONFIRM_FRAMES", "2")
+        ),
+        holding_enabled=parse_boolean(
+            os.getenv("POSE_HOLDING_ENABLED"), default=True
+        ),
+        holding_min_confirmation_seconds=float(
+            os.getenv("POSE_HOLDING_MIN_CONFIRMATION_SECONDS", "0.40")
+        ),
+        holding_release_confirmation_seconds=float(
+            os.getenv("POSE_HOLDING_RELEASE_CONFIRMATION_SECONDS", "0.25")
+        ),
+        holding_max_unknown_gap_seconds=float(
+            os.getenv("POSE_HOLDING_MAX_UNKNOWN_GAP_SECONDS", "0.20")
+        ),
         draw_hands=parse_boolean(
             os.getenv("POSE_DRAW_HANDS"),
             default=True,
@@ -698,6 +613,9 @@ def load_settings() -> PoseWorkerSettings:
         draw_face=parse_boolean(
             os.getenv("POSE_DRAW_FACE"),
             default=False,
+        ),
+        debug_overlay=parse_boolean(
+            os.getenv("POSE_DEBUG_OVERLAY"), default=False
         ),
         progress_update_interval_frames=int(
             os.getenv(
@@ -834,25 +752,20 @@ def load_settings() -> PoseWorkerSettings:
             "w zakresie 0-1."
         )
 
-    if settings.max_track_gap_frames < 0:
-        raise RuntimeError(
-            "POSE_MAX_TRACK_GAP_FRAMES nie może być ujemne."
-        )
-
-    if settings.one_euro_min_cutoff <= 0:
-        raise RuntimeError(
-            "POSE_ONE_EURO_MIN_CUTOFF musi być większe od zera."
-        )
-
-    if settings.one_euro_beta < 0:
-        raise RuntimeError(
-            "POSE_ONE_EURO_BETA nie może być ujemne."
-        )
-
-    if settings.one_euro_d_cutoff <= 0:
-        raise RuntimeError(
-            "POSE_ONE_EURO_D_CUTOFF musi być większe od zera."
-        )
+    if settings.body_reacquire_confirm_frames < 1:
+        raise RuntimeError("POSE_BODY_REACQUIRE_CONFIRM_FRAMES musi wynosić co najmniej 1.")
+    if settings.body_lost_after_missing_frames < 0:
+        raise RuntimeError("POSE_BODY_LOST_AFTER_MISSING_FRAMES nie może być ujemne.")
+    if not 0.0 < settings.body_edge_margin_ratio < 0.25:
+        raise RuntimeError("POSE_BODY_EDGE_MARGIN_RATIO musi mieścić się w zakresie 0-0.25.")
+    if settings.body_max_joint_velocity_bbox_ratio <= 0.0:
+        raise RuntimeError("Limit prędkości jointa musi być większy od zera.")
+    if settings.body_max_joint_acceleration_bbox_ratio <= 0.0:
+        raise RuntimeError("Limit przyspieszenia jointa musi być większy od zera.")
+    if settings.body_bone_log_tolerance <= 0.0:
+        raise RuntimeError("POSE_BODY_BONE_LOG_TOLERANCE musi być większe od zera.")
+    if settings.body_max_interpolation_gap_frames < 0:
+        raise RuntimeError("POSE_BODY_MAX_INTERPOLATION_GAP_FRAMES nie może być ujemne.")
 
     if settings.progress_update_interval_frames < 1:
         raise RuntimeError(
@@ -900,6 +813,14 @@ def load_settings() -> PoseWorkerSettings:
         raise RuntimeError("POSE_HAND_MAX_BONE_OUTLIERS nie może być ujemne.")
     if settings.hand_median_window < 1 or settings.hand_median_window % 2 == 0:
         raise RuntimeError("POSE_HAND_MEDIAN_WINDOW musi być dodatnią liczbą nieparzystą.")
+    if settings.hand_reacquire_confirm_frames < 1:
+        raise RuntimeError("POSE_HAND_REACQUIRE_CONFIRM_FRAMES musi wynosić co najmniej 1.")
+    if settings.holding_min_confirmation_seconds <= 0.0:
+        raise RuntimeError("Minimalny czas potwierdzenia holding musi być większy od zera.")
+    if settings.holding_release_confirmation_seconds < 0.0:
+        raise RuntimeError("Czas potwierdzenia release nie może być ujemny.")
+    if settings.holding_max_unknown_gap_seconds < 0.0:
+        raise RuntimeError("Maksymalna luka holding nie może być ujemna.")
 
     return settings
 
@@ -950,6 +871,8 @@ def create_hand_pipeline_config(
         median_window=settings.hand_median_window,
         smoothing_alpha=settings.hand_smoothing_alpha,
         bone_projection_strength=settings.hand_bone_projection_strength,
+        edge_margin_ratio=settings.body_edge_margin_ratio,
+        reacquire_confirm_frames=settings.hand_reacquire_confirm_frames,
     )
 
 
@@ -1023,6 +946,17 @@ def update_progress(
         )
 
 
+def maybe_update_progress(
+    supabase: Client | None,
+    analysis_id: str,
+    worker_id: str,
+    progress: int,
+    stage: str,
+) -> None:
+    if supabase is not None:
+        update_progress(supabase, analysis_id, worker_id, progress, stage)
+
+
 def mark_analysis_failed(
     supabase: Client,
     analysis_id: str,
@@ -1076,14 +1010,25 @@ class StrictWholebodyModel:
             backend="onnxruntime",
             device="cuda",
         )
+        self.last_object_detections: list[ObjectDetection] = []
+        self.last_timing_seconds: dict[str, float] = {
+            "detector": 0.0,
+            "pose": 0.0,
+        }
 
     def __call__(
         self,
         frame: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         frame_height, frame_width = frame.shape[:2]
+        self.last_object_detections = []
+        self.last_timing_seconds = {"detector": 0.0, "pose": 0.0}
 
+        detector_started_at = time.perf_counter()
         detection_result = self.detector(frame)
+        self.last_timing_seconds["detector"] = (
+            time.perf_counter() - detector_started_at
+        )
 
         if (
             not isinstance(detection_result, tuple)
@@ -1119,12 +1064,10 @@ class StrictWholebodyModel:
 
         accepted_boxes: list[np.ndarray] = []
 
-        for box, class_id in zip(
+        for detection_index, (box, class_id) in enumerate(zip(
             bounding_boxes_array,
             class_ids_array,
-        ):
-            if int(class_id) != 0:
-                continue
+        )):
 
             x1 = float(
                 np.clip(
@@ -1159,6 +1102,25 @@ class StrictWholebodyModel:
             box_height = max(0.0, y2 - y1)
 
             if box_width <= 1.0 or box_height <= 1.0:
+                continue
+
+            numeric_class_id = int(class_id)
+            if numeric_class_id != 0:
+                if numeric_class_id in HAND_RELEVANT_COCO_CLASSES:
+                    class_name = (
+                        COCO_CLASS_NAMES[numeric_class_id]
+                        if 0 <= numeric_class_id < len(COCO_CLASS_NAMES)
+                        else None
+                    )
+                    self.last_object_detections.append(
+                        ObjectDetection(
+                            bbox_xyxy=(x1, y1, x2, y2),
+                            class_id=numeric_class_id,
+                            class_name=class_name,
+                            confidence=None,
+                            detection_index=detection_index,
+                        )
+                    )
                 continue
 
             height_ratio = box_height / max(
@@ -1211,10 +1173,12 @@ class StrictWholebodyModel:
             : self.settings.detector_max_people
         ]
 
+        pose_started_at = time.perf_counter()
         keypoints, scores = self.pose_model(
             frame,
             bboxes=accepted_boxes,
         )
+        self.last_timing_seconds["pose"] = time.perf_counter() - pose_started_at
 
         return normalize_pose_arrays(
             keypoints,
@@ -1808,7 +1772,7 @@ def select_primary_person(
 
 
 def scan_active_segment(
-    supabase: Client,
+    supabase: Client | None,
     settings: PoseWorkerSettings,
     model: StrictWholebodyModel,
     analysis_id: str,
@@ -1895,7 +1859,7 @@ def scan_active_segment(
         )
 
         logger.info(
-            "Skan obecności V3.0: %d próbek, "
+            "Skan obecności V3.1: %d próbek, "
             "co %d klatek (około %.2f FPS), "
             "start=%d trafienia, koniec=%d braki.",
             len(sample_frames),
@@ -2041,7 +2005,7 @@ def scan_active_segment(
                     )
                 )
 
-                update_progress(
+                maybe_update_progress(
                     supabase,
                     analysis_id,
                     settings.worker_id,
@@ -2138,7 +2102,7 @@ def scan_active_segment(
         )
 
         logger.info(
-            "Aktywny fragment V3.0: "
+            "Aktywny fragment V3.1: "
             "%.3f-%.3f s (%d-%d), "
             "długość %.3f s, jakość %.3f.",
             start_frame / fps,
@@ -2306,7 +2270,10 @@ def draw_connection(
     threshold: float,
     color: tuple[int, int, int],
     thickness: int,
+    valid_pairs: set[tuple[int, int]] | None = None,
 ) -> None:
+    if valid_pairs is not None and (first_index, second_index) not in valid_pairs:
+        return
     if not (
         point_is_valid(points, scores, first_index, threshold)
         and point_is_valid(points, scores, second_index, threshold)
@@ -2315,7 +2282,48 @@ def draw_connection(
 
     first_point = tuple(np.round(points[first_index]).astype(int))
     second_point = tuple(np.round(points[second_index]).astype(int))
+    height, width = image.shape[:2]
+    if not (
+        0 <= first_point[0] < width
+        and 0 <= first_point[1] < height
+        and 0 <= second_point[0] < width
+        and 0 <= second_point[1] < height
+    ):
+        return
+    if float(np.linalg.norm(points[first_index] - points[second_index])) > 0.65 * math.hypot(width, height):
+        return
 
+    cv2.line(
+        image,
+        first_point,
+        second_point,
+        color,
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
+def draw_virtual_connection(
+    image: np.ndarray,
+    first: np.ndarray,
+    second: np.ndarray,
+    color: tuple[int, int, int],
+    thickness: int,
+) -> None:
+    if not np.isfinite(first).all() or not np.isfinite(second).all():
+        return
+    height, width = image.shape[:2]
+    first_point = tuple(np.round(first).astype(int))
+    second_point = tuple(np.round(second).astype(int))
+    if not (
+        0 <= first_point[0] < width
+        and 0 <= first_point[1] < height
+        and 0 <= second_point[0] < width
+        and 0 <= second_point[1] < height
+    ):
+        return
+    if float(np.linalg.norm(first - second)) > 0.65 * math.hypot(width, height):
+        return
     cv2.line(
         image,
         first_point,
@@ -2331,6 +2339,7 @@ def draw_precise_pose(
     points: np.ndarray,
     scores: np.ndarray,
     settings: PoseWorkerSettings,
+    bone_validity: dict[str, bool] | None = None,
 ) -> np.ndarray:
     output = frame.copy()
     height, width = output.shape[:2]
@@ -2342,6 +2351,15 @@ def draw_precise_pose(
     right_color = (80, 225, 120)
     hand_color = (60, 180, 255)
     threshold = settings.keypoint_threshold
+    if bone_validity is not None:
+        known_pairs = {pair: name for name, pair in BODY_BONES.items()}
+        valid_pairs = {
+            pair
+            for pair in (*TORSO_EDGES, *LEFT_BODY_EDGES, *RIGHT_BODY_EDGES)
+            if pair not in known_pairs or bone_validity.get(known_pairs[pair], False)
+        }
+    else:
+        valid_pairs = None
 
     for first_index, second_index in TORSO_EDGES:
         draw_connection(
@@ -2353,6 +2371,7 @@ def draw_precise_pose(
             threshold,
             torso_color,
             thickness,
+            valid_pairs,
         )
 
     for first_index, second_index in LEFT_BODY_EDGES:
@@ -2365,6 +2384,7 @@ def draw_precise_pose(
             threshold,
             left_color,
             thickness,
+            valid_pairs,
         )
 
     for first_index, second_index in RIGHT_BODY_EDGES:
@@ -2377,6 +2397,7 @@ def draw_precise_pose(
             threshold,
             right_color,
             thickness,
+            valid_pairs,
         )
 
     # Wirtualna linia kark-tułów: stabilniejsza i czytelniejsza
@@ -2384,6 +2405,10 @@ def draw_precise_pose(
     if (
         point_is_valid(points, scores, 5, threshold)
         and point_is_valid(points, scores, 6, threshold)
+        and (
+            bone_validity is None
+            or bone_validity.get("shoulders", False)
+        )
     ):
         neck = (points[5] + points[6]) / 2.0
         neck_score = min(float(scores[5]), float(scores[6]))
@@ -2391,25 +2416,30 @@ def draw_precise_pose(
         if (
             point_is_valid(points, scores, 11, threshold)
             and point_is_valid(points, scores, 12, threshold)
+            and (
+                bone_validity is None
+                or all(
+                    bone_validity.get(name, False)
+                    for name in ("hips", "left_torso", "right_torso")
+                )
+            )
         ):
             pelvis = (points[11] + points[12]) / 2.0
-            cv2.line(
+            draw_virtual_connection(
                 output,
-                tuple(np.round(neck).astype(int)),
-                tuple(np.round(pelvis).astype(int)),
+                neck,
+                pelvis,
                 torso_color,
                 thickness + 1,
-                cv2.LINE_AA,
             )
 
         if point_is_valid(points, scores, 0, threshold) and neck_score >= threshold:
-            cv2.line(
+            draw_virtual_connection(
                 output,
-                tuple(np.round(points[0]).astype(int)),
-                tuple(np.round(neck).astype(int)),
+                points[0],
+                neck,
                 torso_color,
                 thickness,
-                cv2.LINE_AA,
             )
 
     if settings.draw_face:
@@ -2482,7 +2512,7 @@ def serialize_scores(scores: np.ndarray) -> list[float]:
 
 
 def process_pose_video(
-    supabase: Client,
+    supabase: Client | None,
     settings: PoseWorkerSettings,
     model: StrictWholebodyModel,
     hand_engine: MediaPipeHandEngine,
@@ -2493,7 +2523,7 @@ def process_pose_video(
     logger: logging.Logger,
 ) -> PoseProcessingResult:
     """
-    Pose Pipeline V3.0 działa dwupasowo.
+    Pose Pipeline V3.1 działa dwupasowo.
 
     Przebieg 1:
     - RTMW wyznacza ciało,
@@ -2507,6 +2537,7 @@ def process_pose_video(
     - dopiero wtedy generujemy film wynikowy.
     """
 
+    processing_started_at = time.perf_counter()
     analysis_id = str(analysis["id"])
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
@@ -2522,14 +2553,30 @@ def process_pose_video(
     raw_output_video_path = job_directory / "pose-overlay-raw.mp4"
     output_video_path = job_directory / "pose-overlay.mp4"
     output_json_path = job_directory / "pose-keypoints.json"
+    diagnostics_path = job_directory / "pose-diagnostics.json"
     thumbnail_path = job_directory / "pose-thumbnail.jpg"
 
-    smoother = KeypointSmoother(
-        threshold=settings.keypoint_threshold,
-        max_gap_frames=settings.max_track_gap_frames,
-        min_cutoff=settings.one_euro_min_cutoff,
-        beta=settings.one_euro_beta,
-        d_cutoff=settings.one_euro_d_cutoff,
+    tracker = PersonTrackingStateMachine(
+        TrackingConfig(
+            keypoint_threshold=settings.body_presence_threshold,
+            reacquire_confirm_frames=settings.body_reacquire_confirm_frames,
+            lost_after_missing_frames=settings.body_lost_after_missing_frames,
+            maximum_center_jump_ratio=settings.track_max_center_jump_ratio,
+            edge_margin_ratio=settings.body_edge_margin_ratio,
+        )
+    )
+    body_validator = BodyValidator(
+        BodyValidationConfig(
+            keypoint_threshold=settings.keypoint_threshold,
+            edge_margin_ratio=settings.body_edge_margin_ratio,
+            maximum_joint_velocity_bbox_ratio=(
+                settings.body_max_joint_velocity_bbox_ratio
+            ),
+            maximum_joint_acceleration_bbox_ratio=(
+                settings.body_max_joint_acceleration_bbox_ratio
+            ),
+            bone_log_tolerance=settings.body_bone_log_tolerance,
+        )
     )
 
     body_records: list[dict[str, Any]] = []
@@ -2537,15 +2584,17 @@ def process_pose_video(
         "left": [],
         "right": [],
     }
+    object_detection_frames: list[list[ObjectDetection]] = []
+    previous_palm_centers: dict[str, np.ndarray] = {}
+    hand_failure_count = 0
+    hand_failure_types: dict[str, int] = {}
 
     processed_frames = 0
     detected_frames = 0
     confidence_sum = 0.0
     confidence_count = 0
     previous_bbox: np.ndarray | None = None
-    missing_track_frames = 0
     track_started = False
-    track_ended = False
 
     capture.set(cv2.CAP_PROP_POS_FRAMES, active_segment.start_frame)
 
@@ -2561,19 +2610,21 @@ def process_pose_video(
                 )
 
             inference_started_at = time.perf_counter()
-            if track_ended:
-                keypoints_array, scores_array = StrictWholebodyModel.empty_result()
-                candidate = None
-            else:
-                keypoints_array, scores_array = model(frame)
-                candidate = select_primary_person(
-                    keypoints_array,
-                    scores_array,
-                    width,
-                    height,
-                    settings,
-                    previous_bbox,
-                )
+            keypoints_array, scores_array = model(frame)
+            selection_bbox = (
+                previous_bbox
+                if tracker.state != TrackingState.LOST
+                else None
+            )
+            candidate = select_primary_person(
+                keypoints_array,
+                scores_array,
+                width,
+                height,
+                settings,
+                selection_bbox,
+            )
+            object_detection_frames.append(list(model.last_object_detections))
 
             raw_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
             raw_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
@@ -2581,87 +2632,108 @@ def process_pose_video(
             candidate_detected = candidate is not None
 
             if candidate is not None:
-                track_started = True
                 usable_point_count = min(KEYPOINT_COUNT, candidate.keypoints.shape[0])
                 usable_score_count = min(KEYPOINT_COUNT, candidate.scores.shape[0])
                 raw_points[:usable_point_count] = candidate.keypoints[:usable_point_count]
                 raw_scores[:usable_score_count] = candidate.scores[:usable_score_count]
 
-                # Dłonie RTMW pozostają w raw JSON jako materiał diagnostyczny,
-                # ale nie trafiają do wygładzonego szkieletu ani renderingu V3.
-                body_filter_scores = raw_scores.copy()
-                body_filter_scores[91:133] = 0.0
+            tracking = tracker.update(
+                detected=candidate_detected,
+                bbox=candidate.bbox if candidate is not None else None,
+                points=raw_points,
+                scores=raw_scores,
+                frame_width=width,
+                frame_height=height,
+                candidate_quality=(candidate.selection_score if candidate is not None else 0.0),
+            )
+            if tracker.last_bbox is not None:
+                previous_bbox = tracker.last_bbox.copy()
+            body_validation = body_validator.validate(
+                raw_points,
+                raw_scores,
+                candidate.bbox if candidate is not None else None,
+                tracking,
+                width,
+                height,
+            )
+            validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+            validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+            body_count = min(BODY_POINT_COUNT, body_validation.points.shape[0])
+            validated_points[:body_count] = body_validation.points[:body_count]
+            validated_scores[:body_count] = body_validation.scores[:body_count]
 
-                smoothed_points, smoothed_scores = smoother.update(
-                    raw_points,
-                    body_filter_scores,
-                    source_timestamp,
-                )
-                previous_bbox = candidate.bbox
-                missing_track_frames = 0
+            # Preserve the optional RTMW face landmarks for backward
+            # compatibility, but only inside an accepted track and only when
+            # each coordinate independently passes confidence/bounds checks.
+            if tracking.accept_pose:
+                for point_index in range(23, min(91, KEYPOINT_COUNT)):
+                    if (
+                        raw_scores[point_index] >= settings.keypoint_threshold
+                        and np.isfinite(raw_points[point_index]).all()
+                        and 0.0 <= raw_points[point_index, 0] < width
+                        and 0.0 <= raw_points[point_index, 1] < height
+                    ):
+                        validated_points[point_index] = raw_points[point_index]
+                        validated_scores[point_index] = raw_scores[point_index]
+
+            if tracking.accept_pose and candidate is not None:
+                track_started = True
                 detected_frames += 1
-
                 valid_body_scores = raw_scores[:BODY_POINT_COUNT][
-                    raw_scores[:BODY_POINT_COUNT]
-                    >= settings.body_presence_threshold
+                    raw_scores[:BODY_POINT_COUNT] >= settings.body_presence_threshold
                 ]
                 if valid_body_scores.size > 0:
                     confidence_sum += float(valid_body_scores.sum())
                     confidence_count += int(valid_body_scores.size)
 
-                frame_quality = (
-                    candidate.body_keypoint_count
-                    + candidate.body_average_confidence
-                    + candidate.selection_score
-                )
-
                 timestamp_ms = int(round(processed_frames / fps * 1000.0))
-                hand_candidates = (
-                    hand_engine.detect(frame, timestamp_ms)
-                    if settings.draw_hands
-                    else []
-                )
+                hand_started_at = time.perf_counter()
+                try:
+                    hand_candidates = (
+                        hand_engine.detect(frame, timestamp_ms)
+                        if settings.draw_hands
+                        else []
+                    )
+                    hand_error = None
+                except Exception as error:  # hand failure is isolated from body inference
+                    # A hand subsystem failure must not invalidate body pose.
+                    hand_candidates = []
+                    hand_error = type(error).__name__
+                    hand_failure_count += 1
+                    hand_failure_types[hand_error] = (
+                        hand_failure_types.get(hand_error, 0) + 1
+                    )
+                hand_seconds = time.perf_counter() - hand_started_at
                 assignments = assign_hands_to_body(
                     candidates=hand_candidates,
-                    body_points=raw_points,
-                    body_scores=raw_scores,
-                    body_threshold=settings.body_presence_threshold,
+                    body_points=validated_points,
+                    body_scores=validated_scores,
+                    body_threshold=0.01,
                     config=hand_engine.config,
                     timestamp_seconds=source_timestamp,
+                    previous_palm_centers=previous_palm_centers,  # type: ignore[arg-type]
                 )
+                for side in ("left", "right"):
+                    observation = assignments[side].observation
+                    if observation is not None:
+                        previous_palm_centers[side] = np.mean(
+                            observation.points_px[[0, 5, 9, 13, 17]], axis=0
+                        )
             else:
-                missing_track_frames += 1
-                frame_quality = -1.0
-
-                if (
-                    track_started
-                    and missing_track_frames > settings.max_track_gap_frames
-                ):
-                    track_ended = True
-                    previous_bbox = None
-                    smoothed_points = np.zeros(
-                        (KEYPOINT_COUNT, 2),
-                        dtype=np.float32,
-                    )
-                    smoothed_scores = np.zeros(
-                        (KEYPOINT_COUNT,),
-                        dtype=np.float32,
-                    )
-                else:
-                    smoothed_points, smoothed_scores = smoother.update_missing()
-
+                hand_seconds = 0.0
+                hand_error = None
                 assignments = {
                     "left": RawHandFrame(
                         observation=None,
                         timestamp_seconds=source_timestamp,
                         detector_found=False,
-                        assignment_reasons=["body_track_missing"],
+                        assignment_reasons=[tracking.state.value.lower()],
                     ),
                     "right": RawHandFrame(
                         observation=None,
                         timestamp_seconds=source_timestamp,
                         detector_found=False,
-                        assignment_reasons=["body_track_missing"],
+                        assignment_reasons=[tracking.state.value.lower()],
                     ),
                 }
 
@@ -2674,9 +2746,13 @@ def process_pose_video(
                     "output_frame_index": processed_frames,
                     "source_timestamp_seconds": source_timestamp,
                     "output_timestamp_seconds": processed_frames / fps,
-                    "detected": candidate_detected,
+                    "detected": tracking.accept_pose,
+                    "raw_person_detected": candidate_detected,
                     "track_started": track_started,
-                    "track_ended": track_ended,
+                    "track_ended": tracking.state == TrackingState.LOST,
+                    "tracking_state": tracking.state.value,
+                    "tracking_reasons": list(tracking.reasons),
+                    "tracking_identity_score": tracking.identity_score,
                     "selection_score": (
                         float(candidate.selection_score)
                         if candidate is not None
@@ -2692,12 +2768,19 @@ def process_pose_video(
                         if candidate is not None
                         else None
                     ),
-                    "frame_quality": float(frame_quality),
+                    "image_quality": analyze_image_quality(frame),
+                    "body_validation": body_validation,
                     "inference_seconds": time.perf_counter() - inference_started_at,
+                    "timing_seconds": {
+                        "detector": model.last_timing_seconds.get("detector", 0.0),
+                        "pose": model.last_timing_seconds.get("pose", 0.0),
+                        "hands": hand_seconds,
+                    },
+                    "hand_error": hand_error,
                     "raw_points": raw_points.copy(),
                     "raw_scores": raw_scores.copy(),
-                    "smoothed_points": smoothed_points.copy(),
-                    "smoothed_scores": smoothed_scores.copy(),
+                    "smoothed_points": validated_points.copy(),
+                    "smoothed_scores": validated_scores.copy(),
                 }
             )
 
@@ -2712,7 +2795,7 @@ def process_pose_video(
                     active_segment.frame_count,
                 )
                 progress = 30 + int(min(1.0, frame_ratio) * 40)
-                update_progress(
+                maybe_update_progress(
                     supabase,
                     analysis_id,
                     settings.worker_id,
@@ -2721,6 +2804,19 @@ def process_pose_video(
                 )
     finally:
         capture.release()
+
+    smoothed_points, smoothed_scores, interpolation_masks = smooth_body_sequence(
+        [record["smoothed_points"] for record in body_records],
+        [record["smoothed_scores"] for record in body_records],
+        [record["tracking_state"] for record in body_records],
+        frame_width=width,
+        frame_height=height,
+        maximum_gap_frames=settings.body_max_interpolation_gap_frames,
+    )
+    for index, record in enumerate(body_records):
+        record["smoothed_points"] = smoothed_points[index]
+        record["smoothed_scores"] = smoothed_scores[index]
+        record["body_interpolated"] = interpolation_masks[index]
 
     if processed_frames <= 0:
         raise RuntimeError(
@@ -2736,7 +2832,7 @@ def process_pose_video(
             f"wykryty tylko w {presence_ratio * 100:.1f}% aktywnego fragmentu."
         )
 
-    update_progress(
+    maybe_update_progress(
         supabase,
         analysis_id,
         settings.worker_id,
@@ -2744,6 +2840,7 @@ def process_pose_video(
         "pose-v3-validating-hand-trajectories",
     )
 
+    hand_validation_started_at = time.perf_counter()
     left_hand_result = stabilize_hand_track(
         "left",
         raw_hand_frames["left"],
@@ -2754,6 +2851,75 @@ def process_pose_video(
         raw_hand_frames["right"],
         hand_engine.config,
     )
+    left_hand_result = enhance_hand_track(
+        left_hand_result,
+        frame_width=width,
+        frame_height=height,
+        config=hand_engine.config,
+    )
+    right_hand_result = enhance_hand_track(
+        right_hand_result,
+        frame_width=width,
+        frame_height=height,
+        config=hand_engine.config,
+    )
+    hand_validation_seconds = time.perf_counter() - hand_validation_started_at
+
+    hand_object_started_at = time.perf_counter()
+    holding_config = HoldingConfig(
+        enabled=settings.holding_enabled,
+        minimum_confirmation_seconds=settings.holding_min_confirmation_seconds,
+        release_confirmation_seconds=settings.holding_release_confirmation_seconds,
+        maximum_unknown_gap_seconds=settings.holding_max_unknown_gap_seconds,
+    )
+    output_timestamps = [
+        float(record["output_timestamp_seconds"]) for record in body_records
+    ]
+    left_holding_frames, left_holding_summary = analyze_holding_track(
+        "left",
+        left_hand_result.frames,
+        output_timestamps,
+        object_detection_frames,
+        fps=fps,
+        config=holding_config,
+    )
+    right_holding_frames, right_holding_summary = analyze_holding_track(
+        "right",
+        right_hand_result.frames,
+        output_timestamps,
+        object_detection_frames,
+        fps=fps,
+        config=holding_config,
+    )
+    bimanual_holding = analyze_bimanual_holding(
+        left_holding_frames,
+        right_holding_frames,
+        output_timestamps,
+        fps=fps,
+    )
+    hand_object_seconds = time.perf_counter() - hand_object_started_at
+
+    frame_quality_records: list[dict[str, object]] = []
+    for index, record in enumerate(body_records):
+        left_quality = left_hand_result.frames[index].quality
+        right_quality = right_hand_result.frames[index].quality
+        body_validation = record["body_validation"]
+        quality = build_frame_quality(
+            record["image_quality"],
+            body_quality=body_validation.quality,
+            left_hand_quality=left_quality,
+            right_hand_quality=right_quality,
+            tracking_state=str(record["tracking_state"]),
+            out_of_frame=body_validation.out_of_frame_joint_count > 0,
+        )
+        frame_quality_records.append(
+            {
+                "state": quality.state.value,
+                "score": round(quality.score, 6),
+                "components": quality.components,
+                "reasons": list(quality.reasons),
+            }
+        )
 
     writer = create_video_writer(
         raw_output_video_path,
@@ -2776,6 +2942,7 @@ def process_pose_video(
     frames_data: list[dict[str, Any]] = []
     best_quality = -1.0
     best_thumbnail: np.ndarray | None = None
+    drawing_seconds = 0.0
 
     try:
         for frame_offset, body_record in enumerate(body_records):
@@ -2786,11 +2953,16 @@ def process_pose_video(
                     f"{body_record['source_frame_index']}."
                 )
 
+            drawing_started_at = time.perf_counter()
             rendered_frame = draw_precise_pose(
                 frame,
                 body_record["smoothed_points"],
                 body_record["smoothed_scores"],
                 settings,
+                {
+                    name: diagnostic.valid
+                    for name, diagnostic in body_record["body_validation"].bones.items()
+                },
             )
 
             hand_thickness = max(
@@ -2819,7 +2991,7 @@ def process_pose_video(
             cv2.putText(
                 rendered_frame,
                 (
-                    "Ergonomia AI V3 | aktywny fragment "
+                    "Ergonomia AI Worker V0.3 | aktywny fragment "
                     f"{output_timestamp:05.2f}s / "
                     f"{active_segment.duration_seconds:05.2f}s"
                 ),
@@ -2830,7 +3002,35 @@ def process_pose_video(
                 2,
                 cv2.LINE_AA,
             )
+            if settings.debug_overlay:
+                debug_text = (
+                    f"{body_record['tracking_state']} | "
+                    f"Q={frame_quality_records[frame_offset]['score']:.2f} | "
+                    f"L={left_holding_frames[frame_offset].state.value} | "
+                    f"R={right_holding_frames[frame_offset].state.value}"
+                )
+                cv2.putText(
+                    rendered_frame,
+                    debug_text,
+                    (18, 58),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.46,
+                    (130, 235, 235),
+                    1,
+                    cv2.LINE_AA,
+                )
+                bbox = body_record.get("bbox_xyxy")
+                if isinstance(bbox, list) and len(bbox) == 4:
+                    cv2.rectangle(
+                        rendered_frame,
+                        (int(bbox[0]), int(bbox[1])),
+                        (int(bbox[2]), int(bbox[3])),
+                        (120, 220, 220),
+                        1,
+                        cv2.LINE_AA,
+                    )
             writer.write(rendered_frame)
+            drawing_seconds += time.perf_counter() - drawing_started_at
 
             left_frame = left_hand_result.frames[frame_offset]
             right_frame = right_hand_result.frames[frame_offset]
@@ -2838,7 +3038,7 @@ def process_pose_video(
                 (left_frame.quality if left_frame.visible else 0.0)
                 + (right_frame.quality if right_frame.visible else 0.0)
             )
-            thumbnail_quality = body_record["frame_quality"] + hand_bonus
+            thumbnail_quality = float(frame_quality_records[frame_offset]["score"]) + hand_bonus
             if body_record["detected"] and thumbnail_quality > best_quality:
                 best_quality = thumbnail_quality
                 best_thumbnail = rendered_frame.copy()
@@ -2856,8 +3056,14 @@ def process_pose_video(
                         4,
                     ),
                     "detected": body_record["detected"],
+                    "raw_person_detected": body_record["raw_person_detected"],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
+                    "tracking_state": body_record["tracking_state"],
+                    "tracking_reasons": body_record["tracking_reasons"],
+                    "tracking_identity_score": round(
+                        body_record["tracking_identity_score"], 6
+                    ),
                     "selection_score": round(
                         body_record["selection_score"],
                         6,
@@ -2879,8 +3085,42 @@ def process_pose_video(
                     "scores": serialize_scores(
                         body_record["smoothed_scores"],
                     ),
-                    "left_hand": serialize_hand_frame(left_frame),
-                    "right_hand": serialize_hand_frame(right_frame),
+                    "body_interpolated": body_record["body_interpolated"].astype(bool).tolist(),
+                    "body_quality": serialize_body_validation(
+                        body_record["body_validation"]
+                    ),
+                    "frame_quality": frame_quality_records[frame_offset],
+                    "left_hand": {
+                        **serialize_hand_frame(left_frame),
+                        "grip": serialize_holding_frame(
+                            left_holding_frames[frame_offset]
+                        ),
+                    },
+                    "right_hand": {
+                        **serialize_hand_frame(right_frame),
+                        "grip": serialize_holding_frame(
+                            right_holding_frames[frame_offset]
+                        ),
+                    },
+                    "holding": {
+                        "left": serialize_holding_frame(
+                            left_holding_frames[frame_offset]
+                        ),
+                        "right": serialize_holding_frame(
+                            right_holding_frames[frame_offset]
+                        ),
+                        "bimanual_candidate": bool(
+                            bimanual_holding["frame_flags"][frame_offset]
+                        ),
+                    },
+                    "nearby_objects": [
+                        {
+                            "class_id": detection.class_id,
+                            "class_name": detection.class_name,
+                            "bbox_xyxy": [round(value, 2) for value in detection.bbox_xyxy],
+                        }
+                        for detection in object_detection_frames[frame_offset]
+                    ],
                 }
             )
 
@@ -2892,7 +3132,7 @@ def process_pose_video(
             ):
                 render_ratio = rendered_count / max(1, processed_frames)
                 progress = 73 + int(min(1.0, render_ratio) * 15)
-                update_progress(
+                maybe_update_progress(
                     supabase,
                     analysis_id,
                     settings.worker_id,
@@ -2919,18 +3159,73 @@ def process_pose_video(
         np.clip(average_confidence, 0.0, 1.0)
     )
 
+    encoding_started_at = time.perf_counter()
     transcode_video_to_h264(
         raw_output_video_path,
         output_video_path,
         logger,
         settings.output_crf,
     )
+    encoding_seconds = time.perf_counter() - encoding_started_at
     raw_output_video_path.unlink(missing_ok=True)
 
+    quality_summary = summarize_quality(frame_quality_records)
+    if (
+        left_hand_result.summary.valid_ratio < 0.50
+        or right_hand_result.summary.valid_ratio < 0.50
+    ):
+        warning_codes = quality_summary.get("warning_codes")
+        if isinstance(warning_codes, list) and "HIGH_HAND_REJECTION" not in warning_codes:
+            warning_codes.append("HIGH_HAND_REJECTION")
+    invalid_bone_count = sum(
+        1
+        for record in body_records
+        for bone in record["body_validation"].bones.values()
+        if not bone.valid
+    )
+    out_of_frame_frames = sum(
+        1
+        for record in body_records
+        if (
+            record["body_validation"].out_of_frame_joint_count > 0
+            or record["tracking_state"] == TrackingState.PARTIAL.value
+        )
+    )
+    partial_frames = sum(
+        1 for record in body_records
+        if record["tracking_state"] == TrackingState.PARTIAL.value
+    )
+    occluded_frames = sum(
+        1 for record in body_records
+        if record["tracking_state"] == TrackingState.OCCLUDED.value
+    )
+    mean_pose_quality = float(np.mean([
+        record["body_validation"].quality for record in body_records
+    ]))
+    runtime_breakdown = {
+        "detector": round(sum(
+            float(record["timing_seconds"]["detector"])
+            for record in body_records
+        ), 6),
+        "pose": round(sum(
+            float(record["timing_seconds"]["pose"])
+            for record in body_records
+        ), 6),
+        "hands": round(sum(
+            float(record["timing_seconds"]["hands"])
+            for record in body_records
+        ) + hand_validation_seconds, 6),
+        "hand_object": round(hand_object_seconds, 6),
+        "drawing": round(drawing_seconds, 6),
+        "encoding": round(encoding_seconds, 6),
+    }
+
     result_document = {
-        "schema_version": "3.0",
+        "schema_version": "3.1",
         "analysis_id": analysis_id,
-        "generated_by": "Ergonomia AI Pose Worker V3",
+        "generated_by": "Ergonomia AI Worker V0.3",
+        "worker_version": WORKER_VERSION,
+        "pipeline_version": QUALITY_VERSION,
         "quality_version": QUALITY_VERSION,
         "pose_model": (
             "COCO YOLOX-X + RTMW Wholebody performance "
@@ -2938,6 +3233,11 @@ def process_pose_video(
         ),
         "detector_model": "YOLOX-X COCO multiclass person",
         "hand_model": "MediaPipe Hand Landmarker full float16",
+        "models": {
+            "body_detector": "YOLOX-X COCO multiclass",
+            "pose_model": "RTMW WholeBody performance 384x288",
+            "hand_model": "MediaPipe Hand Landmarker full float16",
+        },
         "keypoint_format": {
             "body": "coco-wholebody-133",
             "hands": "mediapipe-hand-21",
@@ -2994,9 +3294,40 @@ def process_pose_video(
                 ),
                 "bone_log_tolerance": settings.hand_bone_log_tolerance,
                 "max_bone_outliers": settings.hand_max_bone_outliers,
+                "reacquire_confirm_frames": settings.hand_reacquire_confirm_frames,
+            },
+            "body_validation": {
+                "reacquire_confirm_frames": settings.body_reacquire_confirm_frames,
+                "lost_after_missing_frames": settings.body_lost_after_missing_frames,
+                "edge_margin_ratio": settings.body_edge_margin_ratio,
+                "max_joint_velocity_bbox_ratio": (
+                    settings.body_max_joint_velocity_bbox_ratio
+                ),
+                "max_joint_acceleration_bbox_ratio": (
+                    settings.body_max_joint_acceleration_bbox_ratio
+                ),
+                "bone_log_tolerance": settings.body_bone_log_tolerance,
+                "max_interpolation_gap_frames": (
+                    settings.body_max_interpolation_gap_frames
+                ),
+            },
+            "holding": {
+                "enabled": settings.holding_enabled,
+                "minimum_confirmation_seconds": (
+                    settings.holding_min_confirmation_seconds
+                ),
+                "release_confirmation_seconds": (
+                    settings.holding_release_confirmation_seconds
+                ),
+                "maximum_unknown_gap_seconds": (
+                    settings.holding_max_unknown_gap_seconds
+                ),
+                "force_estimation_enabled": False,
+                "weight_estimation_enabled": False,
             },
             "draw_hands": settings.draw_hands,
             "draw_face": settings.draw_face,
+            "debug_overlay": settings.debug_overlay,
         },
         "summary": {
             "processed_frames": processed_frames,
@@ -3012,6 +3343,32 @@ def process_pose_video(
             "right_hand": serialize_hand_summary(
                 right_hand_result.summary
             ),
+            "tracking": {
+                "track_loss_count": tracker.track_loss_count,
+                "reacquisition_count": tracker.reacquisition_count,
+                "final_state": tracker.state.value,
+                "out_of_frame_ratio": round(
+                    out_of_frame_frames / processed_frames, 6
+                ),
+                "partial_ratio": round(partial_frames / processed_frames, 6),
+                "occluded_ratio": round(occluded_frames / processed_frames, 6),
+                "valid_body_frame_ratio": round(presence_ratio, 6),
+                "mean_pose_quality": round(mean_pose_quality, 6),
+                "invalid_bone_count": invalid_bone_count,
+                "body_proportion_profile": body_validator.profile.to_dict(),
+            },
+            "quality": quality_summary,
+            "holding": {
+                "left": serialize_holding_summary(left_holding_summary),
+                "right": serialize_holding_summary(right_holding_summary),
+                "bimanual": {
+                    "likely_holding_seconds": bimanual_holding[
+                        "likely_holding_seconds"
+                    ],
+                    "episode_count": bimanual_holding["episode_count"],
+                },
+                "external_load_known": False,
+            },
         },
         "frames": frames_data,
     }
@@ -3025,19 +3382,61 @@ def process_pose_video(
         encoding="utf-8",
     )
 
-    logger.info(
-        "Pose V3.0 zakończone: %d klatek, ciało %.1f%%, "
-        "lewa dłoń %.1f%%, prawa dłoń %.1f%%.",
-        processed_frames,
-        presence_ratio * 100,
-        left_hand_result.summary.valid_ratio * 100,
-        right_hand_result.summary.valid_ratio * 100,
+    diagnostics_document = {
+        "schema_version": "1.0",
+        "worker_version": WORKER_VERSION,
+        "pipeline_version": QUALITY_VERSION,
+        "analysis_id": analysis_id,
+        "runtime_seconds": round(time.perf_counter() - processing_started_at, 4),
+        "runtime_breakdown_seconds": runtime_breakdown,
+        "tracking": result_document["summary"]["tracking"],
+        "quality": quality_summary,
+        "hands": {
+            "left": serialize_hand_summary(left_hand_result.summary),
+            "right": serialize_hand_summary(right_hand_result.summary),
+            "inference_failure_count": hand_failure_count,
+            "inference_failure_types": hand_failure_types,
+        },
+        "holding": result_document["summary"]["holding"],
+        "rejections": {
+            "invalid_bones": invalid_bone_count,
+            "left_hand": left_hand_result.summary.reject_reason_counts,
+            "right_hand": right_hand_result.summary.reject_reason_counts,
+        },
+    }
+    diagnostics_path.write_text(
+        json.dumps(diagnostics_document, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
+
+    logger.info(
+        "Pose V0.3 zakończone: frames_total=%d body_valid_ratio=%.3f "
+        "left_hand_valid_ratio=%.3f right_hand_valid_ratio=%.3f "
+        "track_losses=%d reacquisitions=%d holding_left_seconds=%.3f "
+        "holding_right_seconds=%.3f bimanual_seconds=%.3f runtime=%.2fs.",
+        processed_frames,
+        presence_ratio,
+        left_hand_result.summary.valid_ratio,
+        right_hand_result.summary.valid_ratio,
+        tracker.track_loss_count,
+        tracker.reacquisition_count,
+        left_holding_summary.likely_holding_seconds,
+        right_holding_summary.likely_holding_seconds,
+        bimanual_holding["likely_holding_seconds"],
+        time.perf_counter() - processing_started_at,
+    )
+    if hand_failure_count:
+        logger.warning(
+            "Hand pipeline: pominięto %d klatek; typy=%s.",
+            hand_failure_count,
+            hand_failure_types,
+        )
 
     return PoseProcessingResult(
         video_path=output_video_path,
         json_path=output_json_path,
         thumbnail_path=thumbnail_path,
+        diagnostics_path=diagnostics_path,
         processed_frames=processed_frames,
         detected_frames=detected_frames,
         average_confidence=average_confidence,
@@ -3079,6 +3478,7 @@ def upload_pose_results(
     video_storage_path = f"{base_path}/pose-overlay.mp4"
     json_storage_path = f"{base_path}/pose-keypoints.json"
     thumbnail_storage_path = f"{base_path}/pose-thumbnail.jpg"
+    diagnostics_storage_path = f"{base_path}/pose-diagnostics.json"
 
     upload_result_file(
         supabase,
@@ -3100,6 +3500,13 @@ def upload_pose_results(
         result.thumbnail_path,
         thumbnail_storage_path,
         "image/jpeg",
+    )
+    upload_result_file(
+        supabase,
+        settings.results_bucket,
+        result.diagnostics_path,
+        diagnostics_storage_path,
+        "application/json",
     )
 
     return video_storage_path, json_storage_path, thumbnail_storage_path
@@ -3165,7 +3572,7 @@ def complete_pose_inference_v3(
 
     if response.data is not True:
         raise RuntimeError(
-            "Nie udało się zakończyć etapu estymacji pozy V3.0."
+            "Nie udało się zakończyć etapu estymacji pozy V3.1."
         )
 
 def process_analysis(
@@ -3187,7 +3594,8 @@ def process_analysis(
     )
 
     logger.info(
-        "Rozpoczynam Pose Pipeline V3.0: %s — %s",
+        "Rozpoczynam Pose Pipeline V3.1 / Worker %s: %s — %s",
+        WORKER_VERSION,
         analysis_id,
         analysis.get("title"),
     )
@@ -3289,7 +3697,7 @@ def process_analysis(
         )
     except Exception as error:
         logger.exception(
-            "Błąd Pose Pipeline V3.0 dla analizy %s.",
+            "Błąd Pose Pipeline V3.1 dla analizy %s.",
             analysis_id,
         )
 
@@ -3332,7 +3740,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
             analysis = claim_next_pose_analysis(supabase, settings.worker_id)
 
             if analysis is None:
-                logger.info("Brak analiz gotowych do Pose Pipeline V3.0.")
+                logger.info("Brak analiz gotowych do Pose Pipeline V3.1.")
 
                 if once:
                     return 0
@@ -3354,7 +3762,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
             logger.info("Worker został zatrzymany.")
             return 0
         except Exception:
-            logger.exception("Nieobsłużony błąd cyklu Pose Pipeline V3.0.")
+            logger.exception("Nieobsłużony błąd cyklu Pose Pipeline V3.1.")
 
             if once:
                 return 1
@@ -3364,7 +3772,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ergonomia AI — Pose Pipeline V3.0 z walidacją dłoni MediaPipe"
+        description="Ergonomia AI Worker V0.3 — Pose Pipeline V3.1"
     )
     parser.add_argument(
         "--once",

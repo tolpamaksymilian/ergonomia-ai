@@ -131,7 +131,123 @@ def build_analysis_report(
         "limitations": _limitations(risk, str(profile.get("status"))),
         "disclaimer": DISCLAIMER,
     }
+    hand_activity = _hand_activity(ergonomics)
+    if hand_activity is not None:
+        report["hand_activity"] = hand_activity
+    report["limitations"] = list(
+        dict.fromkeys(
+            [
+                *report["limitations"],
+                *_pose_quality_limitations(ergonomics),
+            ]
+        )
+    )
     return report
+
+
+def _hand_activity(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:
+    source = ergonomics.get("hand_activity")
+    if not isinstance(source, Mapping):
+        return None
+    output: dict[str, Any] = {"external_load_known": False}
+    for side in ("left", "right"):
+        raw = source.get(side)
+        if not isinstance(raw, Mapping):
+            continue
+        item: dict[str, Any] = {}
+        valid_observation = finite_number(raw.get("valid_observation_seconds"))
+        if valid_observation is not None and valid_observation >= 0.0:
+            item["valid_observation_seconds"] = round(valid_observation, 6)
+        observation_known = valid_observation is not None and valid_observation > 0.0
+        for field in (
+            "likely_holding_seconds",
+            "static_holding_seconds",
+            "longest_holding_seconds",
+            "holding_ratio",
+        ):
+            value = finite_number(raw.get(field))
+            if observation_known and value is not None and value >= 0.0:
+                item[field] = round(value, 6)
+        count = raw.get("holding_episode_count")
+        if observation_known and isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            item["holding_episode_count"] = count
+        episodes = raw.get("episodes")
+        known_object_seconds: Counter[str] = Counter()
+        known_object_confidences: dict[str, list[float]] = {}
+        if isinstance(episodes, list):
+            for episode in episodes:
+                if not isinstance(episode, Mapping):
+                    continue
+                object_class = optional_text(episode.get("known_object_class"))
+                if object_class is not None:
+                    duration = finite_number(episode.get("duration_seconds"))
+                    if duration is not None and duration >= 0.0:
+                        known_object_seconds[object_class] += duration
+                    confidence = finite_number(episode.get("known_object_confidence"))
+                    if confidence is not None and 0.0 <= confidence <= 1.0:
+                        known_object_confidences.setdefault(object_class, []).append(confidence)
+        item["object_interactions"] = [
+            {
+                "object_class": name,
+                "holding_seconds": round(seconds, 6),
+                "confidence": (
+                    round(sum(known_object_confidences.get(name, ())) / len(known_object_confidences[name]), 6)
+                    if known_object_confidences.get(name)
+                    else None
+                ),
+            }
+            for name, seconds in known_object_seconds.most_common(5)
+        ]
+        likely_seconds = finite_number(raw.get("likely_holding_seconds"))
+        item["holding_detected"] = (
+            "likely"
+            if observation_known and likely_seconds is not None and likely_seconds > 0.0
+            else "not_detected"
+            if observation_known
+            else "unknown"
+        )
+        if item["holding_detected"] == "likely" and not item["object_interactions"]:
+            item["unclassified_object_possible"] = True
+        output[side] = item
+    bimanual = source.get("bimanual")
+    if isinstance(bimanual, Mapping):
+        output["bimanual"] = {
+            key: value
+            for key in ("likely_holding_seconds", "episode_count")
+            if (value := bimanual.get(key)) is not None
+        }
+    return output if len(output) > 1 else None
+
+
+def _pose_quality_limitations(ergonomics: Mapping[str, Any]) -> list[str]:
+    summary = ergonomics.get("source_quality_summary")
+    limitations: list[str] = []
+    if isinstance(summary, Mapping):
+        for side, label in (("left_hand", "left"), ("right_hand", "right")):
+            hand = summary.get(side)
+            valid_ratio = finite_number(hand.get("valid_ratio")) if isinstance(hand, Mapping) else None
+            if valid_ratio is not None and valid_ratio < 0.50:
+                limitations.append(f"limited_{label}_hand_visibility")
+        tracking = summary.get("tracking")
+        out_ratio = finite_number(tracking.get("out_of_frame_ratio")) if isinstance(tracking, Mapping) else None
+        if out_ratio is not None and out_ratio > 0.25:
+            limitations.append("person_partially_out_of_frame")
+    activity = ergonomics.get("hand_activity")
+    if isinstance(activity, Mapping):
+        for side, label in (("left", "left"), ("right", "right")):
+            hand_activity = activity.get(side)
+            if not isinstance(hand_activity, Mapping):
+                continue
+            holding_seconds = finite_number(hand_activity.get("likely_holding_seconds"))
+            episodes = hand_activity.get("episodes")
+            known_object = any(
+                isinstance(episode, Mapping)
+                and optional_text(episode.get("known_object_class")) is not None
+                for episode in episodes
+            ) if isinstance(episodes, list) else False
+            if holding_seconds is not None and holding_seconds > 0.0 and not known_object:
+                limitations.append(f"{label}_holding_object_unclassified")
+    return limitations
 
 
 def _analysis_section(

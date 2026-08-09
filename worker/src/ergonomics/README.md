@@ -1,13 +1,13 @@
 # Ergonomics Metrics Engine V1
 
-Moduł odczytuje plik `pose-keypoints.json` w schemacie Pose Pipeline V3.0 i tworzy
+Moduł odczytuje plik `pose-keypoints.json` w schemacie Pose Pipeline V3.0 lub V3.1 i tworzy
 `ergonomics-metrics.json` z surowymi pomiarami geometrycznymi dla każdej klatki
 aktywnego fragmentu. Nie wykonuje punktacji RULA/REBA, progów ostrzegawczych,
 zapisu do Supabase ani interpolacji metryk.
 
 ## Wejście i wyjście
 
-Obsługiwane wejście ma `schema_version: "3.0"`. Punkty ciała są odczytywane z
+Obsługiwane wejście ma `schema_version: "3.0"` albo `"3.1"`. Punkty ciała są odczytywane z
 `frames[].smoothed_keypoints` oraz `frames[].scores` w formacie COCO WholeBody
 133. Próg jakości pochodzi z `configuration.keypoint_threshold`; przy jego braku
 stosowana jest wartość V3.0 `0.78`.
@@ -24,6 +24,13 @@ Wyjście zawiera metryki klatkowe z polami `value`, `valid`, `quality`,
 poprawnych wartości. `quality` jest minimum jakości wszystkich wymaganych
 punktów (oraz jakości dłoni, gdy dotyczy), ograniczonym do 0–1. Jest to techniczny
 wskaźnik jakości danych, nie skalibrowane prawdopodobieństwo.
+
+Dla Pose 3.1 wynik zawiera także jawny graf zależności punktów i kości,
+odrzucanie izolowanych skoków o limitach właściwych dla danej metryki,
+`movement_features`, techniczny czas ciągłej dostępności poprawnych danych oraz
+`holding_metric_exposure`. Ostatnie pole mówi wyłącznie, przez jaki czas podczas
+potwierdzonego chwytu odpowiednia metryka postawy była poprawna. Nie stosuje
+progów ryzyka i nie klasyfikuje pozycji jako dobrej ani złej.
 
 ## Definicje i konwencje
 

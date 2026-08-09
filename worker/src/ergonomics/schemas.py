@@ -18,6 +18,8 @@ RejectionReason = Literal[
     "hand_not_valid",
     "unsupported_input_schema",
     "geometry_validation_failed",
+    "temporal_outlier",
+    "dependency_invalid",
 ]
 
 METRIC_NAMES: tuple[str, ...] = (

@@ -10,10 +10,12 @@ from typing import Any
 import numpy as np
 
 from .metrics import compute_frame_metrics
+from .dependencies import METRIC_DEPENDENCIES
 from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, RejectionReason, ValidatedHand
+from .temporal import frame_durations, movement_features, reject_isolated_metric_spikes
 
 
-SUPPORTED_POSE_SCHEMAS = frozenset({"3.0"})
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
@@ -76,6 +78,7 @@ def _body_point(
     keypoints: Any,
     scores: Any,
     threshold: float,
+    diagnostic: Any = None,
 ) -> PointSample:
     coordinate_value = keypoints[index] if isinstance(keypoints, list) and index < len(keypoints) else None
     coordinates, coordinate_reason = _parse_coordinates(coordinate_value)
@@ -83,6 +86,16 @@ def _body_point(
     score = _finite_number(score_value)
     if coordinate_reason is not None:
         return PointSample(name, None, 0.0, coordinate_reason)
+    if isinstance(diagnostic, dict) and diagnostic.get("valid") is False:
+        reason_code = diagnostic.get("reason")
+        reason: RejectionReason = (
+            "low_keypoint_quality"
+            if reason_code == "LOW_CONFIDENCE"
+            else "missing_keypoint"
+            if reason_code in {"TRACK_LOST", "TRACK_REACQUIRING", "OCCLUDED"}
+            else "invalid_coordinate"
+        )
+        return PointSample(name, coordinates, 0.0, reason)
     if score is None or not 0.0 <= score <= 1.0 or score < threshold:
         return PointSample(name, coordinates, 0.0, "low_keypoint_quality")
     return PointSample(name, coordinates, min(1.0, max(0.0, score)))
@@ -103,8 +116,16 @@ def _parse_hand(side: str, value: Any) -> ValidatedHand:
         return _invalid_hand(side, "missing_keypoint")
 
     landmarks: dict[int, PointSample] = {}
+    point_validity = value.get("point_validity")
     for index, raw_point in enumerate(landmarks_value):
         coordinates, reason = _parse_coordinates(raw_point)
+        if (
+            isinstance(point_validity, list)
+            and index < len(point_validity)
+            and point_validity[index] is not True
+        ):
+            coordinates = None
+            reason = "invalid_coordinate"
         name = f"{side}_hand_landmark_{index}"
         landmarks[index] = PointSample(
             name=name,
@@ -134,8 +155,22 @@ def _parse_frame(value: Any, threshold: float) -> FramePose:
     frame = value if isinstance(value, dict) else {}
     keypoints = frame.get("smoothed_keypoints")
     scores = frame.get("scores")
+    body_quality = frame.get("body_quality")
+    joint_diagnostics = (
+        body_quality.get("joints")
+        if isinstance(body_quality, dict)
+        and isinstance(body_quality.get("joints"), list)
+        else []
+    )
     body = {
-        name: _body_point(name, index, keypoints, scores, threshold)
+        name: _body_point(
+            name,
+            index,
+            keypoints,
+            scores,
+            threshold,
+            joint_diagnostics[index] if index < len(joint_diagnostics) else None,
+        )
         for name, index in BODY_KEYPOINT_INDICES.items()
     }
     return FramePose(
@@ -194,28 +229,69 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
     threshold = _quality_threshold(document)
     metric_series: dict[str, list[MetricResult]] = {name: [] for name in METRIC_NAMES}
     output_frames: list[dict[str, Any]] = []
+    timestamps: list[float | None] = []
     for fallback_index, raw_frame in enumerate(frames_value):
         raw_frame_dict = raw_frame if isinstance(raw_frame, dict) else {}
         frame_pose = _parse_frame(raw_frame_dict, threshold)
         metrics = compute_frame_metrics(frame_pose)
+        body_quality = raw_frame_dict.get("body_quality")
+        bone_diagnostics = (
+            body_quality.get("bones")
+            if isinstance(body_quality, dict)
+            and isinstance(body_quality.get("bones"), dict)
+            else {}
+        )
+        explicitly_invalid_bones = {
+            name
+            for name, diagnostic in bone_diagnostics.items()
+            if isinstance(diagnostic, dict) and diagnostic.get("valid") is False
+        }
+        for name, dependency in METRIC_DEPENDENCIES.items():
+            required_bones = dependency.get("required_bones", [])
+            if (
+                metrics[name].valid
+                and isinstance(required_bones, list)
+                and any(bone in explicitly_invalid_bones for bone in required_bones)
+            ):
+                metrics[name] = MetricResult.rejected(
+                    metrics[name].source_points,
+                    "dependency_invalid",
+                )
         for name in METRIC_NAMES:
             metric_series[name].append(metrics[name])
 
         source_timestamp = _timestamp(raw_frame_dict.get("source_timestamp_seconds"))
         output_timestamp = _timestamp(raw_frame_dict.get("output_timestamp_seconds"))
+        timestamp = output_timestamp if output_timestamp is not None else source_timestamp
+        timestamps.append(timestamp)
         output_frames.append(
             {
                 "source_frame_index": _metadata_number(raw_frame_dict.get("source_frame_index")),
                 "output_frame_index": _metadata_number(raw_frame_dict.get("output_frame_index"))
                 if raw_frame_dict.get("output_frame_index") is not None
                 else fallback_index,
-                "timestamp": output_timestamp if output_timestamp is not None else source_timestamp,
+                "timestamp": timestamp,
                 "source_timestamp_seconds": source_timestamp,
                 "output_timestamp_seconds": output_timestamp,
                 "person_detected": frame_pose.person_detected,
                 "metrics": {name: metrics[name].to_dict() for name in METRIC_NAMES},
+                "hand_activity": raw_frame_dict.get("holding")
+                if isinstance(raw_frame_dict.get("holding"), dict)
+                else None,
             }
         )
+
+    for name in METRIC_NAMES:
+        metric_series[name] = reject_isolated_metric_spikes(
+            name, metric_series[name], timestamps
+        )
+        for index, result in enumerate(metric_series[name]):
+            output_frames[index]["metrics"][name] = result.to_dict()
+
+    holding_metric_exposure = _holding_metric_exposure(
+        output_frames,
+        frame_durations(timestamps),
+    )
 
     return {
         "schema_version": "1.0",
@@ -229,10 +305,79 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
             "threshold_scoring_enabled": False,
             "body_keypoint_quality_threshold": threshold,
             "quality_aggregation": "minimum_required_point_quality",
+            "dependency_graph": METRIC_DEPENDENCIES,
+            "temporal_validation": "metric_specific_isolated_spike_rejection-v1",
         },
         "summary": {name: summarize_metric(metric_series[name]) for name in METRIC_NAMES},
+        "movement_features": {
+            name: movement_features(metric_series[name], timestamps)
+            for name in METRIC_NAMES
+        },
+        "holding_metric_exposure": holding_metric_exposure,
+        "hand_activity": (
+            document.get("summary", {}).get("holding")
+            if isinstance(document.get("summary"), dict)
+            and isinstance(document.get("summary", {}).get("holding"), dict)
+            else None
+        ),
+        "source_quality_summary": (
+            document.get("summary")
+            if isinstance(document.get("summary"), dict)
+            else None
+        ),
         "frames": output_frames,
     }
+
+
+def _holding_metric_exposure(
+    frames: list[dict[str, Any]],
+    durations: list[float],
+) -> dict[str, Any] | None:
+    dependencies = {
+        "left": {
+            "holding_with_valid_wrist_posture_seconds": "left_wrist_flexion_deg",
+            "holding_with_valid_forearm_posture_seconds": "left_forearm_inclination_deg",
+            "holding_with_valid_elbow_posture_seconds": "left_elbow_flexion_deg",
+            "holding_with_valid_upper_arm_posture_seconds": "left_upper_arm_elevation_deg",
+            "holding_with_valid_trunk_posture_seconds": "trunk_inclination_deg",
+        },
+        "right": {
+            "holding_with_valid_wrist_posture_seconds": "right_wrist_flexion_deg",
+            "holding_with_valid_forearm_posture_seconds": "right_forearm_inclination_deg",
+            "holding_with_valid_elbow_posture_seconds": "right_elbow_flexion_deg",
+            "holding_with_valid_upper_arm_posture_seconds": "right_upper_arm_elevation_deg",
+            "holding_with_valid_trunk_posture_seconds": "trunk_inclination_deg",
+        },
+    }
+    output: dict[str, Any] = {}
+    observed_holding_data = False
+    for side, metric_fields in dependencies.items():
+        values = {field: 0.0 for field in metric_fields}
+        holding_seconds = 0.0
+        for frame, duration in zip(frames, durations):
+            hand_activity = frame.get("hand_activity")
+            if not isinstance(hand_activity, dict):
+                continue
+            side_activity = hand_activity.get(side)
+            if not isinstance(side_activity, dict):
+                continue
+            observed_holding_data = True
+            if side_activity.get("state") != "LIKELY_HOLDING":
+                continue
+            holding_seconds += duration
+            metrics = frame.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            for field, metric_name in metric_fields.items():
+                metric = metrics.get(metric_name)
+                if isinstance(metric, dict) and metric.get("valid") is True:
+                    values[field] += duration
+        output[side] = {
+            "likely_holding_seconds": round(holding_seconds, 6),
+            **{field: round(value, 6) for field, value in values.items()},
+            "threshold_classification_applied": False,
+        }
+    return output if observed_holding_data else None
 
 
 def process_pose_file(input_path: str | Path, output_path: str | Path) -> dict[str, Any]:
