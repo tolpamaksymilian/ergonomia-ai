@@ -192,9 +192,9 @@ export type ReportKeyMoment = {
 };
 
 export type AnalysisReport = {
-  schema_version: "1.0";
+  schema_version: "1.0" | "2.0";
   generated_by: "Ergonomia AI Report Engine";
-  report_version: "analysis-report-v1.0";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1";
   generated_at: string;
   analysis: {
     analysis_id: string;
@@ -246,6 +246,38 @@ export type AnalysisReport = {
   movement_features?: Record<string, ReportMovementFeature>;
   posture_duration?: Record<string, number | string | null>;
   pose_quality?: Record<string, unknown>;
+  executive_summary?: string[];
+  priority_findings?: Array<{
+    finding_id: string;
+    title: string;
+    summary: string;
+    level: RiskLevel;
+    zone: string;
+    metric_names: string[];
+    duration_seconds?: number | null;
+    exposure_ratio?: number | null;
+    timestamp_seconds?: number | null;
+    data_quality: "sufficient" | "limited" | "insufficient";
+  }>;
+  recommendations?: Array<{
+    recommendation_id: string;
+    zone: string;
+    priority: RiskLevel;
+    text: string;
+    evidence: {
+      finding_id?: string;
+      metric_names: string[];
+      duration_seconds?: number | null;
+      timestamp_seconds?: number | null;
+    };
+    requires_specialist_review: boolean;
+  }>;
+  manual_confirmation?: Array<{ code: string; label: string }>;
+  quality_summary?: {
+    valid_metric_ratio: number;
+    status: "sufficient" | "limited" | "insufficient";
+    message: string;
+  };
 };
 
 export type ReportAssessmentRepresentative = {
@@ -312,7 +344,7 @@ export type ReportMovementFeature = {
 };
 
 export type ReportSummary = {
-  report_version: "analysis-report-v1.0";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1";
   analysis_id: string;
   overall_level: RiskLevel;
   insufficient_data: boolean;

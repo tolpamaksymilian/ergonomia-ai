@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0-beta.1] - 2026-08-10
+
+- Pose Pipeline `pose-v5.0-beta.1` ze schematem 5.0, evidence fusion i walidacją jerk zależną od czasu.
+- Świadomość ruchu kamery, drgań i scene cut z resetem pamięci czasowej.
+- Ograniczony Pass 2 dla trudnych segmentów, z audytem jakości i fallbackiem do Pass 1.
+- Hand/Holding V3 z walidacją łańcuchów palców i dowodami kontaktu/wspólnego ruchu.
+- `analysis-report-v2.0-beta.1`: krótsze wnioski, ekspozycja, dowody i deterministyczne zalecenia.
+
 ## [0.6.0-beta.1] - 2026-08-10
 
 ### Added

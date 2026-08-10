@@ -5,6 +5,7 @@ import { ArrowLeft, FileWarning } from "lucide-react";
 
 import { ReportHeader } from "@/components/analyses/report/report-header";
 import { ReportOverview } from "@/components/analyses/report/report-overview";
+import { ReportV2Summary } from "@/components/analyses/report/report-v2-summary";
 import {
   ReportBodyAreas,
   ReportHands,
@@ -97,6 +98,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
           completedAt={analysis.report_completed_at}
           downloadUrl={downloadAccess.data?.signedUrl ?? null}
         />
+        <ReportV2Summary report={report} />
         <ReportOverview report={report} />
         <ReportBodyAreas report={report} />
         <ReportMetrics report={report} />

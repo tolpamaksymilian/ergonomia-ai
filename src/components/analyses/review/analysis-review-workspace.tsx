@@ -97,6 +97,21 @@ export function AnalysisReviewWorkspace({ model, analysis, urls }: AnalysisRevie
           </dl>
         </header>
 
+        <section className="review-panel" aria-labelledby="top-findings-title">
+          <p className="review-eyebrow">Priorytety analizy</p>
+          <h2 id="top-findings-title" className="mt-2 text-xl font-semibold">Najważniejsze wnioski</h2>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {model.keyMoments.slice(0, 3).map((moment) => (
+              <button key={moment.id} type="button" onClick={() => seekTo(moment.time)} className="rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/[0.05] focus-visible:outline-2 focus-visible:outline-cyan-200">
+                <span className="text-xs font-semibold text-cyan-300">{formatDuration(moment.time)}</span>
+                <span className="mt-2 block font-semibold text-slate-100">{moment.title}</span>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">{moment.description}</span>
+              </button>
+            ))}
+            {model.keyMoments.length === 0 && <p className="text-sm text-slate-500">Brak wiarygodnych momentów wymagających wyróżnienia.</p>}
+          </div>
+        </section>
+
         <div id="analysis-video" className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_21rem]">
           <ReviewVideoPlayer videoRef={videoRef} overlayUrl={urls.overlay} originalUrl={urls.original} posterUrl={urls.thumbnail} fileName={analysis.sourceFileName} currentTime={currentTime} duration={effectiveDuration} keyMoments={model.keyMoments} onTimeUpdate={handleTimeUpdate} onSeek={seekTo} />
           <div className="xl:sticky xl:top-5 xl:self-start"><QuickSummary model={model} /></div>

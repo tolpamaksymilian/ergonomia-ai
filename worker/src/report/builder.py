@@ -1,4 +1,4 @@
-"""Deterministic assembly of an Analysis Report V1 document."""
+"""Deterministic assembly of a concise Analysis Report V2 document."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
+
+from .findings import build_priority_findings
+from .recommendations import build_manual_confirmation, build_recommendations
 
 from .schemas import (
     REPORT_SCHEMA_VERSION,
@@ -72,6 +75,7 @@ def build_analysis_report(
     *,
     assessment: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
+    recommendations_enabled: bool = True,
 ) -> dict[str, Any]:
     """Build a report without rerunning metrics or risk classification."""
 
@@ -88,6 +92,18 @@ def build_analysis_report(
     dominant_metrics = _dominant_metrics(risk)
     dominant_zones = _text_list(overall.get("highest_risk_zones"))
     key_moments = _key_moments(risk)
+    priority_findings = build_priority_findings(risk, maximum=6)
+    hand_activity = _hand_activity(ergonomics)
+    recommendations = build_recommendations(
+        priority_findings,
+        enabled=recommendations_enabled,
+        maximum=5,
+    )
+    manual_confirmation = build_manual_confirmation(
+        assessment,
+        valid_metric_ratio=valid_metric_ratio,
+        hand_activity=hand_activity,
+    )
 
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -121,6 +137,23 @@ def build_analysis_report(
             "key_frames_count": len(key_moments),
             "valid_metric_ratio": valid_metric_ratio,
         },
+        "executive_summary": _executive_summary(
+            overall_level,
+            priority_findings,
+            valid_metric_ratio,
+            assessment,
+        ),
+        "priority_findings": priority_findings,
+        "exposures": _exposure_summary(risk),
+        "hand_summary": hand_activity,
+        "assessment_summary": _assessment_section(assessment),
+        "recommendations": recommendations,
+        "manual_confirmation": manual_confirmation,
+        "quality_summary": {
+            "valid_metric_ratio": valid_metric_ratio,
+            "status": "insufficient" if insufficient_data else "limited" if valid_metric_ratio < 0.8 else "sufficient",
+            "message": "Wskaźnik opisuje pokrycie poprawnymi danymi, a nie dokładność systemu.",
+        },
         "ergonomic_assessment": _assessment_section(assessment),
         "body_areas": _body_areas(risk),
         "metric_summary": _metric_summary(ergonomics, risk),
@@ -132,8 +165,13 @@ def build_analysis_report(
         ),
         "limitations": _limitations(risk, str(profile.get("status"))),
         "disclaimer": DISCLAIMER,
+        "technical_appendix": {
+            "body_areas": _body_areas(risk),
+            "metric_summary": _metric_summary(ergonomics, risk),
+            "key_moments": key_moments,
+            "risk_decision_reasons": _text_list(overall.get("decision_reasons")),
+        },
     }
-    hand_activity = _hand_activity(ergonomics)
     if hand_activity is not None:
         report["hand_activity"] = hand_activity
         report["holding_activity"] = hand_activity
@@ -156,6 +194,53 @@ def build_analysis_report(
         )
     )
     return report
+
+
+def _executive_summary(
+    overall_level: str,
+    findings: list[dict[str, Any]],
+    valid_metric_ratio: float,
+    assessment: Mapping[str, Any] | None,
+) -> list[str]:
+    lines = [
+        "Ocena ogólna: niewystarczające dane."
+        if overall_level == "insufficient_data"
+        else f"Techniczny poziom przesiewowy: {LEVEL_LABELS.get(overall_level, overall_level)}.",
+        f"Pokrycie poprawnymi danymi: {valid_metric_ratio * 100:.1f}%.",
+    ]
+    lines.extend(item["summary"] for item in findings[:3])
+    if isinstance(assessment, Mapping):
+        statuses = [
+            f"{method.upper()}: {assessment[method].get('status')}"
+            for method in ("rula", "reba")
+            if isinstance(assessment.get(method), Mapping)
+        ]
+        if statuses:
+            lines.append("; ".join(statuses) + ".")
+    return lines[:6]
+
+
+def _exposure_summary(risk: Mapping[str, Any]) -> list[dict[str, Any]]:
+    metrics = risk.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return []
+    output: list[dict[str, Any]] = []
+    for name, raw in metrics.items():
+        if not isinstance(name, str) or not isinstance(raw, Mapping):
+            continue
+        exposure = raw.get("exposure")
+        if not isinstance(exposure, Mapping):
+            continue
+        output.append({
+            "metric_name": name,
+            "level": raw.get("final_level"),
+            "total_valid_duration_seconds": exposure.get("total_valid_duration_seconds"),
+            "moderate_duration_seconds": exposure.get("moderate_duration_seconds"),
+            "high_duration_seconds": exposure.get("high_duration_seconds"),
+            "critical_duration_seconds": exposure.get("critical_duration_seconds"),
+            "timing_method": exposure.get("timing_method"),
+        })
+    return output
 
 
 def _assessment_section(assessment: Mapping[str, Any] | None) -> dict[str, Any]:

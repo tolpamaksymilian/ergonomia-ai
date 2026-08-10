@@ -45,6 +45,7 @@ worker/data/
 worker/logs/
 worker/models/
 worker/outputs/
+worker/local-validation.json
 worker/**/__pycache__/
 worker/**/*.pyc
 

@@ -15,7 +15,7 @@ const ergonomics = {
   ],
 };
 
-for (const schema of ["3.0", "3.1", "4.0"]) {
+for (const schema of ["3.0", "3.1", "4.0", "5.0"]) {
   test(`normalizer accepts Pose schema ${schema}`, () => {
     const model = normalizeAnalysisReview({ analysisId: "analysis-1", pose: { schema_version: schema, unknown_future_field: true, source: { fps: 25 }, frames: [] }, ergonomics, risk: null, report: null });
     assert.equal(model.poseSchemaVersion, schema);

@@ -1,5 +1,12 @@
 # Worker changelog
 
+## 0.5.0-beta.1
+
+- Pose V5 schema 5.0 z evidence fusion, dt-aware jerk i global camera-motion signal.
+- Ograniczony Pass 2 z bramką biomechaniczną oraz audytem before/after.
+- Hand Shape/assignment i Holding V3 bez automatycznego uznawania pięści za chwyt.
+- Report V2 z rankingiem, deduplikacją, ekspozycją i bezpiecznymi zaleceniami.
+
 ## 0.4.0-beta.1
 
 ### Improved

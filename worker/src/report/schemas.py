@@ -1,4 +1,4 @@
-"""Dependency-free contracts and validation for Report Engine V1."""
+"""Dependency-free contracts and validation for Report Engine V2."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from typing import Any
 
 
-REPORT_SCHEMA_VERSION = "1.0"
-REPORT_VERSION = "analysis-report-v1.0"
+REPORT_SCHEMA_VERSION = "2.0"
+REPORT_VERSION = "analysis-report-v2.0-beta.1"
 SUPPORTED_ERGONOMICS_SCHEMA_VERSIONS = frozenset({"1.0"})
 SUPPORTED_ERGONOMICS_VERSIONS = frozenset({"ergonomics-metrics-v1.0"})
 SUPPORTED_RISK_SCHEMA_VERSIONS = frozenset({"1.0"})

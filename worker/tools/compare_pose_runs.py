@@ -23,6 +23,11 @@ COMPARISON_FIELDS: tuple[tuple[str, ...], ...] = (
     ("holding", "left", "likely_holding_seconds"),
     ("holding", "right", "likely_holding_seconds"),
     ("holding", "bimanual", "likely_holding_seconds"),
+    ("scene_cut_count",),
+    ("refinement", "frames_reprocessed"),
+    ("refinement", "frames_improved"),
+    ("refinement", "mean_quality_gain"),
+    ("refinement", "refinement_ratio"),
     ("runtime_seconds",),
 )
 

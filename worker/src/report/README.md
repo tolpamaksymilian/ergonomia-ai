@@ -1,4 +1,4 @@
-# Report Engine V1
+# Report Engine V2
 
 Report Engine jest deterministyczną warstwą prezentacyjną istniejących wyników.
 Nie uruchamia ponownie Pose Pipeline, Ergonomics Metrics Engine ani Risk Engine i
@@ -12,7 +12,7 @@ Engine przyjmuje metadane rekordu analizy oraz dwa prywatne dokumenty:
 - `risk-assessment.json` w schemacie `1.0`.
 
 Weryfikuje wersje i zgodność `analysis_id`, a następnie tworzy
-`analysis-report.json` w wersji `analysis-report-v1.0`. Raport zawiera metadane
+`analysis-report.json` w wersji `analysis-report-v2.0-beta.1`. Raport zawiera metadane
 analizy, informacje o przetwarzaniu i jakości danych, podsumowanie ryzyka,
 obszary ciała, ograniczoną listę metryk, kluczowe momenty, deterministyczne
 obserwacje, ograniczenia oraz jeden disclaimer. Nie powiela danych klatkowych.

@@ -35,7 +35,7 @@ class FakeBucket:
         raise RuntimeError("unexpected path")
 
     def upload(self, *, path, file, file_options):
-        assert json.load(file)["report_version"] == "analysis-report-v1.0"
+        assert json.load(file)["report_version"] == "analysis-report-v2.0-beta.1"
         assert file_options["upsert"] == "true"
         self.uploaded_path = path
         return SimpleNamespace(path=path)
@@ -120,7 +120,7 @@ def test_complete_rpc_failure_has_stable_code():
             analysis_id="analysis",
             worker_id="worker",
             report_path="u/a/results/analysis-report.json",
-            report_summary={"report_version": "analysis-report-v1.0"},
+            report_summary={"report_version": "analysis-report-v2.0-beta.1"},
         )
     assert error.value.error_code == "REPORT_COMPLETE_RPC_ERROR"
 
@@ -176,7 +176,7 @@ def test_full_worker_flow_generates_uploads_and_completes(monkeypatch, tmp_path)
         payload for name, payload in client.calls if name == report_worker.COMPLETE_RPC_NAME
     ]
     assert len(complete) == 1
-    assert complete[0]["p_report_version"] == "analysis-report-v1.0"
+    assert complete[0]["p_report_version"] == "analysis-report-v2.0-beta.1"
     assert complete[0]["p_report_summary"]["overall_level"] == "low"
 
 

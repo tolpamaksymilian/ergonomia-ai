@@ -1,9 +1,9 @@
 export const release = {
-  version: "0.2.1-beta.1",
-  name: "Pierwsza kompletna wersja testowa",
+  version: "0.7.0-beta.1",
+  name: "Robust Multimodal Pose Pipeline i Report 2.0",
   channel: "beta",
   statusLabel: "Wersja testowa",
-  releasedAt: "2026-08-06",
+  releasedAt: "2026-08-10",
   productionReady: false,
   pipelineComplete: true,
 } as const;

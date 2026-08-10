@@ -15,7 +15,7 @@ from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, Rejecti
 from .temporal import frame_durations, movement_features, reject_isolated_metric_spikes
 
 
-SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0"})
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,

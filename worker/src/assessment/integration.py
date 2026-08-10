@@ -18,7 +18,7 @@ from .selection import select_candidate_postures
 from .summary import summarize_method
 
 
-SUPPORTED_METRICS_SCHEMA="1.0"; SUPPORTED_METRICS_VERSION="ergonomics-metrics-v1.0"; SUPPORTED_POSE_SCHEMAS=frozenset({"4.0"})
+SUPPORTED_METRICS_SCHEMA="1.0"; SUPPORTED_METRICS_VERSION="ergonomics-metrics-v1.0"; SUPPORTED_POSE_SCHEMAS=frozenset({"4.0", "5.0"})
 
 
 def process_assessment_documents(ergonomics: Mapping[str,Any], pose: Mapping[str,Any] | None = None, *, user_context: Mapping[str,Any] | None = None, maximum_candidates:int=12, minimum_quality:float=0.55, calculated_at:str|None=None)->dict[str,Any]:
@@ -52,7 +52,7 @@ def _validate_inputs(ergonomics:Mapping[str,Any],pose:Mapping[str,Any]|None)->st
     frames=ergonomics.get("frames")
     if not isinstance(frames,list) or not frames: raise AssessmentInputError("ergonomics metrics frames must be a non-empty array")
     if pose is not None:
-        if pose.get("schema_version") not in SUPPORTED_POSE_SCHEMAS: raise AssessmentInputError("unsupported pose schema; assessment requires Pose V4")
+        if pose.get("schema_version") not in SUPPORTED_POSE_SCHEMAS: raise AssessmentInputError("unsupported pose schema; assessment requires Pose V4 or V5")
         pose_id=pose.get("analysis_id")
         if isinstance(pose_id,str) and pose_id and pose_id!=analysis_id: raise AssessmentInputError("pose and ergonomics analysis_id do not match")
     return analysis_id

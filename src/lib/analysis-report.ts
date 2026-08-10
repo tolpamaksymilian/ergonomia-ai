@@ -22,9 +22,11 @@ const profileStatuses = new Set<RiskProfileStatus>([
 
 export function parseAnalysisReport(value: unknown): AnalysisReport | null {
   if (!isRecord(value)) return null;
+  const supportedVersion =
+    (value.schema_version === "1.0" && value.report_version === "analysis-report-v1.0") ||
+    (value.schema_version === "2.0" && value.report_version === "analysis-report-v2.0-beta.1");
   if (
-    value.schema_version !== "1.0" ||
-    value.report_version !== "analysis-report-v1.0" ||
+    !supportedVersion ||
     value.generated_by !== "Ergonomia AI Report Engine" ||
     typeof value.generated_at !== "string" ||
     !isRecord(value.analysis) ||
@@ -50,7 +52,7 @@ export function parseAnalysisReport(value: unknown): AnalysisReport | null {
 export function parseReportSummary(value: unknown): ReportSummary | null {
   if (
     !isRecord(value) ||
-    value.report_version !== "analysis-report-v1.0" ||
+    !["analysis-report-v1.0", "analysis-report-v2.0-beta.1"].includes(String(value.report_version)) ||
     typeof value.analysis_id !== "string" ||
     !isRiskLevel(value.overall_level) ||
     typeof value.insufficient_data !== "boolean" ||

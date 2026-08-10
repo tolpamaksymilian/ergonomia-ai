@@ -1,4 +1,4 @@
-"""Run the real Pose V0.4 pipeline for a local video without Supabase."""
+"""Run the real Pose V5 pipeline for a local video without Supabase."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ if str(SOURCE_DIRECTORY) not in sys.path:
 
 from ergonomics.processor import process_pose_file  # noqa: E402
 from assessment.integration import process_assessment_files  # noqa: E402
+from report.integration import build_report_file  # noqa: E402
+from risk.processor import process_risk_file  # noqa: E402
 from pose_v3.hand_pipeline import MediaPipeHandEngine  # noqa: E402
 from pose_worker import (  # noqa: E402
     WORKER_VERSION,
@@ -37,6 +39,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
     parser.add_argument("--output", required=True, help="Katalog wynikowy.")
     parser.add_argument("--debug-overlay", action="store_true")
+    parser.add_argument("--refine", action=argparse.BooleanOptionalAction, default=None, help="Włącz lub wyłącz ograniczony Pass 2.")
     parser.add_argument("--angles", action="store_true", help="Pokaż kąty metryk na overlayu.")
     parser.add_argument("--objects", action="store_true", help="Pokaż śledzone obiekty w trybie QA.")
     parser.add_argument("--no-hands", action="store_true")
@@ -52,6 +55,8 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Po metrykach utwórz ergonomic-assessment.json (RULA/REBA beta).",
     )
+    parser.add_argument("--report", action="store_true", help="Utwórz risk-assessment.json i analysis-report.json; wymaga --risk-profile.")
+    parser.add_argument("--risk-profile", help="Jawny profil Risk Engine wymagany przez --report.")
     return parser.parse_args()
 
 
@@ -77,6 +82,11 @@ def main() -> int:
         draw_angles=settings.draw_angles or bool(arguments.angles),
         draw_objects=settings.draw_objects or bool(arguments.objects),
         keep_worker_files=True,
+        pose_v5_refinement_enabled=(
+            settings.pose_v5_refinement_enabled
+            if arguments.refine is None
+            else bool(arguments.refine)
+        ),
     )
     logger = configure_logging()
     model = initialize_pose_model(settings, logger)
@@ -126,16 +136,34 @@ def main() -> int:
         hand_engine.close()
 
     metrics_path = output_directory / "ergonomics-metrics.json"
-    if arguments.ergonomics or arguments.assessment:
+    if arguments.ergonomics or arguments.assessment or arguments.report:
         process_pose_file(
             result.json_path,
             metrics_path,
         )
-    if arguments.assessment:
+    assessment_path = output_directory / "ergonomic-assessment.json"
+    if arguments.assessment or arguments.report:
         process_assessment_files(
             result.json_path,
             metrics_path,
-            output_directory / "ergonomic-assessment.json",
+            assessment_path,
+        )
+    if arguments.report:
+        if not arguments.risk_profile:
+            print("BŁĄD: --report wymaga jawnego --risk-profile; brak ukrytego profilu.", file=sys.stderr)
+            return 2
+        risk_path = output_directory / "risk-assessment.json"
+        process_risk_file(
+            metrics_path,
+            Path(arguments.risk_profile).expanduser().resolve(),
+            risk_path,
+        )
+        build_report_file(
+            analysis,
+            metrics_path,
+            risk_path,
+            output_directory / "analysis-report.json",
+            assessment_path=assessment_path,
         )
     diagnostics = json.loads(result.diagnostics_path.read_text(encoding="utf-8"))
     summary_path = output_directory / "validation-summary.txt"
@@ -210,7 +238,7 @@ def _validation_summary(
     runtime = diagnostics.get("runtime_breakdown_seconds", {})
     warnings = quality.get("warning_codes", []) if isinstance(quality, dict) else []
     lines = [
-        "ERGONOMIA AI — LOCAL VALIDATION V0.4",
+        "ERGONOMIA AI — LOCAL VALIDATION V0.5",
         f"VIDEO\nfile={video_path.name} fps={fps:.3f} frames={frame_count}",
         "TRACKING\n" + json.dumps(tracking, ensure_ascii=False, indent=2),
         "BODY\n" + json.dumps(body, ensure_ascii=False, indent=2),
@@ -223,6 +251,8 @@ def _validation_summary(
             "HOLDING\n" + json.dumps(holding, ensure_ascii=False, indent=2),
             "QUALITY\n" + json.dumps(quality, ensure_ascii=False, indent=2),
             "RUNTIME\n" + json.dumps(runtime, ensure_ascii=False, indent=2),
+            "PASS 1\nstandard analysis completed",
+            "PASS 2\n" + json.dumps(diagnostics.get("refinement", {}), ensure_ascii=False, indent=2),
             "WARNINGS\n" + ("\n".join(str(item) for item in warnings) if warnings else "none"),
         ]
     )
