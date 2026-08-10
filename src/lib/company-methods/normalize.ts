@@ -9,7 +9,7 @@ export type CompanyMethodsView = {
 };
 
 export function normalizeCompanyMethods(value: unknown): CompanyMethodsView | null {
-  if (!record(value) || value.schema_version !== "1.0" || value.company_methods_version !== "company-methods-v1.0-beta.1") return null;
+  if (!record(value) || value.schema_version !== "1.0" || !["company-methods-v1.0-beta.1", "company-methods-v1.1-beta.1"].includes(String(value.company_methods_version))) return null;
   return {
     version: text(value.company_methods_version),
     owas: record(value.owas) ? value.owas : null,

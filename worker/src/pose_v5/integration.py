@@ -80,7 +80,7 @@ def _fps(document:Mapping[str,Any])->float:
 
 
 def _timestamp(frame:Mapping[str,Any],index:int,fps:float)->float:
-    for name in ("output_timestamp_seconds","source_timestamp_seconds","timestamp"):
+    for name in ("source_timestamp_seconds","timestamp","output_timestamp_seconds"):
         value=frame.get(name)
         if isinstance(value,(int,float)) and value>=0:return float(value)
     return index/fps

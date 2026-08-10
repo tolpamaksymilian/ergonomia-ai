@@ -45,6 +45,16 @@ def test_invalid_tracking_cannot_win(metrics_document, pose_document):
     assert all(item.frame_position != 10 for item in selected)
 
 
+def test_pose_evidence_is_joined_by_source_frame_index(metrics_document, pose_document):
+    for index, frame in enumerate(pose_document["frames"]):
+        frame["source_frame_index"] = index
+        frame["scores"] = [0.95 if index == 10 else 0.1] * 17
+    pose_document["frames"].reverse()
+    result = process_assessment_documents(metrics_document, pose_document)
+    candidate = next(item for item in result["candidate_postures"] if item["source_frame_index"] == 10)
+    assert candidate["reba"]["left"]["components"]["legs"]["source"] == "derived"
+
+
 def test_empty_metrics_is_rejected(metrics_document):
     metrics_document["frames"] = []
     with pytest.raises(AssessmentInputError):

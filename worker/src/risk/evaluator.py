@@ -554,9 +554,9 @@ def _integer_or_none(value: object) -> int | None:
 
 def _first_frame_timestamp(frame: Mapping[str, Any]) -> float | None:
     for name in (
+        "source_timestamp_seconds",
         "timestamp",
         "output_timestamp_seconds",
-        "source_timestamp_seconds",
     ):
         value = _finite_or_none(frame.get(name))
         if value is not None:

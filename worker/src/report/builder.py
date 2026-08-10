@@ -165,7 +165,11 @@ def build_analysis_report(
             dominant_zones,
             _text_list(overall.get("insufficient_zones")),
         ),
-        "limitations": _limitations(risk, str(profile.get("status"))),
+        "limitations": _limitations(
+            risk,
+            str(profile.get("status")),
+            assessment=assessment,
+        ),
         "disclaimer": DISCLAIMER,
         "technical_appendix": {
             "body_areas": _body_areas(risk),
@@ -190,12 +194,20 @@ def build_analysis_report(
         dict.fromkeys(
             [
                 *report["limitations"],
+                *_processing_coverage_limitations(report["data_quality"]),
                 *_pose_quality_limitations(ergonomics),
                 *_text_list(ergonomics.get("quality_limitations")),
             ]
         )
     )
     return report
+
+
+def _processing_coverage_limitations(data_quality: Mapping[str, Any]) -> list[str]:
+    processing = finite_number(data_quality.get("processing_coverage_ratio"))
+    if processing is not None and processing < 0.8:
+        return ["partial_source_video_processing"]
+    return []
 
 
 def _company_methods_section(company_methods: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -211,7 +223,14 @@ def _company_methods_section(company_methods: Mapping[str, Any] | None) -> dict[
     }
     for key in ("owas", "ejms", "risk_score", "measurable_factors", "chemical"):
         value = company_methods.get(key)
-        output[key] = dict(value) if isinstance(value, Mapping) else list(value) if isinstance(value, list) else None
+        if key == "owas" and isinstance(value, Mapping):
+            output[key] = {
+                name: item
+                for name, item in value.items()
+                if name in {"method_id", "version", "status", "load_evidence", "forced_posture_evidence", "summary", "missing_inputs", "limitations"}
+            }
+        else:
+            output[key] = dict(value) if isinstance(value, Mapping) else list(value) if isinstance(value, list) else None
     return output
 
 
@@ -229,8 +248,13 @@ def _executive_summary(
     ]
     lines.extend(item["summary"] for item in findings[:3])
     if isinstance(assessment, Mapping):
+        status_labels = {
+            "COMPLETE": "wynik kompletny",
+            "PARTIAL": "ocena częściowa",
+            "INSUFFICIENT_DATA": "niewystarczające dane",
+        }
         statuses = [
-            f"{method.upper()}: {assessment[method].get('status')}"
+            f"{method.upper()}: {status_labels.get(str(assessment[method].get('status')), 'stan nieokreślony')}"
             for method in ("rula", "reba")
             if isinstance(assessment.get(method), Mapping)
         ]
@@ -403,7 +427,16 @@ def _hand_activity(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:
             item["unclassified_object_possible"] = True
         output[side] = item
     bimanual = source.get("bimanual")
-    if isinstance(bimanual, Mapping):
+    left_known = isinstance(output.get("left"), Mapping) and output["left"].get("holding_detected") != "unknown"
+    right_known = isinstance(output.get("right"), Mapping) and output["right"].get("holding_detected") != "unknown"
+    bimanual_observation_known = (
+        isinstance(bimanual, Mapping)
+        and (
+            bimanual.get("observation_known") is True
+            or finite_number(bimanual.get("likely_holding_seconds")) is not None
+        )
+    )
+    if isinstance(bimanual, Mapping) and ((left_known and right_known) or bimanual_observation_known):
         output["bimanual"] = {
             key: value
             for key in ("likely_holding_seconds", "episode_count")
@@ -494,6 +527,32 @@ def _quality_section(
         "insufficient_data": insufficient_data,
         "rejection_reasons": _rejection_reasons(ergonomics),
     }
+    source_coverage = ergonomics.get("source_coverage")
+    if isinstance(source_coverage, Mapping):
+        processing = finite_number(source_coverage.get("processing_coverage_ratio"))
+        if processing is not None and 0 <= processing <= 1:
+            output["processing_coverage_ratio"] = round(processing, 6)
+        for field in (
+            "source_frame_count",
+            "processed_frame_count",
+            "first_processed_source_timestamp_seconds",
+            "last_processed_source_timestamp_seconds",
+        ):
+            value = finite_number(source_coverage.get(field))
+            if value is not None and value >= 0:
+                output[field] = value
+    source_quality = ergonomics.get("source_quality_summary")
+    if isinstance(source_quality, Mapping):
+        regional = source_quality.get("regional_quality")
+        if isinstance(regional, Mapping):
+            output["region_coverage"] = {
+                name: round(value, 6)
+                for name, item in regional.items()
+                if isinstance(name, str)
+                and isinstance(item, Mapping)
+                and (value := finite_number(item.get("coverage_ratio"))) is not None
+                and 0 <= value <= 1
+            }
     for field in ("pose_presence_ratio",):
         value = finite_number(analysis.get(field))
         if value is not None and 0 <= value <= 1:
@@ -631,6 +690,13 @@ def _metric_summary(
         data_quality = optional_text(risk_metric.get("data_quality"))
         if data_quality is not None:
             item["data_quality"] = data_quality
+        reliable_for_display = (
+            valid_ratio_value is not None
+            and valid_ratio_value >= 0.5
+            and data_quality != "insufficient"
+            and candidate["level"] != "insufficient_data"
+        )
+        item["display_status"] = "measured" if reliable_for_display else "insufficient_data"
 
         statistics: dict[str, Any] = {}
         ergonomic_metric = ergonomic_metrics.get(name)
@@ -648,7 +714,7 @@ def _metric_summary(
             percentile_used = finite_number(risk_statistics.get("percentile_used"))
             if percentile_used is not None:
                 statistics["percentile_used"] = percentile_used
-        if statistics:
+        if statistics and reliable_for_display:
             item["statistics"] = statistics
 
         exposure = risk_metric.get("exposure")
@@ -676,14 +742,42 @@ def _key_moments(risk: Mapping[str, Any]) -> list[dict[str, Any]]:
     raw_frames = risk.get("key_frames")
     if not isinstance(raw_frames, list):
         return []
+    ranked_frames = sorted(
+        (item for item in raw_frames if isinstance(item, Mapping)),
+        key=lambda item: (
+            SEVERITY.get(str(item.get("level")), -1),
+            finite_number(item.get("weighted_score")) or 0.0,
+            finite_number(item.get("quality")) or 0.0,
+        ),
+        reverse=True,
+    )
     output: list[dict[str, Any]] = []
-    for raw_frame in raw_frames[:10]:
-        if not isinstance(raw_frame, Mapping):
-            continue
+    seen_frames: set[tuple[str, int | float]] = set()
+    selected_metric_times: dict[str, list[float]] = {}
+    for raw_frame in ranked_frames:
         metric_name = optional_text(raw_frame.get("metric_name"))
         level = raw_frame.get("level")
         if metric_name is None or level not in RISK_LEVELS:
             continue
+        source_frame = raw_frame.get("source_frame_index")
+        source_time = finite_number(raw_frame.get("timestamp_seconds"))
+        identity = (
+            ("frame", source_frame)
+            if isinstance(source_frame, int) and not isinstance(source_frame, bool)
+            else ("time", round(source_time, 3))
+            if source_time is not None
+            else ("item", len(output))
+        )
+        if identity in seen_frames:
+            continue
+        if source_time is not None and any(
+            abs(source_time - existing) < 2.5
+            for existing in selected_metric_times.get(metric_name, [])
+        ):
+            continue
+        seen_frames.add(identity)
+        if source_time is not None:
+            selected_metric_times.setdefault(metric_name, []).append(source_time)
         item: dict[str, Any] = {
             "metric_name": metric_name,
             "metric_label": METRIC_LABELS.get(metric_name, metric_name),
@@ -703,7 +797,14 @@ def _key_moments(risk: Mapping[str, Any]) -> list[dict[str, Any]]:
             if value is not None:
                 item[field] = value
         output.append(item)
-    return output
+        if len(output) >= 10:
+            break
+    return sorted(
+        output,
+        key=lambda item: finite_number(item.get("timestamp_seconds"))
+        if finite_number(item.get("timestamp_seconds")) is not None
+        else float("inf"),
+    )
 
 
 def _observations(
@@ -729,16 +830,23 @@ def _observations(
     return observations
 
 
-def _limitations(risk: Mapping[str, Any], profile_status: str) -> list[str]:
+def _limitations(
+    risk: Mapping[str, Any],
+    profile_status: str,
+    *,
+    assessment: Mapping[str, Any] | None,
+) -> list[str]:
     source = _text_list(risk.get("limitations"))
     additions = [
         "result_depends_on_recording_quality",
         "occluded_body_parts_may_be_missing",
         "external_load_not_measured",
-        "rula_not_calculated",
-        "reba_not_calculated",
         "specialist_review_required",
     ]
+    if not isinstance(assessment, Mapping) or not isinstance(assessment.get("rula"), Mapping):
+        additions.append("rula_not_calculated")
+    if not isinstance(assessment, Mapping) or not isinstance(assessment.get("reba"), Mapping):
+        additions.append("reba_not_calculated")
     if profile_status in {"development", "draft"}:
         additions.append("production_profile_not_used")
     return list(dict.fromkeys([*source, *additions]))

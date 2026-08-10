@@ -21,6 +21,7 @@ import {
   type AnalysisFocusMode,
   type AnalysisRegionId,
 } from "@/config/analysis-visualization";
+import { POSE_PIPELINE_VERSION } from "@/config/project-status";
 
 const focusModes: Array<{
   id: AnalysisFocusMode;
@@ -203,7 +204,7 @@ function PreviewHeader() {
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50 motion-reduce:animate-none" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
         </span>
-        Pose V3.0
+        {POSE_PIPELINE_VERSION}
       </div>
     </div>
   );

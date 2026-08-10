@@ -31,11 +31,21 @@ def select_candidate_postures(
     frames=ergonomics.get("frames")
     if not isinstance(frames,list) or not frames: return []
     pose_frames=pose.get("frames") if isinstance(pose,Mapping) and isinstance(pose.get("frames"),list) else []
+    pose_by_source={
+        item.get("source_frame_index"):item
+        for item in pose_frames
+        if isinstance(item,Mapping)
+        and isinstance(item.get("source_frame_index"),int)
+        and not isinstance(item.get("source_frame_index"),bool)
+    }
     raw: list[CandidatePosture]=[]
     severities=[_severity(frame) if isinstance(frame,Mapping) else 0.0 for frame in frames]
     for index, frame in enumerate(frames):
         if not isinstance(frame,Mapping): continue
-        pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
+        source_index=frame.get("source_frame_index")
+        pose_frame=pose_by_source.get(source_index)
+        if pose_frame is None:
+            pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
         quality=frame_quality(frame,pose_frame)
         if quality<minimum_quality: continue
         previous=severities[index-1] if index else -1.0; following=severities[index+1] if index+1<len(frames) else -1.0
@@ -54,7 +64,10 @@ def select_candidate_postures(
     if not raw:
         valid=[(index,frame) for index,frame in enumerate(frames) if isinstance(frame,Mapping)]
         for index,frame in valid[:1]:
-            pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
+            source_index=frame.get("source_frame_index")
+            pose_frame=pose_by_source.get(source_index)
+            if pose_frame is None:
+                pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
             quality=frame_quality(frame,pose_frame)
             if quality>=minimum_quality:
                 raw.append(CandidatePosture(f"posture-{index:06d}",index,integer_or_none(frame.get("source_frame_index")),integer_or_none(frame.get("output_frame_index")),_timestamp(frame,index,ergonomics),0.0,("representative_valid_frame",),"bilateral",quality,severities[index]))
@@ -98,12 +111,13 @@ def _duration_context(frames:Sequence[object],index:int,severity:float)->float:
     while start>0 and _severity(frames[start-1])>=threshold:start-=1
     while end+1<len(frames) and _severity(frames[end+1])>=threshold:end+=1
     first=frames[start] if isinstance(frames[start],Mapping) else {}; last=frames[end] if isinstance(frames[end],Mapping) else {}
-    a=finite_number(first.get("timestamp")); b=finite_number(last.get("timestamp"))
+    a=finite_number(first.get("source_timestamp_seconds")) or finite_number(first.get("timestamp"))
+    b=finite_number(last.get("source_timestamp_seconds")) or finite_number(last.get("timestamp"))
     return max(0.0,(b-a)) if a is not None and b is not None else 0.0
 
 
 def _timestamp(frame:Mapping[str,Any],index:int,document:Mapping[str,Any])->float:
-    for key in ("timestamp","output_timestamp_seconds","source_timestamp_seconds"):
+    for key in ("source_timestamp_seconds","timestamp","output_timestamp_seconds"):
         value=finite_number(frame.get(key))
         if value is not None and value>=0:return value
     fps=finite_number(document.get("fps")) or finite_number(document.get("output_fps"))

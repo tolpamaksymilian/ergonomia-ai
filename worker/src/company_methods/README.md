@@ -1,6 +1,6 @@
 # Company Methods Engine V1
 
-`company-methods-v1.0-beta.1` jest lekkim, deterministycznym modułem CPU, który uzupełnia Risk Engine, RULA i REBA o metody zakładowe odtworzone z audytowanego skoroszytu `testy.xlsx`.
+`company-methods-v1.1-beta.1` jest lekkim, deterministycznym modułem CPU, który uzupełnia Risk Engine, RULA i REBA o metody zakładowe odtworzone z audytowanego skoroszytu `testy.xlsx`.
 
 ## Źródło reguł
 

@@ -1,5 +1,12 @@
 # Worker changelog
 
+## 0.7.0-beta.1
+
+- Pipeline Supervisor `pipeline-supervisor-v1.0-beta.1` z preflightem, heartbeat, blokadą pojedynczej instancji i ochroną przed crash loop.
+- Pose `pose-v5.1-beta.1`, schema 5.1: wiele aktywnych fragmentów, źródłowe znaczniki czasu, jawne coverage i ograniczony Hand Rescue.
+- Report `analysis-report-v2.2-beta.1` z poprawioną semantyką braków danych, deduplikacją kluczowych momentów i spójnymi ograniczeniami.
+- Company Methods `v1.1-beta.1`: OWAS zachowuje rozpoznaną posturę bez masy, a EJMS pokazuje known score i możliwy zakres.
+
 ## 0.6.0-beta.1
 
 - Company Methods Engine `company-methods-v1.0-beta.1` oparty na wersjonowanych specyfikacjach JSON.

@@ -46,6 +46,9 @@ def test_section_ii_requires_absolute_manual_measurements():
     assert result["components"]["twist_deg"]["score"] == 5
     assert "ejms.section_ii.weight_kg" in result["missing_inputs"]
     assert result["components"]["horizontal_distance_cm"]["score"] is None
+    assert result["score"] is None
+    assert result["known_score"] == 15
+    assert result["possible_score_min"] <= result["possible_score_max"]
 
 
 def test_ejms_legs_use_video_derived_owas_sequence():

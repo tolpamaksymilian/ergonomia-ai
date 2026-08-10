@@ -10,6 +10,7 @@ export function formatTimestamp(value: number | null | undefined): string {
 
 export function formatDuration(value: number | null | undefined): string {
   if (!isFiniteNumber(value) || value < 0) return UNKNOWN_VALUE;
+  if (value > 0 && value < 0.1) return "<0,1 s";
   if (value < 60) return `${value.toFixed(value < 10 ? 1 : 0)} s`;
   const minutes = Math.floor(value / 60);
   const seconds = Math.round(value % 60);

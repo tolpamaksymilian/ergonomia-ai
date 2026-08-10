@@ -8,7 +8,7 @@ from typing import Any
 from .schemas import finite_number, list_of_mappings, mapping
 from .specs import load_spec
 
-EJMS_VERSION = "ejms-company-v1.0-beta.1"
+EJMS_VERSION = "ejms-company-v1.1-beta.1"
 LEVELS = ("LOW", "MOD", "HIGH")
 
 
@@ -24,7 +24,9 @@ def evaluate_ejms(
     areas = {}
     for area, rules in spec["rules"]["section_i"]["areas"].items():
         areas[area] = _evaluate_area(area, rules, frames, mapping(manual.get("section_i")).get(area), spec, owas_frames)
-    section_i_score = sum(result["score"] for result in areas.values() if isinstance(result.get("score"), (int, float)))
+    known_score = sum(result["score"] for result in areas.values() if isinstance(result.get("score"), (int, float)))
+    possible_score_min = sum(int(result.get("possible_score_min", 0)) for result in areas.values())
+    possible_score_max = sum(int(result.get("possible_score_max", 0)) for result in areas.values())
     section_ii = evaluate_section_ii(mapping(manual.get("section_ii")), spec)
     missing = [item for result in areas.values() for item in result["missing_inputs"]]
     missing.extend(section_ii["missing_inputs"])
@@ -33,7 +35,15 @@ def evaluate_ejms(
         status = "AUTOMATIC"
     return {
         "method_id": "ejms-company", "version": EJMS_VERSION, "status": status,
-        "section_i": {"score": section_i_score, "areas": areas, "global_ranking": None, "global_ranking_status": "SOURCE_THRESHOLD_CONFLICT"},
+        "section_i": {
+            "score": known_score if not missing else None,
+            "known_score": known_score,
+            "possible_score_min": possible_score_min,
+            "possible_score_max": possible_score_max,
+            "areas": areas,
+            "global_ranking": None,
+            "global_ranking_status": "SOURCE_THRESHOLD_CONFLICT",
+        },
         "section_ii": section_ii, "missing_inputs": sorted(set(missing)),
         "limitations": ["global_ranking_disabled_due_to_source_conflict", "absolute_distance_not_estimated_without_calibration", "force_not_estimated_from_video"],
     }
@@ -62,8 +72,28 @@ def evaluate_section_ii(inputs: Mapping[str, Any], spec: Mapping[str, Any] | Non
     grip_score = thresholds["grip"].get(grip) if isinstance(grip, str) else None
     results["grip"] = {"value": grip, "score": grip_score, "source": "USER_PROVIDED" if grip_score is not None else "UNKNOWN"}
     missing = [f"ejms.section_ii.{name}" for name, item in results.items() if item["score"] is None]
-    score = sum(int(item["score"]) for item in results.values() if item["score"] is not None)
-    return {"status": "MANUAL" if not missing else "PARTIAL", "score": score, "components": results, "missing_inputs": missing}
+    known_score = sum(int(item["score"]) for item in results.values() if item["score"] is not None)
+    possible_min = known_score
+    possible_max = known_score
+    for name, item in results.items():
+        if item["score"] is not None:
+            continue
+        options = (
+            [int(value) for value in thresholds["grip"].values()]
+            if name == "grip"
+            else [int(band[2]) for band in thresholds[name] if isinstance(band, list) and len(band) == 3]
+        )
+        possible_min += min(options, default=0)
+        possible_max += max(options, default=0)
+    return {
+        "status": "MANUAL" if not missing else "PARTIAL",
+        "score": known_score if not missing else None,
+        "known_score": known_score,
+        "possible_score_min": possible_min,
+        "possible_score_max": possible_max,
+        "components": results,
+        "missing_inputs": missing,
+    }
 
 
 def _evaluate_area(area: str, rules: Mapping[str, Any], frames: list[Mapping[str, Any]], manual: object, spec: Mapping[str, Any], owas_frames: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -79,6 +109,14 @@ def _evaluate_area(area: str, rules: Mapping[str, Any], frames: list[Mapping[str
     force_level = manual_force if manual_force in LEVELS else None
     posture_force = _merge_posture_force(posture, force_level)
     score = matrix_score(posture_force, frequency_level)
+    posture_options = [posture_force] if posture_force in LEVELS else list(LEVELS)
+    frequency_options = [frequency_level] if frequency_level in LEVELS else list(LEVELS)
+    possible_scores = [
+        candidate
+        for posture_option in posture_options
+        for frequency_option in frequency_options
+        if (candidate := matrix_score(posture_option, frequency_option)) is not None
+    ]
     missing = []
     if force_level is None and posture != "HIGH":
         missing.append(f"ejms.section_i.{area}.force_level")
@@ -90,6 +128,8 @@ def _evaluate_area(area: str, rules: Mapping[str, Any], frames: list[Mapping[str
     return {
         "posture_level": posture, "force_level": force_level or "UNKNOWN", "posture_force_level": posture_force or "UNKNOWN",
         "frequency_duration_level": frequency_level or "UNKNOWN", "score": score, "data_status": "COMPLETE" if not missing else "PARTIAL",
+        "possible_score_min": min(possible_scores) if possible_scores else 0,
+        "possible_score_max": max(possible_scores) if possible_scores else 0,
         "final_level": final_level, "valid_frames": len(known), "total_frames": len(frames),
         "duration_ratio": round(duration_ratio, 6) if duration_ratio is not None else None,
         "frequency_per_minute": round(frequency, 6) if frequency is not None else None, "quality": round(quality, 6),
@@ -197,7 +237,7 @@ def _transition_frequency(area: str, samples: list[tuple[float | None, float]], 
 
 
 def _timestamp(frame: Mapping[str, Any]) -> float | None:
-    for name in ("timestamp_seconds", "timestamp", "output_timestamp_seconds"):
+    for name in ("source_timestamp_seconds", "timestamp_seconds", "timestamp", "output_timestamp_seconds"):
         value = finite_number(frame.get(name))
         if value is not None:
             return value

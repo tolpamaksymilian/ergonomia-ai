@@ -15,7 +15,7 @@ from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, Rejecti
 from .temporal import frame_durations, movement_features, reject_isolated_metric_spikes
 
 
-SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0"})
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0", "5.1"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
@@ -317,13 +317,16 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
 
         source_timestamp = _timestamp(raw_frame_dict.get("source_timestamp_seconds"))
         output_timestamp = _timestamp(raw_frame_dict.get("output_timestamp_seconds"))
-        timestamp = output_timestamp if output_timestamp is not None else source_timestamp
+        timestamp = source_timestamp if source_timestamp is not None else output_timestamp
         timestamps.append(timestamp)
         output_frames.append(
             {
                 "source_frame_index": _metadata_number(raw_frame_dict.get("source_frame_index")),
                 "output_frame_index": _metadata_number(raw_frame_dict.get("output_frame_index"))
                 if raw_frame_dict.get("output_frame_index") is not None
+                else fallback_index,
+                "analysis_frame_index": _metadata_number(raw_frame_dict.get("analysis_frame_index"))
+                if raw_frame_dict.get("analysis_frame_index") is not None
                 else fallback_index,
                 "timestamp": timestamp,
                 "source_timestamp_seconds": source_timestamp,
@@ -407,6 +410,9 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
         "hand_activity": holding_activity,
         "holding_activity": holding_activity,
         "source_quality_summary": source_summary,
+        "source_coverage": document.get("coverage")
+        if isinstance(document.get("coverage"), dict)
+        else None,
         "quality_limitations": _quality_limitations(source_summary),
         "frames": output_frames,
     }

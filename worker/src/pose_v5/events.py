@@ -26,7 +26,7 @@ def merge_metric_events(frames: Sequence[Mapping[str,Any]], metric_name:str, eve
     samples=[]
     for frame in frames:
         metrics=frame.get("metrics"); metric=metrics.get(metric_name) if isinstance(metrics,Mapping) else None
-        timestamp=frame.get("timestamp",frame.get("output_timestamp_seconds"))
+        timestamp=frame.get("source_timestamp_seconds",frame.get("timestamp",frame.get("output_timestamp_seconds")))
         if isinstance(metric,Mapping) and metric.get("valid") is True and isinstance(metric.get("value"),(int,float)) and isinstance(timestamp,(int,float)):
             value=float(metric["value"]); quality=float(metric.get("quality",0.0))
             if abs(value)>=minimum_value: samples.append((float(timestamp),value,max(0.0,min(1.0,quality))))

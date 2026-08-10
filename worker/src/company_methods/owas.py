@@ -9,7 +9,7 @@ from typing import Any
 from .schemas import evidence, finite_number, list_of_mappings, mapping
 from .specs import load_spec
 
-OWAS_VERSION = "owas-company-v1.0-beta.1"
+OWAS_VERSION = "owas-company-v1.1-beta.1"
 
 
 def evaluate_owas(
@@ -26,6 +26,7 @@ def evaluate_owas(
     walking_flags = _walking_flags(pose_frames)
     frames: list[dict[str, Any]] = []
     category_durations: Counter[int] = Counter()
+    posture_durations: Counter[str] = Counter()
     category_episodes: Counter[int] = Counter()
     previous_category: int | None = None
     for index, frame in enumerate(metrics_frames):
@@ -43,6 +44,9 @@ def evaluate_owas(
                 possible.append({"code": code, "status": item["status"] if item else "SOURCE_MISSING", "categories": item["categories"] if item else []})
         resolved = possible[0]["categories"][0] if len(possible) == 1 and possible[0]["status"] == "VERIFIED" and len(possible[0]["categories"]) == 1 else None
         duration = durations[index]
+        posture_code = "".join(str(value) for value in codes) if all(isinstance(value, int) for value in codes) else None
+        if posture_code is not None:
+            posture_durations[posture_code] += duration
         if resolved is not None:
             category_durations[resolved] += duration
             if resolved != previous_category:
@@ -52,10 +56,12 @@ def evaluate_owas(
             "source_frame_index": frame.get("source_frame_index"), "output_frame_index": frame.get("output_frame_index"),
             "timestamp_seconds": _timestamp(frame), "duration_seconds": round(duration, 6),
             "components": {"back": back, "arms": arms, "legs": legs, "load": evidence(load_code, "USER_PROVIDED" if load_code else "UNKNOWN", reason=None if load_code else "load_kg_required")},
+            "posture_code": posture_code,
             "code": possible[0]["code"] if len(possible) == 1 else None, "category": resolved,
             "possible_categories": possible, "status": _frame_status(possible, load_code),
         })
     valid_duration = sum(category_durations.values())
+    posture_valid_duration = sum(posture_durations.values())
     total_duration = sum(durations)
     longest = _longest_episodes(frames)
     category_ratios = {str(key): round(category_durations[key] / total_duration, 6) if total_duration else 0.0 for key in range(1, 5)}
@@ -73,7 +79,12 @@ def evaluate_owas(
         "forced_posture_evidence": evidence(forced_posture, "USER_PROVIDED" if forced_posture else "UNKNOWN", reason=None if forced_posture else "forced_posture_required"),
         "frames": frames,
         "summary": {
-            "frame_count": len(frames), "classified_duration_seconds": round(valid_duration, 6), "active_duration_seconds": round(total_duration, 6),
+            "frame_count": len(frames),
+            "posture_classified_duration_seconds": round(posture_valid_duration, 6),
+            "classified_duration_seconds": round(valid_duration, 6),
+            "active_duration_seconds": round(total_duration, 6),
+            "posture_coverage_ratio": round(posture_valid_duration / total_duration, 6) if total_duration else 0.0,
+            "posture_duration_seconds": {key: round(value, 6) for key, value in posture_durations.items()},
             "category_duration_seconds": {str(key): round(category_durations[key], 6) for key in range(1, 5)},
             "category_ratios": category_ratios,
             "episode_counts": {str(key): category_episodes[key] for key in range(1, 5)},
@@ -262,7 +273,7 @@ def _load_code(value: object) -> int | None:
 
 
 def _timestamp(frame: Mapping[str, Any]) -> float | None:
-    for name in ("timestamp_seconds", "timestamp", "output_timestamp_seconds", "source_timestamp_seconds"):
+    for name in ("source_timestamp_seconds", "timestamp_seconds", "timestamp", "output_timestamp_seconds"):
         value = finite_number(frame.get(name))
         if value is not None and value >= 0:
             return value

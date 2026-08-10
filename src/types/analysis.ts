@@ -159,6 +159,7 @@ export type ReportMetricSummary = {
   level: RiskLevel;
   valid_ratio?: number;
   data_quality?: "sufficient" | "limited" | "insufficient";
+  display_status?: "measured" | "insufficient_data";
   statistics?: {
     median?: number;
     maximum?: number;
@@ -192,9 +193,9 @@ export type ReportKeyMoment = {
 };
 
 export type AnalysisReport = {
-  schema_version: "1.0" | "2.0" | "2.1";
+  schema_version: "1.0" | "2.0" | "2.1" | "2.2";
   generated_by: "Ergonomia AI Report Engine";
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1";
   generated_at: string;
   analysis: {
     analysis_id: string;
@@ -220,6 +221,12 @@ export type AnalysisReport = {
     pose_processed_frames?: number;
     pose_detected_frames?: number;
     invalid_metric_values?: number;
+    processing_coverage_ratio?: number;
+    source_frame_count?: number;
+    processed_frame_count?: number;
+    first_processed_source_timestamp_seconds?: number;
+    last_processed_source_timestamp_seconds?: number;
+    region_coverage?: Record<string, number>;
     rejection_reasons: Array<{
       reason: string;
       count: number;
@@ -284,7 +291,7 @@ export type AnalysisReport = {
     };
     requires_specialist_review: boolean;
   }>;
-  manual_confirmation?: Array<{ code: string; label: string }>;
+  manual_confirmation?: Array<{ code: string; label: string; impact?: "high" | "medium" | "optional"; explanation?: string }>;
   quality_summary?: {
     valid_metric_ratio: number;
     status: "sufficient" | "limited" | "insufficient";
@@ -356,7 +363,7 @@ export type ReportMovementFeature = {
 };
 
 export type ReportSummary = {
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1";
   analysis_id: string;
   overall_level: RiskLevel;
   insufficient_data: boolean;

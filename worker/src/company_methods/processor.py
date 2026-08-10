@@ -13,7 +13,7 @@ from .owas import evaluate_owas
 from .risk_score import evaluate_risk_score
 from .specs import load_spec
 
-COMPANY_METHODS_VERSION = "company-methods-v1.0-beta.1"
+COMPANY_METHODS_VERSION = "company-methods-v1.1-beta.1"
 
 
 def process_company_methods(

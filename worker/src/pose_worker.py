@@ -53,6 +53,7 @@ from pose_v5.camera_motion import CameraMotionEstimator
 from pose_v5.config import CameraMotionConfig, PoseV5Config, RefinementConfig
 from pose_v5.integration import augment_pose_document_v5
 from pose_v5.diagnostics import region_quality_coverage
+from pose_v5.hand_rescue import enlarge_roi, observation_coverage, rescue_frame_indexes
 from pose_v5.refinement import (
     RefinementResult,
     detect_difficult_segments,
@@ -284,6 +285,11 @@ class PoseWorkerSettings:
     hand_bone_projection_strength: float
     hand_reacquire_confirm_frames: int
     hand_use_adaptive_roi: bool
+    hand_rescue_enabled: bool
+    hand_rescue_minimum_coverage: float
+    hand_rescue_roi_scale: float
+    hand_rescue_upscale_factor: float
+    hand_rescue_maximum_ratio: float
 
     holding_enabled: bool
     holding_min_confirmation_seconds: float
@@ -306,6 +312,18 @@ class PoseWorkerSettings:
 
 
 @dataclass(frozen=True)
+class ActiveSegmentPart:
+    start_frame: int
+    end_frame: int
+    start_seconds: float
+    end_seconds: float
+
+    @property
+    def frame_count(self) -> int:
+        return self.end_frame - self.start_frame + 1
+
+
+@dataclass(frozen=True)
 class ActiveSegment:
     start_frame: int
     end_frame: int
@@ -314,6 +332,7 @@ class ActiveSegment:
     duration_seconds: float
     scan_stride: int
     scan_presence_ratio: float
+    segments: tuple[ActiveSegmentPart, ...] = ()
 
     @property
     def frame_count(self) -> int:
@@ -666,6 +685,21 @@ def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
         hand_use_adaptive_roi=parse_boolean(
             os.getenv("POSE_HAND_USE_ADAPTIVE_ROI"), default=True
         ),
+        hand_rescue_enabled=parse_boolean(
+            os.getenv("POSE_HAND_RESCUE_ENABLED"), default=True
+        ),
+        hand_rescue_minimum_coverage=float(
+            os.getenv("POSE_HAND_RESCUE_MINIMUM_COVERAGE", "0.20")
+        ),
+        hand_rescue_roi_scale=float(
+            os.getenv("POSE_HAND_RESCUE_ROI_SCALE", "1.75")
+        ),
+        hand_rescue_upscale_factor=float(
+            os.getenv("POSE_HAND_RESCUE_UPSCALE_FACTOR", "1.75")
+        ),
+        hand_rescue_maximum_ratio=float(
+            os.getenv("POSE_HAND_RESCUE_MAXIMUM_RATIO", "0.35")
+        ),
         holding_enabled=parse_boolean(
             os.getenv("POSE_HOLDING_ENABLED"), default=True
         ),
@@ -898,6 +932,17 @@ def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
             raise RuntimeError(
                 f"{variable_name} musi mieścić się w zakresie 0-1."
             )
+
+    for variable_name, value in {
+        "POSE_HAND_RESCUE_MINIMUM_COVERAGE": settings.hand_rescue_minimum_coverage,
+        "POSE_HAND_RESCUE_MAXIMUM_RATIO": settings.hand_rescue_maximum_ratio,
+    }.items():
+        if not 0.0 <= value <= 1.0:
+            raise RuntimeError(f"{variable_name} musi mieścić się w zakresie 0-1.")
+    if not 1.0 <= settings.hand_rescue_roi_scale <= 3.0:
+        raise RuntimeError("POSE_HAND_RESCUE_ROI_SCALE musi mieścić się w zakresie 1-3.")
+    if not 1.0 <= settings.hand_rescue_upscale_factor <= 3.0:
+        raise RuntimeError("POSE_HAND_RESCUE_UPSCALE_FACTOR musi mieścić się w zakresie 1-3.")
 
     if settings.hand_assignment_max_wrist_distance_ratio <= 0:
         raise RuntimeError(
@@ -2084,6 +2129,7 @@ def scan_active_segment(
         potential_start_sample: int | None = None
         confirmed_start_sample: int | None = None
         last_valid_sample: int | None = None
+        confirmed_segments: list[tuple[int, int]] = []
 
         presence_flags: list[bool] = []
         accepted_qualities: list[float] = []
@@ -2197,7 +2243,14 @@ def scan_active_segment(
                             "po %.3f s.",
                             frame_index / fps,
                         )
-                        break
+                        if confirmed_start_sample is not None and last_valid_sample is not None:
+                            confirmed_segments.append((confirmed_start_sample, last_valid_sample))
+                        confirmed_start_sample = None
+                        last_valid_sample = None
+                        consecutive_hits = 0
+                        consecutive_misses = 0
+                        potential_start_sample = None
+                        previous_bbox = None
 
             if sample_number % 10 == 0:
                 progress = (
@@ -2220,18 +2273,18 @@ def scan_active_segment(
                     "detecting-active-segment-v3",
                 )
 
-        if (
-            confirmed_start_sample is None
-            or last_valid_sample is None
-        ):
+        if confirmed_start_sample is not None and last_valid_sample is not None:
+            confirmed_segments.append((confirmed_start_sample, last_valid_sample))
+
+        if not confirmed_segments:
             raise RuntimeError(
                 "Nie wykryto stabilnego fragmentu "
                 "z prawdziwym pracownikiem."
             )
 
-        detected_start_frame = sample_frames[
-            confirmed_start_sample
-        ]
+        confirmed_start_sample = confirmed_segments[0][0]
+        last_valid_sample = confirmed_segments[-1][1]
+        detected_start_frame = sample_frames[confirmed_start_sample]
         detected_end_frame = min(
             total_frames - 1,
             sample_frames[last_valid_sample]
@@ -2307,16 +2360,44 @@ def scan_active_segment(
             if selected_qualities
             else 0.0
         )
+        pre_padding_frames = int(round(settings.active_pre_padding_seconds * fps))
+        post_padding_frames = int(round(settings.active_post_padding_seconds * fps))
+        segment_parts = tuple(
+            ActiveSegmentPart(
+                start_frame=max(0, sample_frames[start_sample] - pre_padding_frames),
+                end_frame=min(
+                    total_frames - 1,
+                    sample_frames[end_sample] + scan_stride - 1 + post_padding_frames,
+                ),
+                start_seconds=round(
+                    max(0, sample_frames[start_sample] - pre_padding_frames) / fps,
+                    3,
+                ),
+                end_seconds=round(
+                    (
+                        min(
+                            total_frames - 1,
+                            sample_frames[end_sample] + scan_stride - 1 + post_padding_frames,
+                        )
+                        + 1
+                    )
+                    / fps,
+                    3,
+                ),
+            )
+            for start_sample, end_sample in confirmed_segments
+        )
 
         logger.info(
-            "Aktywny fragment V4: "
+            "Aktywny zakres V5.1: "
             "%.3f-%.3f s (%d-%d), "
-            "długość %.3f s, jakość %.3f.",
+            "długość %.3f s, segmenty=%d, jakość %.3f.",
             start_frame / fps,
             (end_frame + 1) / fps,
             start_frame,
             end_frame,
             active_duration,
+            len(segment_parts),
             average_scan_quality,
         )
 
@@ -2340,6 +2421,7 @@ def scan_active_segment(
                 scan_presence_ratio,
                 6,
             ),
+            segments=segment_parts,
         )
     finally:
         capture.release()
@@ -2773,6 +2855,133 @@ def summarize_overlay_movement(
 
 
 
+def run_hand_rescue_pass(
+    settings: PoseWorkerSettings,
+    video_path: Path,
+    body_records: list[dict[str, Any]],
+    raw_hand_frames: dict[str, list[RawHandFrame]],
+    hand_rois: dict[str, list[tuple[int, int, int, int] | None]],
+    *,
+    frame_width: int,
+    frame_height: int,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Retry sparse hand observations without bypassing temporal validation."""
+
+    relevant = {
+        side: [
+            bool(record.get("detected")) and hand_rois[side][index] is not None
+            for index, record in enumerate(body_records)
+        ]
+        for side in ("left", "right")
+    }
+    before = {
+        side: observation_coverage(
+            [frame.observation is not None for frame in raw_hand_frames[side]],
+            relevant[side],
+        )
+        for side in ("left", "right")
+    }
+    summary: dict[str, Any] = {
+        "enabled": settings.hand_rescue_enabled,
+        "minimum_coverage": settings.hand_rescue_minimum_coverage,
+        "coverage_before": {side: round(value, 6) for side, value in before.items()},
+        "coverage_after_raw_rescue": {side: round(value, 6) for side, value in before.items()},
+        "attempted_frames": 0,
+        "eligible_frames": {side: sum(relevant[side]) for side in ("left", "right")},
+        "rescued_observations": {"left": 0, "right": 0},
+        "rejected_rescue_observations": {"left": 0, "right": 0},
+        "_rescued_frame_indexes": {"left": [], "right": []},
+        "accepted_only_after_standard_validation": True,
+    }
+    if not settings.hand_rescue_enabled or not settings.draw_hands or not body_records:
+        return summary
+
+    indexes_by_side = {
+        side: set(
+            rescue_frame_indexes(
+                [frame.observation is not None for frame in raw_hand_frames[side]],
+                relevant[side],
+                minimum_coverage=settings.hand_rescue_minimum_coverage,
+                maximum_ratio=settings.hand_rescue_maximum_ratio,
+            )
+        )
+        for side in ("left", "right")
+    }
+    rescue_indexes = sorted(indexes_by_side["left"] | indexes_by_side["right"])
+    if not rescue_indexes:
+        return summary
+
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        summary["error"] = "rescue_video_unavailable"
+        return summary
+    rescue_engine: MediaPipeHandEngine | None = None
+    try:
+        rescue_engine = MediaPipeHandEngine(create_hand_pipeline_config(settings))
+        memory = HandAssignmentMemory()
+        for index in rescue_indexes:
+            record = body_records[index]
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(record["source_frame_index"]))
+            success, frame = capture.read()
+            if not success or frame is None or frame.size == 0:
+                continue
+            expanded = {
+                side: enlarge_roi(
+                    hand_rois[side][index],
+                    frame_width=frame_width,
+                    frame_height=frame_height,
+                    scale=settings.hand_rescue_roi_scale,
+                )
+                for side in ("left", "right")
+            }
+            roi = union_hand_roi(expanded, frame_width=frame_width, frame_height=frame_height)
+            try:
+                candidates = rescue_engine.detect(
+                    frame,
+                    int(round(float(record["source_timestamp_seconds"]) * 1000.0)),
+                    roi,
+                    upscale_factor=settings.hand_rescue_upscale_factor,
+                )
+            except (RuntimeError, ValueError, cv2.error):
+                continue
+            assigned = assign_hands_to_body_v2(
+                candidates=candidates,
+                body_points=record["smoothed_points"],
+                body_scores=record["smoothed_scores"],
+                body_threshold=0.01,
+                config=rescue_engine.config,
+                graph_config=HandGraphConfig(),
+                timestamp_seconds=float(record["source_timestamp_seconds"]),
+                memory=memory,
+            )
+            for side in ("left", "right"):
+                if index in indexes_by_side[side] and assigned[side].observation is not None:
+                    raw_hand_frames[side][index] = assigned[side]
+                    summary["rescued_observations"][side] += 1
+                    summary["_rescued_frame_indexes"][side].append(index)
+            summary["attempted_frames"] += 1
+    except (RuntimeError, OSError, ValueError) as error:
+        logger.warning("Hand Rescue pominięty: %s.", type(error).__name__)
+        summary["error"] = type(error).__name__
+    finally:
+        capture.release()
+        if rescue_engine is not None:
+            rescue_engine.close()
+
+    after = {
+        side: observation_coverage(
+            [frame.observation is not None for frame in raw_hand_frames[side]],
+            relevant[side],
+        )
+        for side in ("left", "right")
+    }
+    summary["coverage_after_raw_rescue"] = {
+        side: round(value, 6) for side, value in after.items()
+    }
+    return summary
+
+
 def process_pose_video(
     supabase: Client | None,
     settings: PoseWorkerSettings,
@@ -2990,7 +3199,7 @@ def process_pose_video(
                     confidence_sum += float(valid_body_scores.sum())
                     confidence_count += int(valid_body_scores.size)
 
-                timestamp_ms = int(round(processed_frames / fps * 1000.0))
+                timestamp_ms = int(round(source_timestamp * 1000.0))
                 predicted_rois = predict_hand_rois(
                     validated_points,
                     validated_scores,
@@ -3066,6 +3275,7 @@ def process_pose_video(
                 {
                     "source_frame_index": source_frame_index,
                     "output_frame_index": processed_frames,
+                    "analysis_frame_index": processed_frames,
                     "source_timestamp_seconds": source_timestamp,
                     "output_timestamp_seconds": processed_frames / fps,
                     "detected": tracking.accept_pose,
@@ -3141,6 +3351,16 @@ def process_pose_video(
         capture.release()
 
     refinement_results: list[RefinementResult] = []
+    hand_rescue_summary = run_hand_rescue_pass(
+        settings,
+        video_path,
+        body_records,
+        raw_hand_frames,
+        hand_rois,
+        frame_width=width,
+        frame_height=height,
+        logger=logger,
+    )
     if pose_v5_config.refinement.enabled and body_records:
         refinement_source = []
         for index, record in enumerate(body_records):
@@ -3408,11 +3628,43 @@ def process_pose_video(
         frame_height=height,
         config=hand_engine.config,
     )
+    relevant_hand_frames = {
+        side: [
+            bool(record.get("detected")) and hand_rois[side][index] is not None
+            for index, record in enumerate(body_records)
+        ]
+        for side in ("left", "right")
+    }
+    validated_hand_frames = {
+        "left": left_hand_result.frames,
+        "right": right_hand_result.frames,
+    }
+    hand_rescue_summary["coverage_after_validation"] = {
+        side: round(
+            observation_coverage(
+                [frame.visible for frame in validated_hand_frames[side]],
+                relevant_hand_frames[side],
+            ),
+            6,
+        )
+        for side in ("left", "right")
+    }
+    rescued_indexes = hand_rescue_summary.pop("_rescued_frame_indexes", {})
+    hand_rescue_summary["rejected_rescue_observations"] = {
+        side: sum(
+            not validated_hand_frames[side][index].visible
+            for index in rescued_indexes.get(side, [])
+            if 0 <= index < len(validated_hand_frames[side])
+        )
+        for side in ("left", "right")
+    }
     hand_validation_seconds = time.perf_counter() - hand_validation_started_at
 
     hand_object_started_at = time.perf_counter()
+    # Source time remains authoritative even when gaps exist between active
+    # segments. This prevents exposure and key moments from being compressed.
     output_timestamps = [
-        float(record["output_timestamp_seconds"]) for record in body_records
+        float(record["source_timestamp_seconds"]) for record in body_records
     ]
     object_association_available = True
     try:
@@ -3479,6 +3731,15 @@ def process_pose_video(
         minimum_confirmation_seconds=settings.holding_min_confirmation_seconds,
     )
     holding_durations = _timestamp_durations(output_timestamps, fps)
+    bimanual_observation_seconds = sum(
+        duration
+        for duration, left_frame, right_frame in zip(
+            holding_durations,
+            left_hand_result.frames,
+            right_hand_result.frames,
+        )
+        if left_frame.visible and right_frame.visible
+    )
     left_holding_v3 = analyze_holding_v3(
         [_holding_v3_evidence(frame) for frame in left_holding_frames],
         holding_durations,
@@ -3637,6 +3898,7 @@ def process_pose_video(
                 {
                     "source_frame_index": body_record["source_frame_index"],
                     "output_frame_index": body_record["output_frame_index"],
+                    "analysis_frame_index": body_record["analysis_frame_index"],
                     "source_timestamp_seconds": round(
                         body_record["source_timestamp_seconds"],
                         4,
@@ -3941,6 +4203,33 @@ def process_pose_video(
             "output_frame_count": processed_frames,
             "scan_stride": active_segment.scan_stride,
             "scan_presence_ratio": active_segment.scan_presence_ratio,
+            "selection_mode": "multiple-active-segments-envelope",
+            "segments": [
+                {
+                    "source_start_frame": segment.start_frame,
+                    "source_end_frame": segment.end_frame,
+                    "source_start_seconds": segment.start_seconds,
+                    "source_end_seconds": segment.end_seconds,
+                    "frame_count": segment.frame_count,
+                }
+                for segment in active_segment.segments
+            ],
+        },
+        "coverage": {
+            "source_frame_count": int(analysis.get("source_frame_count") or 0),
+            "processed_frame_count": processed_frames,
+            "processing_coverage_ratio": round(
+                processed_frames
+                / max(1, int(analysis.get("source_frame_count") or processed_frames)),
+                6,
+            ),
+            "pose_presence_ratio": round(presence_ratio, 6),
+            "first_processed_source_timestamp_seconds": round(
+                float(body_records[0]["source_timestamp_seconds"]), 6
+            ),
+            "last_processed_source_timestamp_seconds": round(
+                float(body_records[-1]["source_timestamp_seconds"]), 6
+            ),
         },
         "configuration": {
             "model_mode": settings.model_mode,
@@ -4069,7 +4358,9 @@ def process_pose_video(
                 "right": serialize_hand_summary(right_hand_result.summary),
                 "assignment_switches": hand_assignment_memory.assignment_switches,
                 "finger_rejections": finger_rejections,
+                "rescue": hand_rescue_summary,
             },
+            "regional_quality": region_quality_coverage(frames_data, fps=fps),
             "quality": quality_summary,
             "holding": {
                 "version": "holding-v3",
@@ -4082,8 +4373,18 @@ def process_pose_video(
                     **_summarize_holding_v3(right_holding_v3, holding_durations),
                 },
                 "bimanual": {
-                    "likely_holding_seconds": round(sum(duration for duration, flag in zip(holding_durations, bimanual_holding_v3_flags) if flag), 6),
-                    "episode_count": sum(flag and (index == 0 or not bimanual_holding_v3_flags[index - 1]) for index, flag in enumerate(bimanual_holding_v3_flags)),
+                    "observation_known": bimanual_observation_seconds > 0.0,
+                    "valid_observation_seconds": round(bimanual_observation_seconds, 6),
+                    "likely_holding_seconds": (
+                        round(sum(duration for duration, flag in zip(holding_durations, bimanual_holding_v3_flags) if flag), 6)
+                        if bimanual_observation_seconds > 0.0
+                        else None
+                    ),
+                    "episode_count": (
+                        sum(flag and (index == 0 or not bimanual_holding_v3_flags[index - 1]) for index, flag in enumerate(bimanual_holding_v3_flags))
+                        if bimanual_observation_seconds > 0.0
+                        else None
+                    ),
                 },
                 "external_load_known": False,
             },

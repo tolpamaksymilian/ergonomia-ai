@@ -118,7 +118,7 @@ function normalizeMetrics(document: UnknownRecord | null): Record<ReviewMetricNa
       const rawValue = rawMetric?.value;
       const value = number(rawValue);
       const explicitlyValid = rawMetric?.valid === true;
-      const time = firstNumber(rawFrame.timestamp, rawFrame.output_timestamp_seconds, rawFrame.source_timestamp_seconds);
+      const time = firstNumber(rawFrame.source_timestamp_seconds, rawFrame.timestamp, rawFrame.output_timestamp_seconds);
       if (time === null) continue;
       const valid = explicitlyValid && value !== null;
       fullPoints.push({
@@ -283,7 +283,7 @@ function poseFrameSegments(frames: unknown[]): TimelineSegment[] {
   let previousTime: number | null = null;
   for (const item of frames) {
     if (!isRecord(item)) continue;
-    const time = firstNumber(item.output_timestamp_seconds, item.source_timestamp_seconds);
+    const time = firstNumber(item.source_timestamp_seconds, item.output_timestamp_seconds);
     if (time === null) continue;
     if (previousTime !== null && time > previousTime) fallbackStep = time - previousTime;
     previousTime = time;
@@ -379,7 +379,7 @@ function buildKeyMoments(
 function bimanualEpisodesFromFrames(frames: unknown[]): HoldingEpisode[] {
   const samples = frames.flatMap((item) => {
     if (!isRecord(item)) return [];
-    const time = firstNumber(item.output_timestamp_seconds, item.source_timestamp_seconds);
+    const time = firstNumber(item.source_timestamp_seconds, item.output_timestamp_seconds);
     const holding = child(item, "holding");
     return time !== null ? [{ time, active: holding?.bimanual_candidate === true }] : [];
   });

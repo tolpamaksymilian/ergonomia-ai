@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from typing import Any
 
 
-REPORT_SCHEMA_VERSION = "2.1"
-REPORT_VERSION = "analysis-report-v2.1-beta.1"
+REPORT_SCHEMA_VERSION = "2.2"
+REPORT_VERSION = "analysis-report-v2.2-beta.1"
 SUPPORTED_ERGONOMICS_SCHEMA_VERSIONS = frozenset({"1.0"})
 SUPPORTED_ERGONOMICS_VERSIONS = frozenset({"ergonomics-metrics-v1.0"})
 SUPPORTED_RISK_SCHEMA_VERSIONS = frozenset({"1.0"})

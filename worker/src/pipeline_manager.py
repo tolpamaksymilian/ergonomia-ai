@@ -16,7 +16,7 @@ from typing import IO, Mapping, Sequence
 from dotenv import load_dotenv
 
 
-RELEASE_VERSION = "0.8.0-beta.1"
+RELEASE_VERSION = "0.7.0-beta.1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 WORKER_ROOT = REPOSITORY_ROOT / "worker"
 ENV_PATH = WORKER_ROOT / ".env"
@@ -193,7 +193,7 @@ def _forward_output(worker_name: str, stream: IO[str]) -> None:
 
 def start_worker(worker: WorkerSpec) -> subprocess.Popen[str]:
     process = subprocess.Popen(
-        [sys.executable, str(worker.script)],
+        [sys.executable, "-u", str(worker.script)],
         cwd=REPOSITORY_ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -248,8 +248,9 @@ def run_continuous(
                     continue
                 print(f"[{name}] exited code={returncode}")
                 if not restart or restarts[name] >= settings.max_restarts:
-                    del processes[name]
-                    continue
+                    if restart:
+                        print(f"[{name}] restart limit exhausted; stopping Pipeline Manager")
+                    return 1
                 restarts[name] += 1
                 delay = min(settings.restart_delay_seconds * restarts[name], 60.0)
                 print(f"[{name}] restart {restarts[name]}/{settings.max_restarts} in {delay:.1f}s")

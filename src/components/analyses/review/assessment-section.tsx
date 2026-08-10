@@ -3,6 +3,7 @@
 import { Calculator, CircleHelp, Play, ScanSearch } from "lucide-react";
 import Image from "next/image";
 
+import { manualInputLabel } from "@/config/manual-input-labels";
 import { formatPercentage, formatTimestamp, UNKNOWN_VALUE } from "@/lib/analysis-review/formatters";
 import type { AssessmentComponent, AssessmentMethodResult, AssessmentReview } from "@/lib/analysis-review/schemas";
 
@@ -52,5 +53,5 @@ function scoreLabel(result: AssessmentMethodResult) { if (result.finalScore !== 
 function statusLabel(status: AssessmentMethodResult["status"]) { return status === "COMPLETE" ? "Wynik kompletny" : status === "PARTIAL" ? "Ocena częściowa" : "Niewystarczające dane"; }
 function qualityLabel(value: AssessmentMethodResult["applicability"]) { return value === "GOOD" ? "Jakość dobra" : value === "LIMITED" ? "Jakość ograniczona" : "Za mało danych"; }
 function sourceLabel(value: AssessmentComponent["source"]) { return ({ observed: "Z filmu", derived: "Obliczone z filmu", user_provided: "Podane przez użytkownika", assumed: "Założenie", unknown: "Brak danych" } as const)[value]; }
-function componentLabel(value: string) { return ({ upper_arm: "Ramię", lower_arm: "Przedramię", wrist: "Nadgarstek", wrist_twist: "Skręt nadgarstka", neck: "Szyja", trunk: "Tułów", legs: "Nogi", muscle_use: "Praca mięśni", force_load: "Siła / obciążenie", load_force: "Siła / obciążenie", coupling: "Sprzężenie z przedmiotem", activity: "Aktywność" } as Record<string, string>)[value] ?? value.replaceAll("_", " "); }
-function missingLabel(value: string) { if (value.includes("force") || value.includes("load")) return "Nie określono obciążenia zewnętrznego."; if (value.includes("coupling")) return "Nie określono jakości uchwytu przedmiotu."; if (value.includes("twist")) return "Skręt osiowy nie jest wiarygodnie widoczny w 2D."; if (value.includes("support") || value.includes("balance")) return "Nie określono podparcia i rozkładu ciężaru."; return value.replaceAll("_", " "); }
+function componentLabel(value: string) { return ({ upper_arm: "Ramię", lower_arm: "Przedramię", wrist: "Nadgarstek", wrist_twist: "Skręt nadgarstka", neck: "Szyja", trunk: "Tułów", legs: "Nogi", muscle_use: "Praca mięśni", force_load: "Siła / obciążenie", load_force: "Siła / obciążenie", coupling: "Sprzężenie z przedmiotem", activity: "Aktywność" } as Record<string, string>)[value] ?? "Dodatkowy składnik metody"; }
+function missingLabel(value: string) { return manualInputLabel(value); }

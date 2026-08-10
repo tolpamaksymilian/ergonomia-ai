@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { AnalysisLiveStatus } from "@/components/analyses/analysis-live-status";
+import { PipelineSystemStatus } from "@/components/analyses/pipeline-system-status";
 import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-button";
 import { ErgonomicsMetricsCard } from "@/components/analyses/ergonomics-metrics-card";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
@@ -66,6 +67,7 @@ export default async function AnalysisDetailsPage({
       queued_at,
       created_at,
       updated_at,
+      heartbeat_at,
       processing_stage,
       result_video_path,
       result_json_path,
@@ -375,6 +377,19 @@ export default async function AnalysisDetailsPage({
               updated_at: analysis.updated_at,
             }}
           />
+          <div className="lg:col-span-2">
+            <PipelineSystemStatus
+              initialAnalysis={{
+                id: analysis.id,
+                status: analysis.status,
+                progress: analysis.progress,
+                processing_stage: analysis.processing_stage,
+                updated_at: analysis.updated_at,
+                heartbeat_at: analysis.heartbeat_at,
+                error_code: analysis.error_code,
+              }}
+            />
+          </div>
         </section>
 
         <section className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -630,7 +645,7 @@ export default async function AnalysisDetailsPage({
                         type="submit"
                         className="rounded-xl border border-red-300/25 bg-red-300/10 px-4 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-300/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                       >
-                        Ponów bieżący etap
+                        {analysis.processing_stage === "report-failed" ? "Odbuduj raport" : "Ponów nieudany etap"}
                       </button>
                     </form>
                   </div>

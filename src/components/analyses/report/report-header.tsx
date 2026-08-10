@@ -52,7 +52,7 @@ export function ReportHeader({
         <div className="report-card min-w-56 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.07] p-4 print:border-slate-300 print:bg-transparent">
           <p className="flex items-center gap-2 font-semibold text-emerald-200 print:text-black">
             <CheckCircle2 className="size-5" aria-hidden="true" />
-            Analiza gotowa
+            Raport gotowy
           </p>
           <dl className="mt-3 space-y-1 text-xs text-slate-400 print:text-slate-700">
             <div className="flex justify-between gap-4">
@@ -76,12 +76,6 @@ export function ReportHeader({
           </dl>
         </div>
       </div>
-      <dl className="mt-6 grid gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-500 sm:grid-cols-2 lg:grid-cols-4 print:border-slate-300 print:text-slate-700">
-        <div><dt>Pose Pipeline</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.pose_pipeline_version ?? "Brak danych"}</dd></div>
-        <div><dt>Metrics Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.ergonomics_metrics_version}</dd></div>
-        <div><dt>Risk Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.risk_engine_version}</dd></div>
-        <div><dt>Report Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.report_engine_version}</dd></div>
-      </dl>
     </header>
   );
 }

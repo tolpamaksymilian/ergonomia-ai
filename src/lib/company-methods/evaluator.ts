@@ -49,7 +49,18 @@ export function ejmsSectionTwoScore(input: UnknownRecord) {
   const grip = typeof input.grip === "string" && input.grip in thresholds.grip ? input.grip as keyof typeof thresholds.grip : null;
   components.grip = { value: grip, score: grip ? thresholds.grip[grip] : null, source: grip ? "USER_PROVIDED" : "UNKNOWN" };
   const missing_inputs = Object.entries(components).filter(([, item]) => item.score === null).map(([name]) => `ejms.section_ii.${name}`);
-  return { status: missing_inputs.length ? "PARTIAL" : "MANUAL", score: Object.values(components).reduce((sum, item) => sum + (item.score ?? 0), 0), components, missing_inputs } as const;
+  const known_score = Object.values(components).reduce((sum, item) => sum + (item.score ?? 0), 0);
+  let possible_score_min = known_score;
+  let possible_score_max = known_score;
+  for (const [name, item] of Object.entries(components)) {
+    if (item.score !== null) continue;
+    const options = name === "grip"
+      ? Object.values(thresholds.grip)
+      : (thresholds[name as typeof numericFields[number]] as ReadonlyArray<ReadonlyArray<number | null>>).flatMap((band) => typeof band[2] === "number" ? [band[2]] : []);
+    possible_score_min += Math.min(...options);
+    possible_score_max += Math.max(...options);
+  }
+  return { status: missing_inputs.length ? "PARTIAL" : "MANUAL", score: missing_inputs.length ? null : known_score, known_score, possible_score_min, possible_score_max, components, missing_inputs } as const;
 }
 
 export function resolveOwasCode(codePrefix: string, loadKg: number | null) {

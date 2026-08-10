@@ -38,8 +38,8 @@ export async function saveCompanyMethodInputs(formData: FormData): Promise<void>
   await uploadJson(bucket, assessmentPath, updatedAssessment);
   if (analysis.report_path && record(report)) {
     report.company_methods = reportCompanySection(updatedAssessment);
-    report.report_version = "analysis-report-v2.1-beta.1";
-    report.schema_version = "2.1";
+    report.report_version = "analysis-report-v2.2-beta.1";
+    report.schema_version = "2.2";
     await uploadJson(bucket, analysis.report_path, report);
   }
   revalidatePath(`/panel/analizy/${analysis.id}`);
@@ -47,14 +47,16 @@ export async function saveCompanyMethodInputs(formData: FormData): Promise<void>
 }
 
 function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
+  const sharedLoadKg = optionalNumber(formData, "handled_load_kg");
   const riskScore = {
     exposure: optionalText(formData, "risk_exposure"), severity: optionalText(formData, "risk_severity"), probability: optionalText(formData, "risk_probability"),
     activity: optionalText(formData, "risk_activity"), hazard_source: optionalText(formData, "risk_hazard_source"), hazard: optionalText(formData, "risk_hazard"), effect: optionalText(formData, "risk_effect"), controls: optionalText(formData, "risk_controls"),
     psif_sif: optionalText(formData, "risk_psif"), factor_type: optionalText(formData, "risk_factor_type"), work_type: optionalText(formData, "risk_work_type"),
   };
   const sectionTwo: JsonRecord = Object.fromEntries([
-    "weight_kg", "horizontal_distance_cm", "start_hand_height_from_waist_cm", "vertical_travel_cm", "frequency_per_minute", "twist_deg", "distance_m",
+    "horizontal_distance_cm", "start_hand_height_from_waist_cm", "vertical_travel_cm", "frequency_per_minute", "twist_deg", "distance_m",
   ].map((name) => [name, optionalNumber(formData, `ejms_${name}`)]));
+  sectionTwo.weight_kg = sharedLoadKg;
   sectionTwo.grip = optionalText(formData, "ejms_grip");
   const oldEjms = record(previous.ejms) ? previous.ejms : {};
   const oldSectionOne = record(oldEjms.section_i) ? oldEjms.section_i : {};
@@ -69,7 +71,7 @@ function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
   return {
     ...previous,
     schema_version: "1.0", analysis_id: requiredText(formData, "analysis_id"), updated_at: new Date().toISOString(),
-    owas: { ...(record(previous.owas) ? previous.owas : {}), load_kg: optionalNumber(formData, "owas_load_kg"), forced_posture: optionalText(formData, "owas_forced_posture") },
+    owas: { ...(record(previous.owas) ? previous.owas : {}), load_kg: sharedLoadKg, forced_posture: optionalText(formData, "owas_forced_posture") },
     ejms: { ...oldEjms, section_i: sectionOne, section_ii: sectionTwo },
     risk_score: riskScore,
     measurable_factors: measurable,
@@ -86,7 +88,7 @@ function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
 
 function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysisId: string): JsonRecord {
   const output: JsonRecord = record(current) ? structuredClone(current) : {
-    schema_version: "1.0", generated_by: "Ergonomia AI Company Methods Engine", company_methods_version: "company-methods-v1.0-beta.1", analysis_id: analysisId,
+    schema_version: "1.0", generated_by: "Ergonomia AI Company Methods Engine", company_methods_version: "company-methods-v1.1-beta.1", analysis_id: analysisId,
   };
   output.generated_at = new Date().toISOString();
   const riskInput = record(inputs.risk_score) ? inputs.risk_score : {};
@@ -112,9 +114,16 @@ function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysis
       ].filter((item): item is string => item !== null);
       areas[area] = { ...result, force_level: force ?? "UNKNOWN", posture_force_level: postureForce ?? "UNKNOWN", frequency_duration_level: frequency ?? "UNKNOWN", frequency_per_minute: manualFrequency ?? result.frequency_per_minute, frequency_source: manualFrequency === null ? "VIDEO_DERIVED" : "USER_PROVIDED", final_level: score === null ? "UNKNOWN" : postureForce, score, data_status: missing.length ? "PARTIAL" : "COMPLETE", missing_inputs: missing };
     }
-    let sectionOneScore = 0;
-    for (const item of Object.values(areas)) if (record(item) && typeof item.score === "number") sectionOneScore += item.score;
-    ejms.section_i = { ...ejms.section_i, areas, score: sectionOneScore };
+    let knownScore = 0;
+    let possibleMinimum = 0;
+    let possibleMaximum = 0;
+    let complete = true;
+    for (const item of Object.values(areas)) if (record(item)) {
+      if (typeof item.score === "number") knownScore += item.score; else complete = false;
+      if (typeof item.possible_score_min === "number") possibleMinimum += item.possible_score_min;
+      if (typeof item.possible_score_max === "number") possibleMaximum += item.possible_score_max;
+    }
+    ejms.section_i = { ...ejms.section_i, areas, score: complete ? knownScore : null, known_score: knownScore, possible_score_min: possibleMinimum, possible_score_max: possibleMaximum };
   }
   ejms.section_ii = ejmsSectionTwoScore(record(inputs.ejms) && record(inputs.ejms.section_ii) ? inputs.ejms.section_ii : {});
   output.ejms = ejms;
@@ -123,7 +132,7 @@ function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysis
   const forcedPosture = record(inputs.owas) && (inputs.owas.forced_posture === "forced" || inputs.owas.forced_posture === "unforced") ? inputs.owas.forced_posture : null;
   const owas = record(output.owas) ? output.owas : {};
   if (Array.isArray(owas.frames)) {
-    owas.frames = owas.frames.map((item) => {
+    const recalculatedFrames = owas.frames.map((item) => {
       if (!record(item) || !record(item.components)) return item;
       const components = item.components;
       const prefix = ["back", "arms", "legs"].map((name) => {
@@ -133,6 +142,8 @@ function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysis
       const resolved = resolveOwasCode(prefix, loadKg);
       return { ...item, ...resolved, components: { ...item.components, load: { value: loadKg === null ? null : loadKg < 10 ? 1 : loadKg <= 20 ? 2 : 3, source: loadKg === null ? "UNKNOWN" : "USER_PROVIDED", known: loadKg !== null } } };
     });
+    owas.frames = recalculatedFrames;
+    owas.summary = rebuildOwasSummary(recalculatedFrames, record(owas.summary) ? owas.summary : {});
   }
   owas.load_evidence = { value: loadKg, source: loadKg === null ? "UNKNOWN" : "USER_PROVIDED", known: loadKg !== null };
   owas.forced_posture_evidence = { value: forcedPosture, source: forcedPosture === null ? "UNKNOWN" : "USER_PROVIDED", known: forcedPosture !== null };
@@ -198,6 +209,33 @@ function chemicalResult(input: JsonRecord): JsonRecord {
   const safe = input.classified_safe === true;
   const hasData = Object.values(input).some((value) => value !== null && value !== "" && value !== false);
   return { method_id: "chemical-inhalation-company", status: !hasData ? "REQUIRES_DATA" : safe ? "MANUAL" : "PARTIAL", automatic_scoring_enabled: false, classified_safe: safe, inputs: input, risk_level: input.risk_level ?? null, residual_risk_level: input.residual_risk_level ?? null, missing_inputs: safe ? [] : ["IN.06.13"], limitation: "IN.06.13_NOT_INCLUDED" };
+}
+
+function rebuildOwasSummary(frames: unknown[], previous: JsonRecord): JsonRecord {
+  const durations = new Map<number, number>();
+  const postureDurations = new Map<string, number>();
+  let total = 0;
+  for (const raw of frames) {
+    if (!record(raw)) continue;
+    const duration = typeof raw.duration_seconds === "number" ? raw.duration_seconds : 0;
+    total += duration;
+    if (typeof raw.posture_code === "string") postureDurations.set(raw.posture_code, (postureDurations.get(raw.posture_code) ?? 0) + duration);
+    if (typeof raw.category === "number") durations.set(raw.category, (durations.get(raw.category) ?? 0) + duration);
+  }
+  const classified = [...durations.values()].reduce((sum, value) => sum + value, 0);
+  const postureClassified = [...postureDurations.values()].reduce((sum, value) => sum + value, 0);
+  const categoryDuration = Object.fromEntries([1, 2, 3, 4].map((category) => [String(category), Number((durations.get(category) ?? 0).toFixed(6))]));
+  return {
+    ...previous,
+    classified_duration_seconds: Number(classified.toFixed(6)),
+    posture_classified_duration_seconds: Number(postureClassified.toFixed(6)),
+    active_duration_seconds: Number(total.toFixed(6)),
+    category_duration_seconds: categoryDuration,
+    category_ratios: Object.fromEntries(Object.entries(categoryDuration).map(([key, value]) => [key, total > 0 ? Number((value / total).toFixed(6)) : 0])),
+    posture_duration_seconds: Object.fromEntries([...postureDurations].map(([key, value]) => [key, Number(value.toFixed(6))])),
+    posture_coverage_ratio: total > 0 ? Number((postureClassified / total).toFixed(6)) : 0,
+    dominant_category: [...durations.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null,
+  };
 }
 
 function reportCompanySection(value: JsonRecord): JsonRecord {

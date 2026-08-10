@@ -1,13 +1,16 @@
 {
   "name": "ergonomia-ai",
-  "version": "0.8.0-beta.1",
+  "version": "0.9.0-beta.1",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-supervisor.mjs",
+    "dev:web": "next dev",
+    "dev:pipeline": "worker\\.venv\\Scripts\\python.exe worker\\src\\pipeline_supervisor.py",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test:analysis-review": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --experimental-strip-types src/lib/analysis-review/__tests__/*.test.mjs src/lib/company-methods/__tests__/*.test.mjs",
+    "test:dev-supervisor": "node --test scripts/dev-processes.test.mjs",
     "check:release": "node scripts/check-release-version.mjs"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
-# Pose Pipeline V5
+# Pose Pipeline V5.1
 
-Pose V5 (`pose-v5.0-beta.1`, schema `5.0`) zachowuje YOLOX-X, RTMW WholeBody i MediaPipe Hand Landmarker jako bazowe providery. Nie przedstawia jakości jako prawdopodobieństwa ani dokładności względem ground truth.
+Pose V5.1 (`pose-v5.1-beta.1`, schema `5.1`) zachowuje YOLOX-X, RTMW WholeBody i MediaPipe Hand Landmarker jako bazowe providery. Nie przedstawia jakości jako prawdopodobieństwa ani dokładności względem ground truth.
 
 ## Przepływ
 

@@ -218,6 +218,8 @@ class MediaPipeHandEngine:
         frame_bgr: np.ndarray,
         timestamp_ms: int,
         roi_xyxy: tuple[int, int, int, int] | None = None,
+        *,
+        upscale_factor: float = 1.0,
     ) -> list[_Candidate]:
         safe_timestamp = max(self._last_timestamp_ms + 1, int(timestamp_ms))
         self._last_timestamp_ms = safe_timestamp
@@ -237,6 +239,14 @@ class MediaPipeHandEngine:
             selected = frame_bgr[y1:y2, x1:x2]
             offset_x, offset_y = x1, y1
 
+        source_height, source_width = selected.shape[:2]
+        scale = float(np.clip(upscale_factor, 1.0, 3.0))
+        if scale > 1.001:
+            selected = cv2.resize(
+                selected,
+                (max(1, int(round(source_width * scale))), max(1, int(round(source_height * scale)))),
+                interpolation=cv2.INTER_CUBIC,
+            )
         rgb = cv2.cvtColor(selected, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect_for_video(image, safe_timestamp)
@@ -254,8 +264,8 @@ class MediaPipeHandEngine:
             points_px = np.asarray(
                 [
                     [
-                        float(item.x) * width + offset_x,
-                        float(item.y) * height + offset_y,
+                        float(item.x) * width / scale + offset_x,
+                        float(item.y) * height / scale + offset_y,
                     ]
                     for item in landmarks
                 ],

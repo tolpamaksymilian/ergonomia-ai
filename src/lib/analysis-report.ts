@@ -25,7 +25,8 @@ export function parseAnalysisReport(value: unknown): AnalysisReport | null {
   const supportedVersion =
     (value.schema_version === "1.0" && value.report_version === "analysis-report-v1.0") ||
     (value.schema_version === "2.0" && value.report_version === "analysis-report-v2.0-beta.1") ||
-    (value.schema_version === "2.1" && value.report_version === "analysis-report-v2.1-beta.1");
+    (value.schema_version === "2.1" && value.report_version === "analysis-report-v2.1-beta.1") ||
+    (value.schema_version === "2.2" && value.report_version === "analysis-report-v2.2-beta.1");
   if (
     !supportedVersion ||
     value.generated_by !== "Ergonomia AI Report Engine" ||
@@ -53,7 +54,7 @@ export function parseAnalysisReport(value: unknown): AnalysisReport | null {
 export function parseReportSummary(value: unknown): ReportSummary | null {
   if (
     !isRecord(value) ||
-    !["analysis-report-v1.0", "analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1"].includes(String(value.report_version)) ||
+    !["analysis-report-v1.0", "analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1", "analysis-report-v2.2-beta.1"].includes(String(value.report_version)) ||
     typeof value.analysis_id !== "string" ||
     !isRiskLevel(value.overall_level) ||
     typeof value.insufficient_data !== "boolean" ||

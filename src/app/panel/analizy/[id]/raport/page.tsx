@@ -5,7 +5,7 @@ import { ArrowLeft, FileWarning } from "lucide-react";
 
 import { ReportHeader } from "@/components/analyses/report/report-header";
 import { ReportOverview } from "@/components/analyses/report/report-overview";
-import { ReportV2Summary } from "@/components/analyses/report/report-v2-summary";
+import { ReportManualConfirmation, ReportPriorityFindings, ReportRecommendations, ReportV2Summary } from "@/components/analyses/report/report-v2-summary";
 import {
   ReportBodyAreas,
   ReportHands,
@@ -122,16 +122,30 @@ export default async function ReportPage({ params }: ReportPageProps) {
           downloadUrl={downloadAccess.data?.signedUrl ?? null}
         />
         <ReportV2Summary report={report} />
-        <ReportOverview report={report} />
-        <ReportBodyAreas report={report} />
-        <ReportMetrics report={report} />
-        <ReportHands report={report} />
-        <ReportMovement report={report} />
-        <ReportKeyMoments report={report} />
         <ReportQuality report={report} />
+        <ReportPriorityFindings report={report} />
+        <ReportOverview report={report} />
         <ReportAssessment report={report} />
         <ReportCompanyMethods report={report} />
+        <ReportHands report={report} />
+        <ReportMovement report={report} />
+        <ReportManualConfirmation report={report} />
+        <ReportRecommendations report={report} />
         <ReportLimitations report={report} />
+        <details className="report-card rounded-[26px] border border-white/10 bg-white/[0.025] p-6 print:border-slate-300 print:bg-white">
+          <summary className="cursor-pointer font-semibold text-slate-200 focus-visible:outline-2 focus-visible:outline-cyan-200 print:text-black">Załącznik techniczny</summary>
+          <div className="mt-6 space-y-6">
+            <dl className="grid gap-2 text-[10px] text-slate-500 sm:grid-cols-2 lg:grid-cols-4 print:text-slate-700">
+              <div><dt>Pose Pipeline</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.pose_pipeline_version ?? "Brak danych"}</dd></div>
+              <div><dt>Metrics Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.ergonomics_metrics_version}</dd></div>
+              <div><dt>Risk Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.risk_engine_version}</dd></div>
+              <div><dt>Report Engine</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.report_engine_version}</dd></div>
+            </dl>
+            <ReportBodyAreas report={report} />
+            <ReportMetrics report={report} />
+            <ReportKeyMoments report={report} />
+          </div>
+        </details>
       </div>
     </main>
   );

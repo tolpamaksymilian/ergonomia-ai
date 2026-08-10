@@ -18,16 +18,27 @@ from .selection import select_candidate_postures
 from .summary import summarize_method
 
 
-SUPPORTED_METRICS_SCHEMA="1.0"; SUPPORTED_METRICS_VERSION="ergonomics-metrics-v1.0"; SUPPORTED_POSE_SCHEMAS=frozenset({"4.0", "5.0"})
+SUPPORTED_METRICS_SCHEMA="1.0"; SUPPORTED_METRICS_VERSION="ergonomics-metrics-v1.0"; SUPPORTED_POSE_SCHEMAS=frozenset({"4.0", "5.0", "5.1"})
 
 
 def process_assessment_documents(ergonomics: Mapping[str,Any], pose: Mapping[str,Any] | None = None, *, user_context: Mapping[str,Any] | None = None, maximum_candidates:int=12, minimum_quality:float=0.55, calculated_at:str|None=None)->dict[str,Any]:
     started=time.perf_counter(); analysis_id=_validate_inputs(ergonomics,pose)
     frames=ergonomics["frames"]; pose_frames=pose.get("frames",[]) if isinstance(pose,Mapping) else []
+    pose_frames_by_source = {
+        item.get("source_frame_index"): item
+        for item in pose_frames
+        if isinstance(item, Mapping)
+        and isinstance(item.get("source_frame_index"), int)
+        and not isinstance(item.get("source_frame_index"), bool)
+    }
     selection_started=time.perf_counter(); candidates=select_candidate_postures(ergonomics,pose,maximum_candidates=maximum_candidates,minimum_quality=minimum_quality); selection_ms=(time.perf_counter()-selection_started)*1000
     evaluated=[]; rula_started=time.perf_counter(); rula_ms=0.0; reba_ms=0.0
     for candidate in candidates:
-        frame=frames[candidate.frame_position]; pose_frame=pose_frames[candidate.frame_position] if candidate.frame_position<len(pose_frames) and isinstance(pose_frames[candidate.frame_position],Mapping) else None
+        frame=frames[candidate.frame_position]
+        source_frame_index = frame.get("source_frame_index") if isinstance(frame, Mapping) else None
+        pose_frame=pose_frames_by_source.get(source_frame_index)
+        if pose_frame is None and candidate.frame_position<len(pose_frames) and isinstance(pose_frames[candidate.frame_position],Mapping):
+            pose_frame=pose_frames[candidate.frame_position]
         quality=frame_quality(frame,pose_frame)
         rula_clock=time.perf_counter(); rula={side:assess_rula_candidate(frame,side,quality=quality,context=user_context) for side in ("left","right")}; rula_ms+=(time.perf_counter()-rula_clock)*1000
         reba_clock=time.perf_counter(); reba={side:assess_reba_candidate(frame,pose_frame,side,quality=quality,context=user_context) for side in ("left","right")}; reba_ms+=(time.perf_counter()-reba_clock)*1000

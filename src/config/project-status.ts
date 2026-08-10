@@ -1,5 +1,7 @@
 export type ProjectStageStatus = "completed" | "in_progress" | "planned";
 
+export const POSE_PIPELINE_VERSION = "pose-v5.1-beta.1";
+
 export type ProjectStageGroup =
   | "foundation"
   | "vision"
@@ -60,7 +62,7 @@ const stages = [
   { id: "company-method-inputs", title: "Dane kontekstowe metod", description: "Prywatny zapis i przeliczanie bez ponownego uruchamiania GPU.", status: "completed", group: "risk" },
   { id: "production-profile", title: "Produkcyjny profil progów", description: "Profil zatwierdzony przez specjalistę.", status: "planned", group: "risk" },
   { id: "threshold-panel", title: "Panel progów", description: "Konfiguracja wersjonowanych profili.", status: "planned", group: "risk" },
-  { id: "report-engine", title: "Report Engine V2.1", description: "Deterministyczne wnioski, dowody i osobna sekcja metod zakładowych.", status: "completed", group: "reporting" },
+  { id: "report-engine", title: "Report Engine V2.2", description: "Rozdzielone pokrycie przetwarzania, sylwetki, metryk i regionów oraz poprawna semantyka braków.", status: "completed", group: "reporting" },
   { id: "report-worker", title: "Report Worker V1", description: "Osobny etap generowania raportu po ocenie ryzyka.", status: "completed", group: "reporting" },
   { id: "report-json", title: "analysis-report.json", description: "Wersjonowany raport w prywatnym Storage.", status: "completed", group: "reporting" },
   { id: "report-page", title: "Strona raportu", description: "Czytelna prezentacja raportu w panelu.", status: "completed", group: "reporting" },
@@ -72,8 +74,9 @@ const stages = [
   { id: "rula", title: "RULA beta", description: "Evidence-aware ocena kończyn górnych z jawnym zakresem braków.", status: "completed", group: "reporting" },
   { id: "reba", title: "REBA beta", description: "Evidence-aware ocena całego ciała bez zgadywania obciążenia.", status: "completed", group: "reporting" },
   { id: "pipeline-manager", title: "Pipeline Manager", description: "Jeden nadzorowany start pełnego łańcucha workerów.", status: "completed", group: "infrastructure" },
+  { id: "pipeline-supervisor", title: "Pipeline Supervisor", description: "Automatyczny start, heartbeat, preflight i kontrolowany restart lokalnego pipeline’u.", status: "completed", group: "infrastructure" },
   { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
-  { id: "beta-release", title: "Wersja testowa", description: "Metody zakładowe OWAS i EJMS w v0.8.0-beta.1 gotowe do testów.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa", description: "Autonomiczny pipeline i Report V2.2 w v0.9.0-beta.1 gotowe do testów.", status: "completed", group: "infrastructure" },
   { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
   { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
@@ -98,18 +101,19 @@ export const projectStageGroups: ReadonlyArray<{
 export const projectStatus = {
   projectName: "Ergonomia AI",
   versions: {
-    application: "v0.8.0-beta.1",
-    worker: "v0.6.0-beta.1",
-    posePipeline: "pose-v5.0-beta.1",
+    application: "v0.9.0-beta.1",
+    worker: "v0.7.0-beta.1",
+    supervisor: "pipeline-supervisor-v1.0-beta.1",
+    posePipeline: POSE_PIPELINE_VERSION,
     ergonomicsMetricsEngine: "v1.0",
     riskEngine: "v1.0",
-    reportEngine: "analysis-report-v2.1-beta.1",
+    reportEngine: "analysis-report-v2.2-beta.1",
     assessmentEngine: "assessment-v1.0-beta.1",
     rula: "rula-v1.0-beta.1",
     reba: "reba-v1.0-beta.1",
-    companyMethods: "company-methods-v1.0-beta.1",
-    owas: "owas-company-v1.0-beta.1",
-    ejms: "ejms-company-v1.0-beta.1",
+    companyMethods: "company-methods-v1.1-beta.1",
+    owas: "owas-company-v1.1-beta.1",
+    ejms: "ejms-company-v1.1-beta.1",
     workerMode: "Lokalny",
     finalReport: "Dostępny jako JSON i widok panelu",
   },
@@ -118,7 +122,7 @@ export const projectStatus = {
     "upload", "preprocessing", "pose-v3", "hands", "metrics-engine",
     "ergonomics-worker", "risk-engine", "risk-worker", "report-engine",
     "report-worker", "report-json", "report-page", "report-completion",
-    "pipeline-manager", "live-status", "beta-release",
+    "pipeline-manager", "pipeline-supervisor", "live-status", "beta-release",
   ].includes(stage.id)),
   publicWorkflow: [
     { id: "upload", title: "Prześlij film", description: "Nagranie trafia do prywatnego magazynu i kolejki.", status: "completed", group: "foundation" },

@@ -167,9 +167,9 @@ def longest_sequence_seconds(
 
 def _timestamp(frame: dict[str, Any]) -> float | None:
     for field in (
+        "source_timestamp_seconds",
         "timestamp",
         "output_timestamp_seconds",
-        "source_timestamp_seconds",
     ):
         value = frame.get(field)
         if (

@@ -12,7 +12,7 @@ Engine przyjmuje metadane rekordu analizy oraz dwa prywatne dokumenty:
 - `risk-assessment.json` w schemacie `1.0`.
 
 Weryfikuje wersje i zgodność `analysis_id`, a następnie tworzy
-`analysis-report.json` w wersji `analysis-report-v2.1-beta.1`. Raport zawiera metadane
+`analysis-report.json` w wersji `analysis-report-v2.2-beta.1`. Raport zawiera metadane
 analizy, informacje o przetwarzaniu i jakości danych, podsumowanie ryzyka,
 obszary ciała, ograniczoną listę metryk, kluczowe momenty, deterministyczne
 obserwacje, ograniczenia oraz jeden disclaimer. Nie powiela danych klatkowych.

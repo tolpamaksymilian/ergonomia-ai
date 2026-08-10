@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0-beta.1] - 2026-08-10
+
+- Lokalny Pipeline Supervisor uruchamiany razem z Next.js, z preflightem, heartbeat, blokadą pojedynczej instancji i kontrolowanym restartem.
+- Watchdog analizy i lokalny, zabezpieczony endpoint diagnostyczny rozróżniają kolejkę, pracę, stall oraz niedostępny worker.
+- Pose Pipeline `pose-v5.1-beta.1` zachowuje źródłową oś czasu, obsługuje wiele aktywnych fragmentów i ograniczony Hand Rescue.
+- Report `analysis-report-v2.2-beta.1` rozdziela processing, pose, metric i region coverage oraz zachowuje semantykę braku danych.
+- OWAS i EJMS `v1.1-beta.1` raportują wynik częściowy bez udawania wartości końcowej.
+
 ## [0.8.0-beta.1] - 2026-08-10
 
 - Forensic audit sześciu arkuszy `testy.xlsx`, 159 unikalnych grafik i źródłowych anomalii.

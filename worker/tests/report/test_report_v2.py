@@ -17,8 +17,8 @@ def _elevate(risk, metric_name, level="high", duration=2.0):
 def test_report_v2_has_concise_decision_sections(analysis_metadata, ergonomics_document, risk_document):
     _elevate(risk_document, "trunk_inclination_deg")
     report = build_analysis_report(analysis_metadata, ergonomics_document, risk_document)
-    assert report["schema_version"] == "2.1"
-    assert report["report_version"] == "analysis-report-v2.1-beta.1"
+    assert report["schema_version"] == "2.2"
+    assert report["report_version"] == "analysis-report-v2.2-beta.1"
     assert len(report["executive_summary"]) <= 6
     assert len(report["priority_findings"]) <= 6
     assert len(report["recommendations"]) <= 5
@@ -53,7 +53,23 @@ def test_manual_confirmation_preserves_partial_assessment_and_unknown_load():
     assessment = {"rula": {"status": "PARTIAL", "representative": {"missing_inputs": ["external_load"]}}}
     items = build_manual_confirmation(assessment, valid_metric_ratio=0.5, hand_activity={"external_load_known": False})
     codes = {item["code"] for item in items}
-    assert {"limited_data_coverage", "rula_external_load", "external_load_unknown"}.issubset(codes)
+    assert "limited_data_coverage" not in codes
+    assert "handled_load" in codes
+    assert len([item for item in items if item["code"] == "handled_load"]) == 1
+
+
+def test_manual_confirmation_skips_input_that_cannot_change_score_range():
+    assessment = {
+        "rula": {
+            "status": "PARTIAL",
+            "representative": {
+                "score_range": {"min": 4, "max": 4},
+                "missing_inputs": ["rula_force_load"],
+            },
+        },
+    }
+    items = build_manual_confirmation(assessment, valid_metric_ratio=0.9, hand_activity={"external_load_known": True})
+    assert items == []
 
 
 def test_recommendations_can_be_disabled(analysis_metadata, ergonomics_document, risk_document):
