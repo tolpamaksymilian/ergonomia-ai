@@ -2,7 +2,7 @@
 
 System do analizy ergonomii pracy na podstawie krótkiego nagrania wideo.
 
-**Aktualna wersja: v0.7.0-beta.1 — Robust Multimodal Pose Pipeline i Report 2.0.**
+**Aktualna wersja: v0.8.0-beta.1 — metody zakładowe OWAS, EJMS i Report 2.1.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 

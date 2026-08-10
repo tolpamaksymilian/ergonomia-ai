@@ -1,0 +1,97 @@
+{
+  "method_id": "company-source-anomalies",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "ALL",
+  "source_ranges": [
+    "workbook.xml",
+    "xl/worksheets/*",
+    "xl/comments*",
+    "xl/drawings/*",
+    "xl/media/*"
+  ],
+  "source_status": "AUDITED",
+  "rules": {},
+  "thresholds": {},
+  "labels": {},
+  "known_anomalies": [
+    {
+      "id": "OWAS_DUPLICATE_3133",
+      "method": "OWAS",
+      "source_ref": "OWAS!AB217:AC218",
+      "status": "AMBIGUOUS_SOURCE",
+      "detail": "Code 3133 maps to categories 3 and 2."
+    },
+    {
+      "id": "OWAS_MISSING_CODES",
+      "method": "OWAS",
+      "source_ref": "OWAS!AB79:AC330",
+      "status": "BROKEN",
+      "detail": "Expected codes 2133, 4173 and 4373 are missing."
+    },
+    {
+      "id": "OWAS_INVALID_CODES",
+      "method": "OWAS",
+      "source_ref": "OWAS!AB329:AC330",
+      "status": "BROKEN",
+      "detail": "Codes 7173 and 7373 have an invalid back digit."
+    },
+    {
+      "id": "OWAS_APPROXIMATE_LOOKUP",
+      "method": "OWAS",
+      "source_ref": "OWAS!AW354",
+      "status": "AMBIGUOUS",
+      "detail": "VLOOKUP uses TRUE, so absent codes can resolve approximately; runtime spec requires exact match."
+    },
+    {
+      "id": "OWAS_TIME_DISTRIBUTION_OVERLAP",
+      "method": "OWAS",
+      "source_ref": "OWAS!BA63:BB66",
+      "status": "AMBIGUOUS_SOURCE",
+      "detail": "For unforced category 1 at 50-70%, rows 63/64 and 65/66 can assign different levels. Runtime preserves all matching rules and reports SOURCE_AMBIGUOUS."
+    },
+    {
+      "id": "RISK_SCORE_FORMULA_MISSING",
+      "method": "Risk Score",
+      "source_ref": "form_ Risk_Score!AI6:AI17",
+      "status": "SOURCE_FORMULA_MISSING",
+      "detail": "Risk value cells contain no executable formula."
+    },
+    {
+      "id": "RISK_SCORE_BROKEN_REFS",
+      "method": "Risk Score",
+      "source_ref": "form_ Risk_Score!AJ6:AJ17",
+      "status": "BROKEN",
+      "detail": "Eleven category formulas contain #REF! and AJ7 references AI17 instead of AI7."
+    },
+    {
+      "id": "EJMS_RANKING_CONFLICT",
+      "method": "EJMS",
+      "source_ref": "EJMS!A9:C11",
+      "status": "SOURCE_THRESHOLD_CONFLICT",
+      "detail": "Low is shown as >=44 while moderate is 45-84, producing overlap and excluding expected lower scores."
+    },
+    {
+      "id": "EJMS_BROKEN_REFERENCE",
+      "method": "EJMS",
+      "source_ref": "EJMS!S11",
+      "status": "BROKEN_SOURCE_REFERENCE",
+      "detail": "Formula uses R23>=Y1416; Y1416 is outside the used range and empty."
+    },
+    {
+      "id": "CHEM_EXTERNAL_REFERENCE",
+      "method": "Chemical inhalation",
+      "source_ref": "form_chemia!B4,E4",
+      "status": "EXTERNAL_REFERENCE_REQUIRED",
+      "detail": "Hazard and volatility rules depend on IN.06.13, which is not embedded."
+    },
+    {
+      "id": "BROKEN_DEFINED_NAMES",
+      "method": "Workbook",
+      "source_ref": "workbook.xml/definedNames",
+      "status": "BROKEN",
+      "detail": "Global FQ is #REF! and several names point to absent external sheets [1]Ergonomiczne, [1]Opis stanowiska pracy and [2]do not delete."
+    }
+  ]
+}

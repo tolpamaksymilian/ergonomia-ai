@@ -19,10 +19,11 @@ test("parser keeps Report V1 compatibility", () => {
 
 test("parser accepts Report V2", () => {
   assert.ok(parseAnalysisReport({ ...base, schema_version: "2.0", report_version: "analysis-report-v2.0-beta.1", executive_summary: [] }));
+  assert.ok(parseAnalysisReport({ ...base, schema_version: "2.1", report_version: "analysis-report-v2.1-beta.1", executive_summary: [] }));
 });
 
 test("summary parser accepts both report versions", () => {
   const summary = { analysis_id: "a", overall_level: "low", insufficient_data: false, valid_metric_ratio: 1, key_moments_count: 0, metric_count: 14, profile_status: "development" };
   assert.ok(parseReportSummary({ ...summary, report_version: "analysis-report-v1.0" }));
-  assert.ok(parseReportSummary({ ...summary, report_version: "analysis-report-v2.0-beta.1" }));
+  assert.ok(parseReportSummary({ ...summary, report_version: "analysis-report-v2.1-beta.1" }));
 });

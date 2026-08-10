@@ -1,6 +1,6 @@
 # Analysis Report V2
 
-`analysis-report-v2.0-beta.1` jest deterministycznym, krótkim widokiem istniejących wyników Pose, Metrics, Risk i Assessment. Nie przelicza RULA/REBA i nie używa modelu językowego.
+`analysis-report-v2.1-beta.1` jest deterministycznym, krótkim widokiem istniejących wyników Pose, Metrics, Risk i Assessment. Nie przelicza RULA/REBA i nie używa modelu językowego.
 
 ## Sekcje
 

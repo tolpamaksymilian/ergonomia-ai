@@ -1,0 +1,350 @@
+{
+  "method_id": "company-hazard-catalog",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "Lista zagrożeń",
+  "source_ranges": [
+    "A3:D44"
+  ],
+  "source_status": "VERIFIED_WITH_GAPS",
+  "rules": {
+    "user_defined_values_allowed": true,
+    "preserve_source_labels": true
+  },
+  "thresholds": {},
+  "labels": {},
+  "known_anomalies": [
+    "Some source/effects cells are blank; blanks are preserved as null."
+  ],
+  "hazards": [
+    {
+      "id": "hazard-001",
+      "source_label": "Hałas",
+      "display_label": "Hałas",
+      "source": "Pracujące maszyny, urządzenia",
+      "effects": "Urazy oraz choroby układu słuchu, bóle głowy, rozdrażnienie",
+      "source_ref": "Lista zagrożeń!A4:D4"
+    },
+    {
+      "id": "hazard-002",
+      "source_label": "Hałas utradźwiękowy",
+      "display_label": "Hałas utradźwiękowy",
+      "source": "Maszyny i urządzenia np. myjka utradźwiękowa",
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A5:D5"
+    },
+    {
+      "id": "hazard-003",
+      "source_label": "Katastrofa lotnicza",
+      "display_label": "Katastrofa lotnicza",
+      "source": "Lokalizacja zakładu pracy ",
+      "effects": "Ciężkie obrażenia ciała, śmierć",
+      "source_ref": "Lista zagrożeń!A6:D6"
+    },
+    {
+      "id": "hazard-004",
+      "source_label": "Kontakt z gorącą powierzchnią ",
+      "display_label": "Kontakt z gorącą powierzchnią",
+      "source": "Rozgrzewanie wtryskarki",
+      "effects": "Poparzenia",
+      "source_ref": "Lista zagrożeń!A7:D7"
+    },
+    {
+      "id": "hazard-005",
+      "source_label": "Kontakt z gorącą substancją, materiałem płynnym",
+      "display_label": "Kontakt z gorącą substancją, materiałem płynnym",
+      "source": "Przygotowanie kawy,  rozszczelnienie układów chłodzenia, rogrzewanie wtryskarki",
+      "effects": "Oblanie kawą, rozerwanie zaworów hydraulicznych ?",
+      "source_ref": "Lista zagrożeń!A8:D8"
+    },
+    {
+      "id": "hazard-006",
+      "source_label": "Kontakt z ostrymi krawędziami",
+      "display_label": "Kontakt z ostrymi krawędziami",
+      "source": "Elementy maszyn, stosowane narzędzia, pośpiech podczas wykonywania pracy, brak odpowiednich środków ochrony",
+      "effects": "Rany cięte, amputacje",
+      "source_ref": "Lista zagrożeń!A9:D9"
+    },
+    {
+      "id": "hazard-007",
+      "source_label": "Mikroklimat",
+      "display_label": "Mikroklimat",
+      "source": "Wysoka/niska temperatura wewnatrz budynków",
+      "effects": "Zmęczenie, bóle głowy, zasłabnięcie, przeziębienia, grypy, coroby układu oddechowego ",
+      "source_ref": "Lista zagrożeń!A10:D10"
+    },
+    {
+      "id": "hazard-008",
+      "source_label": "Nadmierne obciążenie pracą",
+      "display_label": "Nadmierne obciążenie pracą",
+      "source": "Praca zmianowa, praca w nocy",
+      "effects": "Praca w nocy, praca zmianowa",
+      "source_ref": "Lista zagrożeń!A11:D11"
+    },
+    {
+      "id": "hazard-009",
+      "source_label": "Obciążenie psychiczne, stres",
+      "display_label": "Obciążenie psychiczne, stres",
+      "source": null,
+      "effects": "dla stanowisk kierowniczych",
+      "source_ref": "Lista zagrożeń!A12:D12"
+    },
+    {
+      "id": "hazard-010",
+      "source_label": "Oblanie/ zachlapanie substancją niebezpieczną",
+      "display_label": "Oblanie/ zachlapanie substancją niebezpieczną",
+      "source": "Stosowanie substancji niebepziecznych ",
+      "effects": "Alergia, poparzenia chemiczne",
+      "source_ref": "Lista zagrożeń!A13:D13"
+    },
+    {
+      "id": "hazard-011",
+      "source_label": "Odprysk materiału",
+      "display_label": "Odprysk materiału",
+      "source": "Obróbka materiałów, mocowanie elementów, piny na liniach łańuchowych MS",
+      "effects": "Urazy oczu, części ciała ",
+      "source_ref": "Lista zagrożeń!A14:D14"
+    },
+    {
+      "id": "hazard-012",
+      "source_label": "Pochwycenie części ciała, włosów lub odzieży",
+      "display_label": "Pochwycenie części ciała, włosów lub odzieży",
+      "source": null,
+      "effects": "Przygniecenie, zmiażdzenie, obcięcie, głębokie rany cięte, szarpane, kłute",
+      "source_ref": "Lista zagrożeń!A15:D15"
+    },
+    {
+      "id": "hazard-013",
+      "source_label": "Połknięcie substancji niebepziecznej ",
+      "display_label": "Połknięcie substancji niebepziecznej",
+      "source": "Stosowanie substancji niebepziecznych ",
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A16:D16"
+    },
+    {
+      "id": "hazard-014",
+      "source_label": "Porażenie prądem elektrycznym ",
+      "display_label": "Porażenie prądem elektrycznym",
+      "source": "Prace w rozdzielniach elektrycznych",
+      "effects": "Poparzenia, urazy wielonarządowe, śmierć",
+      "source_ref": "Lista zagrożeń!A17:D17"
+    },
+    {
+      "id": "hazard-015",
+      "source_label": "Poślizgnięcie - upadek na niższy poziom",
+      "display_label": "Poślizgnięcie - upadek na niższy poziom",
+      "source": "Rozlane ciecze na stanowiskach pracy, ciągach komunikacyjnych",
+      "effects": "Urazy ciała, wstrząśnienie mózgu, śmierć",
+      "source_ref": "Lista zagrożeń!A18:D18"
+    },
+    {
+      "id": "hazard-016",
+      "source_label": "Poślizgnięcie - upadek na tym samym poziomie",
+      "display_label": "Poślizgnięcie - upadek na tym samym poziomie",
+      "source": "Rozlane ciecze na stanowiskach pracy, ciągach komunikacyjnych",
+      "effects": "Urazy kończyn  - zwichnięcia, złamania itp.",
+      "source_ref": "Lista zagrożeń!A19:D19"
+    },
+    {
+      "id": "hazard-017",
+      "source_label": "Potknięcie - upadek na niższy poziom",
+      "display_label": "Potknięcie - upadek na niższy poziom",
+      "source": "Brak porządku, pośpiech, zastawione ciągi komunikacyjne",
+      "effects": "Urazy ciała, wstrząśnienie mózgu, śmierć",
+      "source_ref": "Lista zagrożeń!A20:D20"
+    },
+    {
+      "id": "hazard-018",
+      "source_label": "Potknięcie - upadek na tym samym poziomie",
+      "display_label": "Potknięcie - upadek na tym samym poziomie",
+      "source": "Brak porządku, pośpiech, zastawione ciągi komunikacyjne",
+      "effects": "Urazy kończyn  - zwichnięcia, złamania itp.",
+      "source_ref": "Lista zagrożeń!A21:D21"
+    },
+    {
+      "id": "hazard-019",
+      "source_label": "Potrącenie przez obiekt w ruchu ",
+      "display_label": "Potrącenie przez obiekt w ruchu",
+      "source": null,
+      "effects": "Najechanie na stopę, przeładunek formy wtryskarki, (skuter, pojazd, inna osoba, drzwi od toalety)",
+      "source_ref": "Lista zagrożeń!A22:D22"
+    },
+    {
+      "id": "hazard-020",
+      "source_label": "Pożar - sytuacje awaryjne",
+      "display_label": "Pożar - sytuacje awaryjne",
+      "source": "Infrastruktura - uszkodzenie instalacji elektrycznej ",
+      "effects": "Ciężkie obrażenia ciała, śmierć",
+      "source_ref": "Lista zagrożeń!A23:D23"
+    },
+    {
+      "id": "hazard-021",
+      "source_label": "Pożar - zagrożenie procesowe",
+      "display_label": "Pożar - zagrożenie procesowe",
+      "source": "Spawanie, szlifowanie, cięcie (prace pożarowo niebezpieczne)",
+      "effects": "Poparzenia",
+      "source_ref": "Lista zagrożeń!A24:D24"
+    },
+    {
+      "id": "hazard-022",
+      "source_label": "Promieniowane optyczne",
+      "display_label": "Promieniowane optyczne",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A25:D25"
+    },
+    {
+      "id": "hazard-023",
+      "source_label": "Promieniowane rentgenowskie",
+      "display_label": "Promieniowane rentgenowskie",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A26:D26"
+    },
+    {
+      "id": "hazard-024",
+      "source_label": "Promieniowanie elekromagnetyczne",
+      "display_label": "Promieniowanie elekromagnetyczne",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A27:D27"
+    },
+    {
+      "id": "hazard-025",
+      "source_label": "Promieniowanie magnetyczne",
+      "display_label": "Promieniowanie magnetyczne",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A28:D28"
+    },
+    {
+      "id": "hazard-026",
+      "source_label": "Promieniowanie UV, podczerwone",
+      "display_label": "Promieniowanie UV, podczerwone",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A29:D29"
+    },
+    {
+      "id": "hazard-027",
+      "source_label": "Przeciążenie narządu wzroku ",
+      "display_label": "Przeciążenie narządu wzroku",
+      "source": "Niedostateczne oświetlenie stanowiska pracy, praca przy komputerze",
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A30:D30"
+    },
+    {
+      "id": "hazard-028",
+      "source_label": "Przeciążenie układu mięśniowo-szkieletowego - obciążenia  dynamiczne",
+      "display_label": "Przeciążenie układu mięśniowo-szkieletowego - obciążenia  dynamiczne",
+      "source": "Podnoszenie, przenoszenie materiałów/KLT, ciągnięcie wózków, ",
+      "effects": "Urazy,",
+      "source_ref": "Lista zagrożeń!A31:D31"
+    },
+    {
+      "id": "hazard-029",
+      "source_label": "Przeciążenie układu mięśniowo-szkieletowego - obciążenia statyczne ",
+      "display_label": "Przeciążenie układu mięśniowo-szkieletowego - obciążenia statyczne",
+      "source": "Długotrwała praca przy komputerze,  długotrwała praca w pozycji stojącej (linia produkcyjna), ograniczona przestrzeń robocza",
+      "effects": "Bóle pleców, bóle mięśni, zwyrodnienia kręgosłupa",
+      "source_ref": "Lista zagrożeń!A32:D32"
+    },
+    {
+      "id": "hazard-030",
+      "source_label": "Uderzenie elementem w ruchu (narzędzia, montowany element,elementy będące pod ciśnieniem)",
+      "display_label": "Uderzenie elementem w ruchu (narzędzia, montowany element,elementy będące pod ciśnieniem)",
+      "source": null,
+      "effects": "odpryski, montowane elementy, narzędzia",
+      "source_ref": "Lista zagrożeń!A33:D33"
+    },
+    {
+      "id": "hazard-031",
+      "source_label": "Uderzenie o elementy stałe",
+      "display_label": "Uderzenie o elementy stałe",
+      "source": "Poruszanie się po terenie zakładu ",
+      "effects": "np.. Wystające elementy",
+      "source_ref": "Lista zagrożeń!A34:D34"
+    },
+    {
+      "id": "hazard-032",
+      "source_label": "Upadek z wysokości - prace na wysokości ",
+      "display_label": "Upadek z wysokości - prace na wysokości",
+      "source": null,
+      "effects": "Ciężkie obrażenia ciała, śmierć",
+      "source_ref": "Lista zagrożeń!A35:D35"
+    },
+    {
+      "id": "hazard-033",
+      "source_label": "Wdychanie oparów, mgieł, aerozoli substancji niebepziecznych",
+      "display_label": "Wdychanie oparów, mgieł, aerozoli substancji niebepziecznych",
+      "source": "Stosowanie substancji niebepziecznych ",
+      "effects": "Poparzenia/podrażnienia układu oddechowego",
+      "source_ref": "Lista zagrożeń!A36:D36"
+    },
+    {
+      "id": "hazard-034",
+      "source_label": "Wibracje (miejscowe, ogólne)",
+      "display_label": "Wibracje (miejscowe, ogólne)",
+      "source": "Poruszanie się wózkiem widłowym, stosowane narzedzia",
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A37:D37"
+    },
+    {
+      "id": "hazard-035",
+      "source_label": "Wirusy, bakterie (zagrożenia biologiczne)",
+      "display_label": "Wirusy, bakterie (zagrożenia biologiczne)",
+      "source": "Pracownik w czasie choroby, Niedostateczna higiena (mycie rąk)",
+      "effects": "Grypa, Choroby wirusowe, choroby bateryjne",
+      "source_ref": "Lista zagrożeń!A38:D38"
+    },
+    {
+      "id": "hazard-036",
+      "source_label": "Wybuch - sytuacje awaryjne",
+      "display_label": "Wybuch - sytuacje awaryjne",
+      "source": "Infrastruktura",
+      "effects": "Ciężkie obrażenia ciała, śmierć",
+      "source_ref": "Lista zagrożeń!A39:D39"
+    },
+    {
+      "id": "hazard-037",
+      "source_label": "Wybuch - zagrożenie procesowe",
+      "display_label": "Wybuch - zagrożenie procesowe",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A40:D40"
+    },
+    {
+      "id": "hazard-038",
+      "source_label": "Wypadek komunikacyjny ",
+      "display_label": "Wypadek komunikacyjny",
+      "source": "Podróże służbowe, poruszanie się między budynkami na terenie kampusu",
+      "effects": "Złamania, ciężkie urazy ciała, śmierć",
+      "source_ref": "Lista zagrożeń!A41:D41"
+    },
+    {
+      "id": "hazard-039",
+      "source_label": "Zaprószenie pyłem ",
+      "display_label": "Zaprószenie pyłem",
+      "source": null,
+      "effects": "Urazy oczu, choroby oczu np. czyszczenie pojemników, szlifowanie",
+      "source_ref": "Lista zagrożeń!A42:D42"
+    },
+    {
+      "id": "hazard-040",
+      "source_label": "Zapylenie (czynnik oddziaływujący na układ oddechowy)",
+      "display_label": "Zapylenie (czynnik oddziaływujący na układ oddechowy)",
+      "source": null,
+      "effects": null,
+      "source_ref": "Lista zagrożeń!A43:D43"
+    },
+    {
+      "id": "hazard-041",
+      "source_label": "Zmienne warunki pracy",
+      "display_label": "Zmienne warunki pracy",
+      "source": "Naprzemienna praca wewnatrz i na zewnątrz budynków",
+      "effects": "Chroby układu oddechowego, zasłabnięcia",
+      "source_ref": "Lista zagrożeń!A44:D44"
+    }
+  ]
+}

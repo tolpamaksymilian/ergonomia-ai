@@ -1,0 +1,1866 @@
+{
+  "method_id": "owas-company",
+  "version": "owas-company-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "OWAS",
+  "source_ranges": [
+    "E81:O87",
+    "AB79:AC330",
+    "S60:S72",
+    "BA63:BB72"
+  ],
+  "source_status": "VERIFIED_WITH_ANOMALIES",
+  "rules": {
+    "code_order": [
+      "back",
+      "arms",
+      "legs",
+      "load"
+    ],
+    "lookup_mode": "EXACT_ONLY",
+    "load_is_manual": true,
+    "unknown_load_status": "PARTIAL",
+    "unknown_pose_component": "UNKNOWN",
+    "back": {
+      "1": "Wyprostowane",
+      "2": "Zgięte do przodu",
+      "3": "Skręcone",
+      "4": "Zgięte i skręcone"
+    },
+    "arms": {
+      "1": "Obydwa poniżej obręczy barkowej",
+      "2": "Jedno powyżej obręczy barkowej",
+      "3": "Obydwa powyżej obręczy barkowej"
+    },
+    "legs": {
+      "1": "Pozycja siedząca",
+      "2": "Stojąca z nogami wyprostowanymi",
+      "3": "Stojąca z jedną nogą wyprostowaną",
+      "4": "Stojąca z nogami zgiętymi",
+      "5": "Stojąca z jedną nogą zgiętą",
+      "6": "Klęczenie na jednym lub obu kolanach",
+      "7": "Chodzenie"
+    },
+    "load": {
+      "1": "Masa poniżej 10 kg",
+      "2": "Masa od 10 do 20 kg",
+      "3": "Masa powyżej 20 kg"
+    },
+    "time_distribution": {
+      "duration_source": "frame timestamps, FPS fallback",
+      "active_work_denominator": true,
+      "forced_posture_requires_user_evidence": true
+    }
+  },
+  "thresholds": {
+    "load_kg": [
+      {
+        "code": 1,
+        "maximum_exclusive": 10
+      },
+      {
+        "code": 2,
+        "minimum": 10,
+        "maximum": 20
+      },
+      {
+        "code": 3,
+        "minimum_exclusive": 20
+      }
+    ],
+    "time_distribution": [
+      { "source_ref": "BA63:BB63", "posture": "unforced", "categories": [1], "maximum_ratio": 0.7, "level": "SMALL" },
+      { "source_ref": "BA64:BB64", "posture": "unforced", "categories": [1], "minimum_ratio_exclusive": 0.7, "level": "MEDIUM" },
+      { "source_ref": "BA65:BB65", "posture": "unforced", "categories": [1, 2], "minimum_ratio": 0.5, "maximum_ratio": 0.7, "level": "MEDIUM" },
+      { "source_ref": "BA66:BB66", "posture": "unforced", "categories": [1, 2], "maximum_ratio": 0.5, "level": "SMALL" },
+      { "source_ref": "BA67:BB67", "posture_by_category": { "1": "forced", "2": "unforced" }, "categories": [1, 2], "minimum_ratio_exclusive": 0.7, "level": "LARGE" },
+      { "source_ref": "BA68:BB68", "posture": "forced", "categories": [2], "minimum_ratio": 0.3, "maximum_ratio": 0.5, "level": "MEDIUM" },
+      { "source_ref": "BA69:BB69", "posture": "forced", "categories": [2], "maximum_ratio": 0.3, "level": "SMALL" },
+      { "source_ref": "BA70:BB70", "posture": "forced", "categories": [2], "minimum_ratio_exclusive": 0.5, "level": "LARGE" },
+      { "source_ref": "BA71:BB71", "posture": "forced", "categories": [3, 4], "maximum_ratio": 0.3, "level": "MEDIUM" },
+      { "source_ref": "BA72:BB72", "posture": "forced", "categories": [3, 4], "minimum_ratio_exclusive": 0.3, "level": "LARGE" }
+    ]
+  },
+  "labels": {
+    "categories": {
+      "1": "Kategoria 1",
+      "2": "Kategoria 2",
+      "3": "Kategoria 3",
+      "4": "Kategoria 4"
+    }
+  },
+  "lookup": {
+    "1111": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1112": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1113": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1121": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1122": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1123": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1131": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1132": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1133": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1141": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1142": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1143": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1151": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1152": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1153": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1161": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1162": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1163": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1171": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1172": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1173": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1211": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1212": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1213": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1221": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1222": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1223": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1231": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1232": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1233": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1241": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1242": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1243": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1251": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1252": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1253": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1261": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1262": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1263": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1271": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1272": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1273": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1311": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1312": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1313": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1321": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1322": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1323": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1331": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1332": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1333": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1341": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1342": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1343": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "1351": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1352": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "1353": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "1361": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1362": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1363": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1371": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1372": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "1373": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2111": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2112": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2113": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2121": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2122": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2123": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2131": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2132": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2141": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2142": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2143": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2151": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2152": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2153": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2161": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2162": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2163": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2171": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2172": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2173": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2211": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2212": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2213": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2221": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2222": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2223": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2231": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2232": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2233": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2241": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2242": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2243": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2251": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2252": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2253": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2261": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2262": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2263": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2271": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2272": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2273": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2311": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2312": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2313": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2321": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2322": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2323": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2331": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2332": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2333": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2341": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2342": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2343": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2351": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2352": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2353": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2361": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2362": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2363": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "2371": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "2372": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "2373": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3111": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3112": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3113": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3121": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3122": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3123": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3131": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3132": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3133": {
+      "categories": [
+        2,
+        3
+      ],
+      "status": "SOURCE_AMBIGUOUS"
+    },
+    "3141": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3142": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3143": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3151": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3152": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3153": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3161": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3162": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3163": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3171": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3172": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3173": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3211": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3212": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3213": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3221": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3222": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3223": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3231": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3232": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3233": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3241": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3242": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3243": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3251": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3252": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3253": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3261": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3262": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3263": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3271": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3272": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3273": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3311": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3312": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3313": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3321": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3322": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3323": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3331": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "3332": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3333": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "3341": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3342": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3343": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3351": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3352": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3353": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3361": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3362": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3363": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "3371": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3372": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "3373": {
+      "categories": [
+        1
+      ],
+      "status": "VERIFIED"
+    },
+    "4111": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4112": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4113": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4121": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4122": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4123": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4131": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4132": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4133": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4141": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4142": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4143": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4151": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4152": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4153": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4161": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4162": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4163": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4171": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4172": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4211": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4212": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4213": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4221": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4222": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4223": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4231": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4232": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4233": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4241": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4242": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4243": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4251": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4252": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4253": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4261": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4262": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4263": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4271": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4272": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4273": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4311": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4312": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4313": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4321": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4322": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4323": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4331": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4332": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "4333": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4341": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4342": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4343": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4351": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4352": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4353": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4361": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4362": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4363": {
+      "categories": [
+        4
+      ],
+      "status": "VERIFIED"
+    },
+    "4371": {
+      "categories": [
+        2
+      ],
+      "status": "VERIFIED"
+    },
+    "4372": {
+      "categories": [
+        3
+      ],
+      "status": "VERIFIED"
+    },
+    "7173": {
+      "categories": [
+        4
+      ],
+      "status": "SOURCE_INVALID"
+    },
+    "7373": {
+      "categories": [
+        4
+      ],
+      "status": "SOURCE_INVALID"
+    }
+  },
+  "expected_codes": [
+    "1111",
+    "1112",
+    "1113",
+    "1121",
+    "1122",
+    "1123",
+    "1131",
+    "1132",
+    "1133",
+    "1141",
+    "1142",
+    "1143",
+    "1151",
+    "1152",
+    "1153",
+    "1161",
+    "1162",
+    "1163",
+    "1171",
+    "1172",
+    "1173",
+    "1211",
+    "1212",
+    "1213",
+    "1221",
+    "1222",
+    "1223",
+    "1231",
+    "1232",
+    "1233",
+    "1241",
+    "1242",
+    "1243",
+    "1251",
+    "1252",
+    "1253",
+    "1261",
+    "1262",
+    "1263",
+    "1271",
+    "1272",
+    "1273",
+    "1311",
+    "1312",
+    "1313",
+    "1321",
+    "1322",
+    "1323",
+    "1331",
+    "1332",
+    "1333",
+    "1341",
+    "1342",
+    "1343",
+    "1351",
+    "1352",
+    "1353",
+    "1361",
+    "1362",
+    "1363",
+    "1371",
+    "1372",
+    "1373",
+    "2111",
+    "2112",
+    "2113",
+    "2121",
+    "2122",
+    "2123",
+    "2131",
+    "2132",
+    "2133",
+    "2141",
+    "2142",
+    "2143",
+    "2151",
+    "2152",
+    "2153",
+    "2161",
+    "2162",
+    "2163",
+    "2171",
+    "2172",
+    "2173",
+    "2211",
+    "2212",
+    "2213",
+    "2221",
+    "2222",
+    "2223",
+    "2231",
+    "2232",
+    "2233",
+    "2241",
+    "2242",
+    "2243",
+    "2251",
+    "2252",
+    "2253",
+    "2261",
+    "2262",
+    "2263",
+    "2271",
+    "2272",
+    "2273",
+    "2311",
+    "2312",
+    "2313",
+    "2321",
+    "2322",
+    "2323",
+    "2331",
+    "2332",
+    "2333",
+    "2341",
+    "2342",
+    "2343",
+    "2351",
+    "2352",
+    "2353",
+    "2361",
+    "2362",
+    "2363",
+    "2371",
+    "2372",
+    "2373",
+    "3111",
+    "3112",
+    "3113",
+    "3121",
+    "3122",
+    "3123",
+    "3131",
+    "3132",
+    "3133",
+    "3141",
+    "3142",
+    "3143",
+    "3151",
+    "3152",
+    "3153",
+    "3161",
+    "3162",
+    "3163",
+    "3171",
+    "3172",
+    "3173",
+    "3211",
+    "3212",
+    "3213",
+    "3221",
+    "3222",
+    "3223",
+    "3231",
+    "3232",
+    "3233",
+    "3241",
+    "3242",
+    "3243",
+    "3251",
+    "3252",
+    "3253",
+    "3261",
+    "3262",
+    "3263",
+    "3271",
+    "3272",
+    "3273",
+    "3311",
+    "3312",
+    "3313",
+    "3321",
+    "3322",
+    "3323",
+    "3331",
+    "3332",
+    "3333",
+    "3341",
+    "3342",
+    "3343",
+    "3351",
+    "3352",
+    "3353",
+    "3361",
+    "3362",
+    "3363",
+    "3371",
+    "3372",
+    "3373",
+    "4111",
+    "4112",
+    "4113",
+    "4121",
+    "4122",
+    "4123",
+    "4131",
+    "4132",
+    "4133",
+    "4141",
+    "4142",
+    "4143",
+    "4151",
+    "4152",
+    "4153",
+    "4161",
+    "4162",
+    "4163",
+    "4171",
+    "4172",
+    "4173",
+    "4211",
+    "4212",
+    "4213",
+    "4221",
+    "4222",
+    "4223",
+    "4231",
+    "4232",
+    "4233",
+    "4241",
+    "4242",
+    "4243",
+    "4251",
+    "4252",
+    "4253",
+    "4261",
+    "4262",
+    "4263",
+    "4271",
+    "4272",
+    "4273",
+    "4311",
+    "4312",
+    "4313",
+    "4321",
+    "4322",
+    "4323",
+    "4331",
+    "4332",
+    "4333",
+    "4341",
+    "4342",
+    "4343",
+    "4351",
+    "4352",
+    "4353",
+    "4361",
+    "4362",
+    "4363",
+    "4371",
+    "4372",
+    "4373"
+  ],
+  "known_anomalies": [
+    "AMBIGUOUS_3133",
+    "MISSING_2133",
+    "MISSING_4173",
+    "MISSING_4373",
+    "INVALID_7173",
+    "INVALID_7373",
+    "APPROXIMATE_VLOOKUP_IN_SOURCE",
+    "TIME_DISTRIBUTION_OVERLAP_UNFORCED_CATEGORY_1_50_TO_70"
+  ]
+}

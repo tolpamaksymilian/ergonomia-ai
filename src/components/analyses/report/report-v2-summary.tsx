@@ -4,7 +4,7 @@ import { formatDuration, formatTimestamp } from "@/lib/analysis-review/formatter
 import type { AnalysisReport } from "@/types/analysis";
 
 export function ReportV2Summary({ report }: { report: AnalysisReport }) {
-  if (report.report_version !== "analysis-report-v2.0-beta.1") return null;
+  if (!["analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1"].includes(report.report_version)) return null;
   return (
     <div className="space-y-6">
       <section className="report-card rounded-[26px] border border-cyan-300/15 bg-cyan-300/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white">

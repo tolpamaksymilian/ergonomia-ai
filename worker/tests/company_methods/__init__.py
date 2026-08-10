@@ -1,0 +1,1 @@
+"""Company methods test package."""

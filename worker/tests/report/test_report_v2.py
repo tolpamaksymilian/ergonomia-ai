@@ -17,8 +17,8 @@ def _elevate(risk, metric_name, level="high", duration=2.0):
 def test_report_v2_has_concise_decision_sections(analysis_metadata, ergonomics_document, risk_document):
     _elevate(risk_document, "trunk_inclination_deg")
     report = build_analysis_report(analysis_metadata, ergonomics_document, risk_document)
-    assert report["schema_version"] == "2.0"
-    assert report["report_version"] == "analysis-report-v2.0-beta.1"
+    assert report["schema_version"] == "2.1"
+    assert report["report_version"] == "analysis-report-v2.1-beta.1"
     assert len(report["executive_summary"]) <= 6
     assert len(report["priority_findings"]) <= 6
     assert len(report["recommendations"]) <= 5

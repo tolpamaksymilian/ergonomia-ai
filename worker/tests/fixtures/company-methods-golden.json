@@ -1,0 +1,37 @@
+{
+  "risk_score": {
+    "input": {
+      "exposure": "constant",
+      "severity": "serious_injury",
+      "probability": "very_likely"
+    },
+    "expected": {
+      "value": 700.0,
+      "category": "Bardzo wysokie ryzyko",
+      "acceptability": "ND"
+    }
+  },
+  "measurable": [
+    { "measurement": 49.99, "limit": 100.0, "level": "small" },
+    { "measurement": 50.0, "limit": 100.0, "level": "medium" },
+    { "measurement": 100.0, "limit": 100.0, "level": "medium" },
+    { "measurement": 100.01, "limit": 100.0, "level": "large" }
+  ],
+  "ejms_matrix": [
+    { "posture": "LOW", "frequency": "LOW", "score": 0 },
+    { "posture": "LOW", "frequency": "MOD", "score": 5 },
+    { "posture": "LOW", "frequency": "HIGH", "score": 10 },
+    { "posture": "MOD", "frequency": "LOW", "score": 5 },
+    { "posture": "MOD", "frequency": "MOD", "score": 10 },
+    { "posture": "MOD", "frequency": "HIGH", "score": 15 },
+    { "posture": "HIGH", "frequency": "LOW", "score": 10 },
+    { "posture": "HIGH", "frequency": "MOD", "score": 15 },
+    { "posture": "HIGH", "frequency": "HIGH", "score": 20 }
+  ],
+  "owas": {
+    "prefix": "112",
+    "load_kg": 5.0,
+    "expected_code": "1121",
+    "expected_category": 1
+  }
+}

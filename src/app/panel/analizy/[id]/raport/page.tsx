@@ -14,6 +14,7 @@ import {
   ReportMetrics,
   ReportMovement,
   ReportAssessment,
+  ReportCompanyMethods,
   ReportQuality,
 } from "@/components/analyses/report/report-sections";
 import { parseAnalysisReport } from "@/lib/analysis-report";
@@ -37,6 +38,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
     .from("analyses")
     .select(`
       id,
+      user_id,
       title,
       status,
       processing_stage,
@@ -57,11 +59,12 @@ export default async function ReportPage({ params }: ReportPageProps) {
   }
 
   const bucket = supabase.storage.from("analysis-results");
-  const [fileAccess, downloadAccess] = await Promise.all([
+  const [fileAccess, downloadAccess, companyMethodsAccess] = await Promise.all([
     bucket.download(analysis.report_path),
     bucket.createSignedUrl(analysis.report_path, 5 * 60, {
       download: "analysis-report.json",
     }),
+    bucket.download(`${analysis.user_id}/${analysis.id}/results/company-method-assessment.json`),
   ]);
 
   if (fileAccess.error || !fileAccess.data) {
@@ -77,6 +80,26 @@ export default async function ReportPage({ params }: ReportPageProps) {
   const report = parseAnalysisReport(rawReport);
   if (!report || report.analysis.analysis_id !== analysis.id) {
     return <ReportUnavailable analysisId={analysis.id} stage="invalid-report" />;
+  }
+  if (companyMethodsAccess.data) {
+    try {
+      const companyMethods: unknown = JSON.parse(await companyMethodsAccess.data.text());
+      if (isRecord(companyMethods) && companyMethods.schema_version === "1.0") {
+        report.company_methods = {
+          status: "available",
+          company_methods_version: text(companyMethods.company_methods_version),
+          missing_inputs: strings(companyMethods.missing_inputs),
+          limitations: strings(companyMethods.limitations),
+          owas: isRecord(companyMethods.owas) ? companyMethods.owas : null,
+          ejms: isRecord(companyMethods.ejms) ? companyMethods.ejms : null,
+          risk_score: isRecord(companyMethods.risk_score) ? companyMethods.risk_score : null,
+          measurable_factors: Array.isArray(companyMethods.measurable_factors) ? companyMethods.measurable_factors.filter(isRecord) : [],
+          chemical: isRecord(companyMethods.chemical) ? companyMethods.chemical : null,
+        };
+      }
+    } catch {
+      // The immutable report remains usable when the optional live method file is invalid.
+    }
   }
   if (report.ergonomic_assessment?.keyframes) {
     report.ergonomic_assessment.keyframes = await Promise.all(
@@ -107,11 +130,16 @@ export default async function ReportPage({ params }: ReportPageProps) {
         <ReportKeyMoments report={report} />
         <ReportQuality report={report} />
         <ReportAssessment report={report} />
+        <ReportCompanyMethods report={report} />
         <ReportLimitations report={report} />
       </div>
     </main>
   );
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function text(value: unknown) { return typeof value === "string" ? value : undefined; }
+function strings(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
 function ReportUnavailable({
   analysisId,

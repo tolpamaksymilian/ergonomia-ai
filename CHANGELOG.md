@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0-beta.1] - 2026-08-10
+
+- Forensic audit sześciu arkuszy `testy.xlsx`, 159 unikalnych grafik i źródłowych anomalii.
+- Wersjonowane `method-specs` współdzielone przez Python i TypeScript.
+- OWAS `owas-company-v1.0-beta.1` oraz EJMS `ejms-company-v1.0-beta.1` z pełnoprawnym `UNKNOWN`.
+- Prywatne dane kontekstowe i przeliczanie bez GPU.
+- `analysis-report-v2.1-beta.1` z oddzielną sekcją metod zakładowych.
+
 ## [0.7.0-beta.1] - 2026-08-10
 
 - Pose Pipeline `pose-v5.0-beta.1` ze schematem 5.0, evidence fusion i walidacją jerk zależną od czasu.

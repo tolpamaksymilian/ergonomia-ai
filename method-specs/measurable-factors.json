@@ -1,0 +1,42 @@
+{
+  "method_id": "company-measurable-factors",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "form czynniki mierzalne",
+  "source_ranges": [
+    "E4:F14",
+    "I6:I14",
+    "J2:J3"
+  ],
+  "source_status": "VERIFIED",
+  "rules": {
+    "validity_months": 60,
+    "validity_formula": "EDATE(updated_at, 60)"
+  },
+  "thresholds": [
+    {
+      "condition": "P > Pmax",
+      "level": "large",
+      "label": "Duże",
+      "acceptability": "Niedopuszczalne"
+    },
+    {
+      "condition": "0.5 * Pmax <= P <= Pmax",
+      "level": "medium",
+      "label": "Średnie",
+      "acceptability": "Dopuszczalne"
+    },
+    {
+      "condition": "P < 0.5 * Pmax",
+      "level": "small",
+      "label": "Małe",
+      "acceptability": "Dopuszczalne"
+    }
+  ],
+  "labels": {
+    "P": "wynik pomiaru",
+    "Pmax": "NDS / NDN"
+  },
+  "known_anomalies": []
+}

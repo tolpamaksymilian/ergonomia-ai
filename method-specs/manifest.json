@@ -1,0 +1,55 @@
+{
+  "method_id": "company-methods-manifest",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "ALL",
+  "source_ranges": [
+    "all six worksheets"
+  ],
+  "source_status": "AUDITED_WITH_ANOMALIES",
+  "rules": {
+    "unknown_is_never_zero": true,
+    "evidence_sources": [
+      "VIDEO_DERIVED",
+      "USER_PROVIDED",
+      "MEASUREMENT",
+      "WORKBOOK_RULE",
+      "UNKNOWN"
+    ],
+    "no_absolute_video_measurements_without_calibration": true
+  },
+  "thresholds": {},
+  "labels": {},
+  "known_anomalies": [
+    "OWAS_DUPLICATE_3133",
+    "OWAS_MISSING_CODES",
+    "OWAS_INVALID_CODES",
+    "OWAS_APPROXIMATE_LOOKUP",
+    "OWAS_TIME_DISTRIBUTION_OVERLAP",
+    "RISK_SCORE_FORMULA_MISSING",
+    "RISK_SCORE_BROKEN_REFS",
+    "EJMS_RANKING_CONFLICT",
+    "EJMS_BROKEN_REFERENCE",
+    "CHEM_EXTERNAL_REFERENCE",
+    "BROKEN_DEFINED_NAMES"
+  ],
+  "specifications": [
+    "hazards.json",
+    "risk-score.json",
+    "measurable-factors.json",
+    "owas.json",
+    "ejms.json",
+    "chemical-inhalation.json",
+    "source-anomalies.json"
+  ],
+  "versions": {
+    "app": "0.8.0-beta.1",
+    "worker": "0.6.0-beta.1",
+    "pose": "pose-v5.0-beta.1",
+    "pose_schema": "5.0",
+    "owas": "owas-company-v1.0-beta.1",
+    "ejms": "ejms-company-v1.0-beta.1",
+    "report": "analysis-report-v2.1-beta.1"
+  }
+}

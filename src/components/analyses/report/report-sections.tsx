@@ -1,4 +1,4 @@
-import { Activity, Clock3, FileWarning, Hand, ScanLine, ShieldCheck } from "lucide-react";
+import { Activity, Clock3, Factory, FileWarning, Hand, ScanLine, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 
 import { METRIC_DEFINITIONS } from "@/lib/analysis-review/config";
@@ -95,6 +95,22 @@ export function ReportAssessment({ report }: { report: AnalysisReport }) {
     })}</div>}
   </ReportSection>;
 }
+
+export function ReportCompanyMethods({ report }: { report: AnalysisReport }) {
+  const methods = report.company_methods;
+  if (!methods || methods.status !== "available") return <ReportSection title="Metody zakładowe" icon={Factory}><Empty text="Metody zakładowe nie były dostępne dla tej analizy." /></ReportSection>;
+  const items = [
+    ["OWAS", methods.owas], ["EJMS", methods.ejms], ["Risk Score", methods.risk_score],
+    ["Czynniki mierzalne", Array.isArray(methods.measurable_factors) && methods.measurable_factors.length ? { status: "MANUAL" } : null],
+    ["Chemia", methods.chemical],
+  ] as const;
+  return <ReportSection title="Metody zakładowe" icon={Factory} className="report-break-before"><p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">OWAS i EJMS uzupełniają Risk Engine, RULA oraz REBA; nie są łączone w jeden wynik 0–100.</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{items.map(([name, raw]) => { const item = asRecord(raw); const status = typeof item?.status === "string" ? item.status : "REQUIRES_DATA"; return <article key={name} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><h3 className="font-semibold text-slate-100 print:text-black">{name}</h3><p className="mt-2 text-xs font-semibold uppercase text-cyan-200 print:text-black">{companyStatus(status)}</p>{name === "OWAS" && <OwasReportSummary value={item} />}{name === "EJMS" && <EjmsReportSummary value={item} />}</article>; })}</div>{methods.missing_inputs?.length ? <div className="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-4"><p className="font-semibold text-amber-100">Dane wymagające potwierdzenia</p><ul className="mt-2 grid gap-1 text-sm text-slate-500 sm:grid-cols-2 print:text-slate-700">{methods.missing_inputs.slice(0, 12).map((item) => <li key={item}>— {humanize(item)}</li>)}</ul></div> : null}</ReportSection>;
+}
+
+function OwasReportSummary({ value }: { value: Record<string, unknown> | null }) { const summary = asRecord(value?.summary); return <dl className="mt-3 space-y-1 text-xs text-slate-500 print:text-slate-700"><div>Dominująca kategoria: <strong>{typeof summary?.dominant_category === "number" ? summary.dominant_category : UNKNOWN_VALUE}</strong></div><div>Czas sklasyfikowany: <strong>{formatDuration(typeof summary?.classified_duration_seconds === "number" ? summary.classified_duration_seconds : undefined)}</strong></div></dl>; }
+function EjmsReportSummary({ value }: { value: Record<string, unknown> | null }) { const section = asRecord(value?.section_i); return <p className="mt-3 text-xs text-slate-500 print:text-slate-700">Sekcja I: <strong>{typeof section?.score === "number" ? `${section.score} pkt` : UNKNOWN_VALUE}</strong>. Globalny ranking pozostaje wyłączony z powodu konfliktu źródła.</p>; }
+function asRecord(value: unknown): Record<string, unknown> | null { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+function companyStatus(value: string) { return ({ AUTOMATIC: "Automatyczna", PARTIAL: "Częściowa", REQUIRES_DATA: "Wymaga danych", MANUAL: "Manualna", UNAVAILABLE: "Niedostępna", SOURCE_ERROR: "Błąd źródła" } as Record<string, string>)[value] ?? "Niepełne dane"; }
 
 export function ReportLimitations({ report }: { report: AnalysisReport }) {
   return <ReportSection title="Ograniczenia" icon={FileWarning} className="report-break-before"><ul className="space-y-2">{report.limitations.map((item) => <li key={item} className="flex gap-3 text-sm leading-6 text-slate-400 print:text-slate-700"><span aria-hidden="true">—</span>{limitationLabels[item] ?? humanize(item)}</li>)}</ul><p className="mt-6 border-t border-white/10 pt-5 text-sm font-medium text-slate-300 print:border-slate-300 print:text-black">Wynik ma charakter wspierający i nie zastępuje oceny specjalisty.</p></ReportSection>;

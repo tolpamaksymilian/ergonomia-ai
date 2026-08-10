@@ -1,0 +1,35 @@
+{
+  "method_id": "chemical-inhalation-company",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "form_chemia",
+  "source_ranges": [
+    "A1:N128",
+    "A4",
+    "B4",
+    "C4",
+    "E4"
+  ],
+  "source_status": "EXTERNAL_REFERENCE_REQUIRED",
+  "rules": {
+    "mode": "PARTIAL_MANUAL",
+    "automatic_scoring_enabled": false,
+    "required_external_reference": "IN.06.13",
+    "safe_product_flag_allowed": true
+  },
+  "thresholds": {},
+  "labels": {
+    "hazard_levels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+    ]
+  },
+  "known_anomalies": [
+    "IN.06.13_NOT_INCLUDED",
+    "SOURCE_WORKBOOK_CONTAINS_EXAMPLES_NOT_EXECUTABLE_RULES"
+  ]
+}

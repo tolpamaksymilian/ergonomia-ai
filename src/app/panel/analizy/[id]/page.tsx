@@ -20,6 +20,7 @@ import { AnalysisAvailability } from "@/components/analyses/analysis-availabilit
 import { AnalysisReviewWorkspace } from "@/components/analyses/review/analysis-review-workspace";
 import { getSafeAnalysisErrorMessage } from "@/config/analysis-status";
 import { normalizeAnalysisReview } from "@/lib/analysis-review/normalize";
+import { normalizeCompanyMethods } from "@/lib/company-methods/normalize";
 import { requireUser } from "@/lib/auth/access";
 import type { RiskAssessmentSummary } from "@/types/analysis";
 
@@ -220,6 +221,8 @@ export default async function AnalysisDetailsPage({
       reportDownload,
       assessmentFile,
       assessmentDownload,
+      companyMethodsFile,
+      companyMethodsDownload,
     ] = await Promise.all([
       analysis.result_json_path ? resultsBucket.download(analysis.result_json_path) : emptyAccess,
       analysis.ergonomics_metrics_path ? resultsBucket.download(analysis.ergonomics_metrics_path) : emptyAccess,
@@ -240,13 +243,20 @@ export default async function AnalysisDetailsPage({
         resultUrlLifetimeSeconds,
         { download: "ergonomic-assessment.json" },
       ),
+      resultsBucket.download(`${analysis.user_id}/${analysis.id}/results/company-method-assessment.json`),
+      resultsBucket.createSignedUrl(
+        `${analysis.user_id}/${analysis.id}/results/company-method-assessment.json`,
+        resultUrlLifetimeSeconds,
+        { download: "company-method-assessment.json" },
+      ),
     ]);
-    const [poseDocument, ergonomicsDocument, riskDocument, reportDocument, rawAssessmentDocument] = await Promise.all([
+    const [poseDocument, ergonomicsDocument, riskDocument, reportDocument, rawAssessmentDocument, companyMethodsDocument] = await Promise.all([
       parseStorageJson(poseFile.data),
       parseStorageJson(ergonomicsFile.data),
       parseStorageJson(riskFile.data),
       parseStorageJson(reportFile.data),
       parseStorageJson(assessmentFile.data),
+      parseStorageJson(companyMethodsFile.data),
     ]);
     const assessmentDocument = await attachAssessmentSignedUrls(
       rawAssessmentDocument,
@@ -266,10 +276,12 @@ export default async function AnalysisDetailsPage({
       fallbackDurationSeconds: sourceDurationSeconds,
       fallbackProcessedFrames: analysis.pose_processed_frames,
     });
+    const companyMethods = normalizeCompanyMethods(companyMethodsDocument);
 
     return (
       <AnalysisReviewWorkspace
         model={model}
+        companyMethods={companyMethods}
         analysis={{
           id: analysis.id,
           title: analysis.title,
@@ -289,6 +301,7 @@ export default async function AnalysisDetailsPage({
           riskJson: riskDownload.data?.signedUrl ?? null,
           reportJson: reportDownload.data?.signedUrl ?? null,
           assessmentJson: assessmentDownload.data?.signedUrl ?? null,
+          companyMethodsJson: companyMethodsDownload.data?.signedUrl ?? null,
         }}
       />
     );

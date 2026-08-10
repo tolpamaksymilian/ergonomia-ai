@@ -74,6 +74,7 @@ def build_analysis_report(
     risk: Mapping[str, Any],
     *,
     assessment: Mapping[str, Any] | None = None,
+    company_methods: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
     recommendations_enabled: bool = True,
 ) -> dict[str, Any]:
@@ -155,6 +156,7 @@ def build_analysis_report(
             "message": "Wskaźnik opisuje pokrycie poprawnymi danymi, a nie dokładność systemu.",
         },
         "ergonomic_assessment": _assessment_section(assessment),
+        "company_methods": _company_methods_section(company_methods),
         "body_areas": _body_areas(risk),
         "metric_summary": _metric_summary(ergonomics, risk),
         "key_moments": key_moments,
@@ -194,6 +196,23 @@ def build_analysis_report(
         )
     )
     return report
+
+
+def _company_methods_section(company_methods: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(company_methods, Mapping):
+        return {"status": "unavailable", "reason": "company_method_assessment_missing"}
+    if company_methods.get("schema_version") != "1.0":
+        return {"status": "unavailable", "reason": "unsupported_company_methods_schema"}
+    output: dict[str, Any] = {
+        "status": "available",
+        "company_methods_version": company_methods.get("company_methods_version"),
+        "missing_inputs": list(company_methods.get("missing_inputs", [])) if isinstance(company_methods.get("missing_inputs"), list) else [],
+        "limitations": list(company_methods.get("limitations", [])) if isinstance(company_methods.get("limitations"), list) else [],
+    }
+    for key in ("owas", "ejms", "risk_score", "measurable_factors", "chemical"):
+        value = company_methods.get(key)
+        output[key] = dict(value) if isinstance(value, Mapping) else list(value) if isinstance(value, list) else None
+    return output
 
 
 def _executive_summary(

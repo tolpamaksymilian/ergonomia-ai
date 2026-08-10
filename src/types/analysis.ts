@@ -192,9 +192,9 @@ export type ReportKeyMoment = {
 };
 
 export type AnalysisReport = {
-  schema_version: "1.0" | "2.0";
+  schema_version: "1.0" | "2.0" | "2.1";
   generated_by: "Ergonomia AI Report Engine";
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1";
   generated_at: string;
   analysis: {
     analysis_id: string;
@@ -227,6 +227,18 @@ export type AnalysisReport = {
   };
   risk_summary: ReportRiskSummary;
   ergonomic_assessment?: ReportErgonomicAssessment;
+  company_methods?: {
+    status: "available" | "unavailable";
+    reason?: string;
+    company_methods_version?: string;
+    missing_inputs?: string[];
+    limitations?: string[];
+    owas?: Record<string, unknown> | null;
+    ejms?: Record<string, unknown> | null;
+    risk_score?: Record<string, unknown> | null;
+    measurable_factors?: Array<Record<string, unknown>> | null;
+    chemical?: Record<string, unknown> | null;
+  };
   body_areas: ReportBodyArea[];
   metric_summary: ReportMetricSummary[];
   key_moments: ReportKeyMoment[];
@@ -344,7 +356,7 @@ export type ReportMovementFeature = {
 };
 
 export type ReportSummary = {
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1";
   analysis_id: string;
   overall_level: RiskLevel;
   insufficient_data: boolean;

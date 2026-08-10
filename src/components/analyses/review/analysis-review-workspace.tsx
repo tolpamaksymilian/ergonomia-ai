@@ -6,10 +6,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import { formatDuration } from "@/lib/analysis-review/formatters";
 import type { AnalysisReviewModel, ReviewMetricName } from "@/lib/analysis-review/schemas";
+import type { CompanyMethodsView } from "@/lib/company-methods/normalize";
 
 import { AnalysisTimeline } from "./analysis-timeline";
 import { AssessmentSection } from "./assessment-section";
 import { BodyMap } from "./body-map";
+import { CompanyMethodsSection } from "./company-methods-section";
 import { MetricExplorer } from "./metric-explorer";
 import { ReviewVideoPlayer } from "./review-video-player";
 import {
@@ -25,6 +27,7 @@ import {
 
 type AnalysisReviewWorkspaceProps = {
   model: AnalysisReviewModel;
+  companyMethods: CompanyMethodsView | null;
   analysis: {
     id: string;
     title: string;
@@ -44,10 +47,11 @@ type AnalysisReviewWorkspaceProps = {
     riskJson: string | null;
     reportJson: string | null;
     assessmentJson: string | null;
+    companyMethodsJson: string | null;
   };
 };
 
-export function AnalysisReviewWorkspace({ model, analysis, urls }: AnalysisReviewWorkspaceProps) {
+export function AnalysisReviewWorkspace({ model, companyMethods, analysis, urls }: AnalysisReviewWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastUpdateRef = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -129,6 +133,7 @@ export function AnalysisReviewWorkspace({ model, analysis, urls }: AnalysisRevie
         <QualitySection model={model} />
         <RiskSection model={model} />
         <AssessmentSection assessment={model.assessment} onSeek={seekTo} />
+        <CompanyMethodsSection analysisId={analysis.id} value={companyMethods} onSeek={seekTo} />
         <TechnicalDetails model={model} />
 
         <section className="review-panel flex flex-wrap items-center justify-between gap-4">

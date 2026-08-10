@@ -1,5 +1,11 @@
 # Worker changelog
 
+## 0.6.0-beta.1
+
+- Company Methods Engine `company-methods-v1.0-beta.1` oparty na wersjonowanych specyfikacjach JSON.
+- Automatyczne cechy wideo dla OWAS/EJMS bez estymowania kg, N, cm lub metrów.
+- Report Worker zapisuje prywatny `company-method-assessment.json` i Report V2.1.
+
 ## 0.5.0-beta.1
 
 - Pose V5 schema 5.0 z evidence fusion, dt-aware jerk i global camera-motion signal.

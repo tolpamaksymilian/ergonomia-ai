@@ -1,0 +1,344 @@
+{
+  "method_id": "ejms-company",
+  "version": "ejms-company-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "EJMS",
+  "source_ranges": [
+    "A18:V44",
+    "A49:N59",
+    "A74:A76"
+  ],
+  "source_status": "VERIFIED_WITH_ANOMALIES",
+  "rules": {
+    "section_i": {
+      "areas": {
+        "neck": {
+          "row": 20,
+          "posture_low": {
+            "max_exclusive_deg": 10
+          },
+          "posture_high": {
+            "min_exclusive_deg": 30
+          },
+          "frequency_low_per_minute": 4,
+          "frequency_high_per_minute": 15,
+          "duration_low_ratio": 0.35,
+          "duration_high_ratio": 0.65
+        },
+        "arm": {
+          "row": 21,
+          "posture_low": {
+            "elbow_from_trunk_max_exclusive_deg": 30
+          },
+          "posture_high": {
+            "elbow_above_shoulder_deg": 90,
+            "behind_back_deg": 20
+          },
+          "frequency_low_per_minute": 1.5,
+          "frequency_high_per_minute": 6,
+          "duration_low_ratio": 0.15,
+          "duration_high_ratio": 0.5
+        },
+        "trunk": {
+          "row": 22,
+          "posture_low": {
+            "flexion_max_exclusive_deg": 15,
+            "twist_max_exclusive_deg": 15,
+            "side_bend_max_exclusive_deg": 10
+          },
+          "posture_high": {
+            "flexion_or_twist_min_exclusive_deg": 60,
+            "side_bend_min_exclusive_deg": 30
+          },
+          "frequency_low_per_minute": 1,
+          "frequency_high_per_minute": 3,
+          "duration_low_ratio": 0.15,
+          "duration_high_ratio": 0.5
+        },
+        "forearm_elbow": {
+          "row": 23,
+          "posture_low": {
+            "elbow_flexion_min_deg": 70,
+            "elbow_flexion_max_deg": 110,
+            "elbow_from_trunk_max_exclusive_deg": 30
+          },
+          "posture_high": {
+            "forearm_rotation_min_exclusive_deg": 80
+          },
+          "frequency_low_per_minute": 4,
+          "frequency_high_per_minute": 8,
+          "duration_low_ratio": 0.35,
+          "duration_high_ratio": 0.65
+        },
+        "wrist": {
+          "row": 34,
+          "posture_low": {
+            "flexion_extension_abs_max_exclusive_deg": 20,
+            "side_bend_abs_max_exclusive_deg": 10
+          },
+          "posture_high": {
+            "extension_min_exclusive_deg": 30,
+            "flexion_min_exclusive_deg": 45,
+            "side_bend_min_exclusive_deg": 20
+          },
+          "frequency_low_per_minute": 5,
+          "frequency_high_per_minute": 20,
+          "duration_low_ratio": 0.35,
+          "duration_high_ratio": 0.65
+        },
+        "fingers_hands": {
+          "row": 35,
+          "posture_requires_manual_evidence": true,
+          "frequency_low_per_minute": 5,
+          "frequency_high_per_minute": 20,
+          "duration_low_ratio": 0.35,
+          "duration_high_ratio": 0.65
+        },
+        "legs": {
+          "row": 36,
+          "posture_low": {
+            "comfortable_standing_or_sitting": true
+          },
+          "posture_high": {
+            "kneeling_or_squatting": true
+          },
+          "frequency_high_per_minute": 4,
+          "duration_low_ratio": 0.05,
+          "duration_high_ratio": 0.5
+        },
+        "static_load": {
+          "row": 37,
+          "posture_requires_context": true,
+          "duration_high_seconds": 7200
+        }
+      },
+      "levels": [
+        "LOW",
+        "MOD",
+        "HIGH"
+      ],
+      "intermediate_level": "MOD",
+      "unknown_force_is_not_low": true
+    },
+    "matrix": {
+      "LOW": {
+        "LOW": 0,
+        "MOD": 5,
+        "HIGH": 10
+      },
+      "MOD": {
+        "LOW": 5,
+        "MOD": 10,
+        "HIGH": 15
+      },
+      "HIGH": {
+        "LOW": 10,
+        "MOD": 15,
+        "HIGH": 20
+      }
+    },
+    "section_ii": {
+      "mode": "PARTIAL",
+      "absolute_distance_requires_calibration_or_user_input": true,
+      "force_and_weight_require_user_input": true
+    },
+    "global_ranking_enabled": false
+  },
+  "thresholds": {
+    "section_ii": {
+      "weight_kg": [
+        [
+          0,
+          2.7,
+          1
+        ],
+        [
+          2.7,
+          6.8,
+          5
+        ],
+        [
+          6.9,
+          11.3,
+          10
+        ],
+        [
+          11.4,
+          23.1,
+          20
+        ],
+        [
+          23.1,
+          null,
+          30
+        ]
+      ],
+      "horizontal_distance_cm": [
+        [
+          2.5,
+          23,
+          1
+        ],
+        [
+          24,
+          33,
+          5
+        ],
+        [
+          34,
+          43,
+          10
+        ],
+        [
+          44,
+          61,
+          20
+        ],
+        [
+          62,
+          null,
+          30
+        ]
+      ],
+      "start_hand_height_from_waist_cm": [
+        [
+          0,
+          10,
+          1
+        ],
+        [
+          10,
+          38,
+          5
+        ],
+        [
+          38,
+          60,
+          10
+        ],
+        [
+          60,
+          102,
+          20
+        ]
+      ],
+      "vertical_travel_cm": [
+        [
+          2.5,
+          35,
+          1
+        ],
+        [
+          36,
+          56,
+          5
+        ],
+        [
+          57,
+          89,
+          10
+        ],
+        [
+          90,
+          178,
+          20
+        ]
+      ],
+      "frequency_per_minute": [
+        [
+          0,
+          0.2,
+          1
+        ],
+        [
+          0.2,
+          1,
+          5
+        ],
+        [
+          1,
+          3,
+          10
+        ],
+        [
+          3,
+          null,
+          20
+        ]
+      ],
+      "twist_deg": [
+        [
+          1,
+          15,
+          1
+        ],
+        [
+          16,
+          35,
+          5
+        ],
+        [
+          36,
+          65,
+          10
+        ],
+        [
+          66,
+          135,
+          20
+        ]
+      ],
+      "grip": {
+        "GOOD": 1,
+        "SATISFACTORY": 5,
+        "BAD": 10
+      },
+      "distance_m": [
+        [
+          0,
+          2,
+          1
+        ],
+        [
+          2,
+          4,
+          5
+        ],
+        [
+          4,
+          6,
+          10
+        ],
+        [
+          6,
+          null,
+          20
+        ]
+      ]
+    }
+  },
+  "labels": {
+    "section_i_areas": [
+      "neck",
+      "arm",
+      "trunk",
+      "forearm_elbow",
+      "wrist",
+      "fingers_hands",
+      "legs",
+      "static_load"
+    ],
+    "ui_levels_pl": {
+      "LOW": "Niskie",
+      "MOD": "Umiarkowane",
+      "HIGH": "Wysokie",
+      "UNKNOWN": "Niepełne dane"
+    }
+  },
+  "known_anomalies": [
+    "SOURCE_THRESHOLD_CONFLICT_GLOBAL_RANKING",
+    "BROKEN_SOURCE_REFERENCE_R23_Y1416",
+    "UNDEFINED_INTERMEDIATE_BANDS_NORMALIZED_AS_MOD"
+  ]
+}

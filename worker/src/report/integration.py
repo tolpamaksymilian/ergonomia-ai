@@ -60,6 +60,7 @@ def build_report_file(
     output_path: Path,
     *,
     assessment_path: Path | None = None,
+    company_methods_path: Path | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     ergonomics = read_ergonomics_document(ergonomics_path)
@@ -73,11 +74,21 @@ def build_report_file(
         if assessment_path is not None and assessment_path.is_file()
         else None
     )
+    company_methods = (
+        _read_json_object(
+            company_methods_path,
+            "company-method-assessment.json",
+            ReportInputInvalidError,
+        )
+        if company_methods_path is not None and company_methods_path.is_file()
+        else None
+    )
     report = build_analysis_report(
         analysis,
         ergonomics,
         risk,
         assessment=assessment,
+        company_methods=company_methods,
         generated_at=generated_at,
     )
     _write_json_atomically(output_path, report)

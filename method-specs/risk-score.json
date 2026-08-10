@@ -1,0 +1,173 @@
+{
+  "method_id": "company-risk-score",
+  "version": "company-methods-v1.0-beta.1",
+  "source_workbook": "testy.xlsx",
+  "source_workbook_sha256": "78fa02ed3be7d46c1aaab772c556a7e7e56867f7566c825ed84f3eef02be5eca",
+  "source_sheet": "form_ Risk_Score",
+  "source_ranges": [
+    "A4:AL20"
+  ],
+  "source_status": "NORMALIZED_INTERPRETATION",
+  "rules": {
+    "mode": "MANUAL_CONTEXTUAL",
+    "formula": "exposure * severity * probability",
+    "formula_status": "NORMALIZED_INTERPRETATION",
+    "formula_note": "The workbook exposes the three factors and output bands but contains no formula in the risk-value cells. Multiplication is an explicit normalized interpretation, not a source formula.",
+    "automatic_probability_from_video": false
+  },
+  "thresholds": {
+    "exposure": [
+      {
+        "id": "negligible",
+        "label": "Znikoma",
+        "value": 0.5
+      },
+      {
+        "id": "minimal",
+        "label": "Minimalna",
+        "value": 1
+      },
+      {
+        "id": "occasional",
+        "label": "Okazjonalna",
+        "value": 2
+      },
+      {
+        "id": "sporadic",
+        "label": "Sporadyczna",
+        "value": 3
+      },
+      {
+        "id": "frequent",
+        "label": "Częsta",
+        "value": 6
+      },
+      {
+        "id": "constant",
+        "label": "Stała",
+        "value": 10
+      }
+    ],
+    "severity": [
+      {
+        "id": "first_aid",
+        "label": "Udzielenie pierwszej pomocy",
+        "value": 1
+      },
+      {
+        "id": "absence",
+        "label": "Absencja",
+        "value": 3
+      },
+      {
+        "id": "serious_injury",
+        "label": "Ciężkie uszkodzenie ciała",
+        "value": 7
+      },
+      {
+        "id": "fatality",
+        "label": "Ofiara śmiertelna",
+        "value": 15
+      },
+      {
+        "id": "several_fatalities",
+        "label": "Kilka ofiar śmiertelnych",
+        "value": 40
+      },
+      {
+        "id": "many_fatalities",
+        "label": "Wiele ofiar śmiertelnych",
+        "value": 100
+      }
+    ],
+    "probability": [
+      {
+        "id": "theoretical",
+        "label": "Tylko teoretycznie możliwe",
+        "value": 0.1
+      },
+      {
+        "id": "practically_impossible",
+        "label": "Praktycznie niemożliwe",
+        "value": 0.2
+      },
+      {
+        "id": "conceivable",
+        "label": "Możliwe do pomyślenia",
+        "value": 0.5
+      },
+      {
+        "id": "occasionally_possible",
+        "label": "Tylko sporadycznie możliwe",
+        "value": 1
+      },
+      {
+        "id": "unlikely_possible",
+        "label": "Mało prawdopodobne, ale możliwe",
+        "value": 3
+      },
+      {
+        "id": "quite_possible",
+        "label": "Całkiem możliwe",
+        "value": 6
+      },
+      {
+        "id": "very_likely",
+        "label": "Bardzo prawdopodobne",
+        "value": 10
+      }
+    ],
+    "risk_bands": [
+      {
+        "maximum": 20,
+        "category": "Pomijalne",
+        "action": "Wskazana kontrola",
+        "acceptability": "D"
+      },
+      {
+        "minimum_exclusive": 20,
+        "maximum": 70,
+        "category": "Małe ryzyko",
+        "action": "Potrzebna kontrola",
+        "acceptability": "D"
+      },
+      {
+        "minimum_exclusive": 70,
+        "maximum": 200,
+        "category": "Średnie ryzyko",
+        "action": "Potrzebna poprawa",
+        "acceptability": "D"
+      },
+      {
+        "minimum_exclusive": 200,
+        "maximum": 400,
+        "category": "Wysokie ryzyko",
+        "action": "Potrzebna natychmiastowa poprawa",
+        "acceptability": "D"
+      },
+      {
+        "minimum_exclusive": 400,
+        "maximum": null,
+        "category": "Bardzo wysokie ryzyko",
+        "action": "Należy wstrzymać pracę",
+        "acceptability": "ND"
+      }
+    ]
+  },
+  "labels": {
+    "factor_types": [
+      "niebezpieczny",
+      "szkodliwy",
+      "uciążliwy"
+    ],
+    "work_types": [
+      "rutynowa",
+      "nierutynowa"
+    ]
+  },
+  "known_anomalies": [
+    "SOURCE_FORMULA_MISSING",
+    "BROKEN_REF_AJ6_AJ8_AJ17",
+    "WRONG_ROW_REFERENCE_AJ7_AI17"
+  ]
+}

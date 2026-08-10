@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -32,6 +33,7 @@ if str(SCRIPT_DIRECTORY) not in sys.path:
 
 if __package__:
     from worker.src.assessment import process_assessment_files  # noqa: E402
+    from worker.src.company_methods import process_company_methods  # noqa: E402
     from worker.src.assessment.keyframes import extract_keyframes, write_assessment  # noqa: E402
     from worker.src.report.integration import (  # noqa: E402
         build_database_summary,
@@ -48,6 +50,7 @@ if __package__:
     )
 else:
     from assessment import process_assessment_files  # noqa: E402
+    from company_methods import process_company_methods  # noqa: E402
     from assessment.keyframes import extract_keyframes, write_assessment  # noqa: E402
     from report.integration import (  # noqa: E402
         build_database_summary,
@@ -434,6 +437,8 @@ def process_claimed_analysis(
     pose_path = job_directory / "pose-keypoints.json"
     overlay_path = job_directory / "pose-overlay.mp4"
     assessment_path = job_directory / "ergonomic-assessment.json"
+    company_inputs_path = job_directory / "company-method-inputs.json"
+    company_methods_path = job_directory / "company-method-assessment.json"
     report_path = job_directory / "analysis-report.json"
     started_at = time.perf_counter()
 
@@ -541,12 +546,65 @@ def process_claimed_analysis(
                     sanitize_error_message(assessment_error, settings),
                 )
 
+        pose_storage_path = f"{claimed.user_id}/{claimed.analysis_id}/results/pose-keypoints.json"
+        if not pose_path.is_file():
+            try:
+                download_json_file(client, settings.results_bucket, pose_storage_path, pose_path, source="pose")
+            except Exception as pose_error:
+                LOGGER.warning(
+                    "analysis_id=%s company_methods_pose=unavailable reason=%s",
+                    claimed.analysis_id,
+                    sanitize_error_message(pose_error, settings),
+                )
+        company_inputs_storage_path = f"{claimed.user_id}/{claimed.analysis_id}/results/company-method-inputs.json"
+        try:
+            payload = client.storage.from_(settings.results_bucket).download(company_inputs_storage_path)
+            if isinstance(payload, (bytes, bytearray)) and payload:
+                company_inputs_path.write_bytes(payload)
+        except Exception:
+            LOGGER.info("analysis_id=%s company_methods_inputs=not_provided", claimed.analysis_id)
+        with ergonomics_path.open("r", encoding="utf-8") as handle:
+            ergonomics_document = json.load(handle)
+        pose_document = None
+        if pose_path.is_file():
+            with pose_path.open("r", encoding="utf-8") as handle:
+                pose_document = json.load(handle)
+        company_inputs: Mapping[str, Any] = {}
+        if company_inputs_path.is_file():
+            with company_inputs_path.open("r", encoding="utf-8") as handle:
+                raw_inputs = json.load(handle)
+            company_inputs = raw_inputs if isinstance(raw_inputs, Mapping) else {}
+        company_methods = process_company_methods(
+            pose_document,
+            ergonomics_document,
+            company_inputs,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        write_assessment(company_methods_path, company_methods)
+        company_methods_storage_path = f"{claimed.user_id}/{claimed.analysis_id}/results/company-method-assessment.json"
+        upload_report_file(
+            client.storage,
+            settings.results_bucket,
+            company_methods_path,
+            company_methods_storage_path,
+        )
+        LOGGER.info(
+            "analysis_id=%s company_methods_version=%s owas=%s ejms=%s missing_inputs=%s output=%s",
+            claimed.analysis_id,
+            company_methods.get("company_methods_version"),
+            company_methods.get("owas", {}).get("status"),
+            company_methods.get("ejms", {}).get("status"),
+            len(company_methods.get("missing_inputs", [])),
+            company_methods_storage_path,
+        )
+
         report = build_report_file(
             claimed.metadata,
             ergonomics_path,
             risk_path,
             report_path,
             assessment_path=assessment_path if assessment_path.is_file() else None,
+            company_methods_path=company_methods_path,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
         database_summary = build_database_summary(report)
