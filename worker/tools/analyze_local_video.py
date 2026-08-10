@@ -17,6 +17,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 from ergonomics.processor import process_pose_file  # noqa: E402
+from assessment.integration import process_assessment_files  # noqa: E402
 from pose_v3.hand_pipeline import MediaPipeHandEngine  # noqa: E402
 from pose_worker import (  # noqa: E402
     WORKER_VERSION,
@@ -46,6 +47,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Zapisz do 20 automatycznie wybranych klatek QA.",
     )
     parser.add_argument("--ergonomics", action="store_true")
+    parser.add_argument(
+        "--assessment",
+        action="store_true",
+        help="Po metrykach utwórz ergonomic-assessment.json (RULA/REBA beta).",
+    )
     return parser.parse_args()
 
 
@@ -119,10 +125,17 @@ def main() -> int:
     finally:
         hand_engine.close()
 
-    if arguments.ergonomics:
+    metrics_path = output_directory / "ergonomics-metrics.json"
+    if arguments.ergonomics or arguments.assessment:
         process_pose_file(
             result.json_path,
-            output_directory / "ergonomics-metrics.json",
+            metrics_path,
+        )
+    if arguments.assessment:
+        process_assessment_files(
+            result.json_path,
+            metrics_path,
+            output_directory / "ergonomic-assessment.json",
         )
     diagnostics = json.loads(result.diagnostics_path.read_text(encoding="utf-8"))
     summary_path = output_directory / "validation-summary.txt"

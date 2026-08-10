@@ -12,6 +12,7 @@ import {
   ReportLimitations,
   ReportMetrics,
   ReportMovement,
+  ReportAssessment,
   ReportQuality,
 } from "@/components/analyses/report/report-sections";
 import { parseAnalysisReport } from "@/lib/analysis-report";
@@ -76,6 +77,17 @@ export default async function ReportPage({ params }: ReportPageProps) {
   if (!report || report.analysis.analysis_id !== analysis.id) {
     return <ReportUnavailable analysisId={analysis.id} stage="invalid-report" />;
   }
+  if (report.ergonomic_assessment?.keyframes) {
+    report.ergonomic_assessment.keyframes = await Promise.all(
+      report.ergonomic_assessment.keyframes.map(async (keyframe) => {
+        if (!keyframe.storage_path) return keyframe;
+        const access = await bucket.createSignedUrl(keyframe.storage_path, 5 * 60);
+        return access.data?.signedUrl
+          ? { ...keyframe, signed_url: access.data.signedUrl }
+          : keyframe;
+      }),
+    );
+  }
 
   return (
     <main className="report-page min-h-screen overflow-x-hidden bg-[#050b14] px-4 py-6 text-white sm:px-8 sm:py-8 print:bg-white print:px-0 print:py-0 print:text-black">
@@ -92,6 +104,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
         <ReportMovement report={report} />
         <ReportKeyMoments report={report} />
         <ReportQuality report={report} />
+        <ReportAssessment report={report} />
         <ReportLimitations report={report} />
       </div>
     </main>

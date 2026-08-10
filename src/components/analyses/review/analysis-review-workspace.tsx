@@ -8,6 +8,7 @@ import { formatDuration } from "@/lib/analysis-review/formatters";
 import type { AnalysisReviewModel, ReviewMetricName } from "@/lib/analysis-review/schemas";
 
 import { AnalysisTimeline } from "./analysis-timeline";
+import { AssessmentSection } from "./assessment-section";
 import { BodyMap } from "./body-map";
 import { MetricExplorer } from "./metric-explorer";
 import { ReviewVideoPlayer } from "./review-video-player";
@@ -42,6 +43,7 @@ type AnalysisReviewWorkspaceProps = {
     ergonomicsJson: string | null;
     riskJson: string | null;
     reportJson: string | null;
+    assessmentJson: string | null;
   };
 };
 
@@ -111,6 +113,7 @@ export function AnalysisReviewWorkspace({ model, analysis, urls }: AnalysisRevie
         <KeyMomentsSection model={model} onSeek={seekTo} />
         <QualitySection model={model} />
         <RiskSection model={model} />
+        <AssessmentSection assessment={model.assessment} onSeek={seekTo} />
         <TechnicalDetails model={model} />
 
         <section className="review-panel flex flex-wrap items-center justify-between gap-4">

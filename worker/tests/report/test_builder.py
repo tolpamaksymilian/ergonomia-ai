@@ -16,13 +16,36 @@ from worker.src.report.schemas import (
 GENERATED_AT = "2026-08-06T12:00:00+00:00"
 
 
-def build(analysis_metadata, ergonomics_document, risk_document):
+def build(analysis_metadata, ergonomics_document, risk_document, assessment=None):
     return build_analysis_report(
         analysis_metadata,
         ergonomics_document,
         risk_document,
+        assessment=assessment,
         generated_at=GENERATED_AT,
     )
+
+
+def assessment_document(status="PARTIAL"):
+    representative = {
+        "candidate_id": "candidate-0001",
+        "side": "left",
+        "timestamp_seconds": 1.25,
+        "quality": 0.91,
+        "evidence_coverage_ratio": 0.6,
+        "final_score": 5 if status == "COMPLETE" else None,
+        "score_range": {"min": 3, "max": 7},
+        "missing_inputs": [] if status == "COMPLETE" else ["external_load"],
+    }
+    return {
+        "schema_version": "1.0",
+        "engine_version": "assessment-v1.0-beta.1",
+        "calculated_at": GENERATED_AT,
+        "rula": {"method": "RULA", "status": status, "representative": representative},
+        "reba": {"method": "REBA", "status": status, "representative": representative},
+        "limitations": ["two_dimensional_observation"],
+        "keyframes": [],
+    }
 
 
 def test_builds_complete_versioned_report(
@@ -206,3 +229,35 @@ def test_development_profile_is_marked_as_limitation(
     report = build(analysis_metadata, ergonomics_document, risk_document)
     assert report["risk_summary"]["profile"]["profile_status"] == "development"
     assert "production_profile_not_used" in report["limitations"]
+
+
+def test_missing_assessment_remains_explicitly_unavailable(
+    analysis_metadata,
+    ergonomics_document,
+    risk_document,
+):
+    report = build(analysis_metadata, ergonomics_document, risk_document)
+    assert report["ergonomic_assessment"] == {
+        "status": "unavailable",
+        "reason": "assessment_file_missing",
+    }
+
+
+@pytest.mark.parametrize("status", ["COMPLETE", "PARTIAL"])
+def test_report_embeds_versioned_assessment_without_recalculating_it(
+    analysis_metadata,
+    ergonomics_document,
+    risk_document,
+    status,
+):
+    report = build(
+        analysis_metadata,
+        ergonomics_document,
+        risk_document,
+        assessment_document(status),
+    )
+    section = report["ergonomic_assessment"]
+    assert section["status"] == "available"
+    assert section["engine_version"] == "assessment-v1.0-beta.1"
+    assert section["rula"]["status"] == status
+    assert section["rula"]["representative"]["evidence_coverage_ratio"] == 0.6

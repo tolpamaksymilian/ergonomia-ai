@@ -1,4 +1,5 @@
 import { classifyDeviation, METRIC_DEFINITIONS, METRIC_NAMES } from "./config.ts";
+import { normalizeAssessment } from "./assessment.ts";
 import { rankAndDeduplicateKeyMoments } from "./key-moments.ts";
 import type {
   AnalysisReviewModel,
@@ -15,7 +16,7 @@ import type {
   RiskReview,
   TimelineSegment,
   UnknownRecord,
-} from "./schemas";
+} from "./schemas.ts";
 import { isRecord } from "./schemas.ts";
 import { downsampleMetricPoints, mergeTimelineSegments, metricPointsToSegments } from "./timeline.ts";
 
@@ -33,6 +34,8 @@ export function normalizeAnalysisReview(input: NormalizeAnalysisInput): Analysis
   const ergonomics = recordOrNull(input.ergonomics);
   const risk = recordOrNull(input.risk);
   const report = recordOrNull(input.report);
+  const assessmentDocument = recordOrNull(input.assessment);
+  const assessment = normalizeAssessment(assessmentDocument);
   const poseSummary = child(pose, "summary");
   const poseSource = child(pose, "source");
   const metrics = normalizeMetrics(ergonomics);
@@ -51,13 +54,26 @@ export function normalizeAnalysisReview(input: NormalizeAnalysisInput): Analysis
     input.fallbackDurationSeconds,
     maximumMetricTime(metrics),
   );
-  const timeline = buildTimeline(metrics, pose, holding);
+  const timeline = [
+    ...buildTimeline(metrics, pose, holding),
+    ...assessment.candidates.map((candidate) => ({
+      id: `assessment-${candidate.id}`,
+      layer: "assessment" as const,
+      track: "assessment-candidates",
+      label: "Pozycja RULA/REBA",
+      start: candidate.timestamp,
+      end: candidate.timestamp,
+      quality: candidate.quality,
+      description: "Reprezentatywna pozycja wybrana do oceny metodą.",
+    })),
+  ];
   const keyMoments = buildKeyMoments(metrics, holding, timeline);
   const compactMetrics = compactMetricSeries(metrics);
   const limitations = uniqueStrings([
     ...textArray(report?.limitations),
     ...textArray(risk?.limitations),
     ...textArray(ergonomics?.quality_limitations),
+    ...assessment.limitations,
   ]);
 
   return {
@@ -75,6 +91,7 @@ export function normalizeAnalysisReview(input: NormalizeAnalysisInput): Analysis
     hands,
     quality,
     risk: riskReview,
+    assessment,
     keyMoments,
     limitations,
     availableSources: {
@@ -82,6 +99,7 @@ export function normalizeAnalysisReview(input: NormalizeAnalysisInput): Analysis
       ergonomics: ergonomics !== null,
       risk: risk !== null,
       report: report !== null,
+      assessment: assessmentDocument !== null,
     },
   };
 }

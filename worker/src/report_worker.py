@@ -31,11 +31,14 @@ if str(SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIRECTORY))
 
 if __package__:
+    from worker.src.assessment import process_assessment_files  # noqa: E402
+    from worker.src.assessment.keyframes import extract_keyframes, write_assessment  # noqa: E402
     from worker.src.report.integration import (  # noqa: E402
         build_database_summary,
         build_report_file,
         build_report_storage_path,
         upload_report_file,
+        upload_result_file,
     )
     from worker.src.report.schemas import (  # noqa: E402
         REPORT_VERSION,
@@ -44,11 +47,14 @@ if __package__:
         ReportRiskInputMissingError,
     )
 else:
+    from assessment import process_assessment_files  # noqa: E402
+    from assessment.keyframes import extract_keyframes, write_assessment  # noqa: E402
     from report.integration import (  # noqa: E402
         build_database_summary,
         build_report_file,
         build_report_storage_path,
         upload_report_file,
+        upload_result_file,
     )
     from report.schemas import (  # noqa: E402
         REPORT_VERSION,
@@ -88,6 +94,10 @@ class WorkerSettings:
     poll_interval_seconds: int
     log_level: str
     keep_worker_files: bool
+    assessment_enabled: bool = True
+    assessment_max_candidates: int = 12
+    assessment_min_quality: float = 0.55
+    assessment_keyframes_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -123,6 +133,16 @@ def _parse_positive_integer(name: str, value: str) -> int:
     return parsed
 
 
+def _parse_ratio(name: str, value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ReportWorkerConfigurationError(f"{name} musi być liczbą") from error
+    if not 0.0 <= parsed <= 1.0:
+        raise ReportWorkerConfigurationError(f"{name} musi mieścić się w zakresie 0-1")
+    return parsed
+
+
 def _parse_log_level(value: str) -> str:
     normalized = value.strip().upper()
     if not isinstance(getattr(logging, normalized, None), int):
@@ -130,6 +150,13 @@ def _parse_log_level(value: str) -> str:
             f"Nieobsługiwany WORKER_LOG_LEVEL: {value}"
         )
     return normalized
+
+
+def resolve_optional_ffmpeg() -> str | None:
+    configured = os.getenv("FFMPEG_PATH", "").strip()
+    if configured and Path(configured).is_file():
+        return configured
+    return shutil.which("ffmpeg")
 
 
 def load_settings(
@@ -169,6 +196,18 @@ def load_settings(
             log_level_override or os.getenv("WORKER_LOG_LEVEL", DEFAULT_LOG_LEVEL)
         ),
         keep_worker_files=_parse_bool(os.getenv("KEEP_WORKER_FILES")),
+        assessment_enabled=_parse_bool(os.getenv("ASSESSMENT_ENABLED", "true")),
+        assessment_max_candidates=_parse_positive_integer(
+            "ASSESSMENT_MAX_CANDIDATES",
+            os.getenv("ASSESSMENT_MAX_CANDIDATES", "12"),
+        ),
+        assessment_min_quality=_parse_ratio(
+            "ASSESSMENT_MIN_QUALITY",
+            os.getenv("ASSESSMENT_MIN_QUALITY", "0.55"),
+        ),
+        assessment_keyframes_enabled=_parse_bool(
+            os.getenv("ASSESSMENT_KEYFRAMES_ENABLED", "true")
+        ),
     )
 
 
@@ -392,6 +431,9 @@ def process_claimed_analysis(
     job_directory = DATA_DIRECTORY / claimed.analysis_id
     ergonomics_path = job_directory / "ergonomics-metrics.json"
     risk_path = job_directory / "risk-assessment.json"
+    pose_path = job_directory / "pose-keypoints.json"
+    overlay_path = job_directory / "pose-overlay.mp4"
+    assessment_path = job_directory / "ergonomic-assessment.json"
     report_path = job_directory / "analysis-report.json"
     started_at = time.perf_counter()
 
@@ -418,11 +460,93 @@ def process_claimed_analysis(
         )
         update_heartbeat(client, claimed.analysis_id, settings.worker_id, 99)
 
+        assessment_storage_path = (
+            f"{claimed.user_id}/{claimed.analysis_id}/results/ergonomic-assessment.json"
+        )
+        if settings.assessment_enabled:
+            try:
+                pose_storage_path = (
+                    f"{claimed.user_id}/{claimed.analysis_id}/results/pose-keypoints.json"
+                )
+                download_json_file(
+                    client,
+                    settings.results_bucket,
+                    pose_storage_path,
+                    pose_path,
+                    source="pose",
+                )
+                assessment = process_assessment_files(
+                    pose_path,
+                    ergonomics_path,
+                    assessment_path,
+                    maximum_candidates=settings.assessment_max_candidates,
+                    minimum_quality=settings.assessment_min_quality,
+                )
+                keyframes: list[dict[str, Any]] = []
+                ffmpeg_binary = resolve_optional_ffmpeg()
+                if settings.assessment_keyframes_enabled and ffmpeg_binary:
+                    try:
+                        overlay_storage_path = (
+                            f"{claimed.user_id}/{claimed.analysis_id}/results/pose-overlay.mp4"
+                        )
+                        download_json_file(
+                            client,
+                            settings.results_bucket,
+                            overlay_storage_path,
+                            overlay_path,
+                            source="overlay",
+                        )
+                        keyframe_prefix = (
+                            f"{claimed.user_id}/{claimed.analysis_id}/results/assessment-keyframes"
+                        )
+                        keyframes = extract_keyframes(
+                            assessment,
+                            overlay_path,
+                            job_directory / "assessment-keyframes",
+                            keyframe_prefix,
+                            ffmpeg_binary,
+                            limit=6,
+                        )
+                        for keyframe in keyframes:
+                            upload_result_file(
+                                client.storage,
+                                settings.results_bucket,
+                                job_directory / "assessment-keyframes" / str(keyframe["filename"]),
+                                str(keyframe["storage_path"]),
+                                "image/jpeg",
+                            )
+                        write_assessment(assessment_path, assessment)
+                    except Exception as keyframe_error:
+                        LOGGER.warning(
+                            "analysis_id=%s assessment_keyframes=unavailable reason=%s",
+                            claimed.analysis_id,
+                            sanitize_error_message(keyframe_error, settings),
+                        )
+                upload_report_file(
+                    client.storage,
+                    settings.results_bucket,
+                    assessment_path,
+                    assessment_storage_path,
+                )
+                LOGGER.info(
+                    "analysis_id=%s assessment=completed output=%s keyframes=%s",
+                    claimed.analysis_id,
+                    assessment_storage_path,
+                    len(keyframes),
+                )
+            except Exception as assessment_error:
+                LOGGER.warning(
+                    "analysis_id=%s assessment=unavailable reason=%s; report continues",
+                    claimed.analysis_id,
+                    sanitize_error_message(assessment_error, settings),
+                )
+
         report = build_report_file(
             claimed.metadata,
             ergonomics_path,
             risk_path,
             report_path,
+            assessment_path=assessment_path if assessment_path.is_file() else None,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
         database_summary = build_database_summary(report)

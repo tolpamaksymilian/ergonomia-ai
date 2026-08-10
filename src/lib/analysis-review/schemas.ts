@@ -62,7 +62,7 @@ export type ReviewMetric = {
 
 export type TimelineSegment = {
   id: string;
-  layer: "posture" | "hands" | "holding" | "quality" | "events";
+  layer: "posture" | "hands" | "holding" | "quality" | "events" | "assessment";
   track: string;
   label: string;
   start: number;
@@ -117,6 +117,49 @@ export type QualityReview = {
 
 export type KeyMomentCategory = "posture" | "hands" | "holding" | "quality";
 
+export type AssessmentEvidenceSource =
+  | "observed"
+  | "derived"
+  | "user_provided"
+  | "assumed"
+  | "unknown";
+
+export type AssessmentComponent = {
+  name: string;
+  rawInput: number | string | boolean | null;
+  category: string | null;
+  score: number | null;
+  quality: number | null;
+  source: AssessmentEvidenceSource;
+  evidence: string[];
+  missingEvidence: string[];
+  notes: string[];
+};
+
+export type AssessmentMethodResult = {
+  method: "RULA" | "REBA";
+  status: "COMPLETE" | "PARTIAL" | "INSUFFICIENT_DATA";
+  applicability: "GOOD" | "LIMITED" | "INSUFFICIENT";
+  side: "left" | "right" | null;
+  finalScore: number | null;
+  scoreRange: { min: number; max: number } | null;
+  coverage: number | null;
+  quality: number | null;
+  timestamp: number | null;
+  candidateId: string | null;
+  keyframeUrl: string | null;
+  missingInputs: string[];
+  components: AssessmentComponent[];
+};
+
+export type AssessmentReview = {
+  engineVersion: string | null;
+  rula: AssessmentMethodResult;
+  reba: AssessmentMethodResult;
+  candidates: Array<{ id: string; timestamp: number; quality: number | null; keyframeUrl: string | null }>;
+  limitations: string[];
+};
+
 export type KeyMoment = {
   id: string;
   category: KeyMomentCategory;
@@ -158,6 +201,7 @@ export type AnalysisReviewModel = {
   };
   quality: QualityReview;
   risk: RiskReview;
+  assessment: AssessmentReview;
   keyMoments: KeyMoment[];
   limitations: string[];
   availableSources: {
@@ -165,6 +209,7 @@ export type AnalysisReviewModel = {
     ergonomics: boolean;
     risk: boolean;
     report: boolean;
+    assessment: boolean;
   };
 };
 
@@ -174,6 +219,7 @@ export type NormalizeAnalysisInput = {
   ergonomics: unknown;
   risk: unknown;
   report: unknown;
+  assessment?: unknown;
   fallbackDurationSeconds?: number | null;
   fallbackProcessedFrames?: number | null;
 };

@@ -70,6 +70,7 @@ def build_analysis_report(
     ergonomics: Mapping[str, Any],
     risk: Mapping[str, Any],
     *,
+    assessment: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Build a report without rerunning metrics or risk classification."""
@@ -120,6 +121,7 @@ def build_analysis_report(
             "key_frames_count": len(key_moments),
             "valid_metric_ratio": valid_metric_ratio,
         },
+        "ergonomic_assessment": _assessment_section(assessment),
         "body_areas": _body_areas(risk),
         "metric_summary": _metric_summary(ergonomics, risk),
         "key_moments": key_moments,
@@ -154,6 +156,32 @@ def build_analysis_report(
         )
     )
     return report
+
+
+def _assessment_section(assessment: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(assessment, Mapping):
+        return {"status": "unavailable", "reason": "assessment_file_missing"}
+    if assessment.get("schema_version") != "1.0":
+        return {"status": "unavailable", "reason": "unsupported_assessment_schema"}
+    output: dict[str, Any] = {
+        "status": "available",
+        "engine_version": assessment.get("engine_version"),
+        "calculated_at": assessment.get("calculated_at"),
+        "limitations": list(assessment.get("limitations", []))
+        if isinstance(assessment.get("limitations"), list)
+        else [],
+        "keyframes": list(assessment.get("keyframes", []))
+        if isinstance(assessment.get("keyframes"), list)
+        else [],
+    }
+    for method in ("rula", "reba"):
+        summary = assessment.get(method)
+        output[method] = dict(summary) if isinstance(summary, Mapping) else {
+            "method": method.upper(),
+            "status": "INSUFFICIENT_DATA",
+            "representative": None,
+        }
+    return output
 
 
 def _movement_features(ergonomics: Mapping[str, Any]) -> dict[str, Any] | None:

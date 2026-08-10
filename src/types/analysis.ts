@@ -226,6 +226,7 @@ export type AnalysisReport = {
     }>;
   };
   risk_summary: ReportRiskSummary;
+  ergonomic_assessment?: ReportErgonomicAssessment;
   body_areas: ReportBodyArea[];
   metric_summary: ReportMetricSummary[];
   key_moments: ReportKeyMoment[];
@@ -245,6 +246,37 @@ export type AnalysisReport = {
   movement_features?: Record<string, ReportMovementFeature>;
   posture_duration?: Record<string, number | string | null>;
   pose_quality?: Record<string, unknown>;
+};
+
+export type ReportAssessmentRepresentative = {
+  candidate_id?: string;
+  side?: "left" | "right";
+  timestamp_seconds?: number;
+  duration_context_seconds?: number;
+  quality?: number;
+  evidence_coverage_ratio?: number;
+  final_score?: number | null;
+  score_range?: { min: number; max: number } | null;
+  missing_inputs?: string[];
+};
+
+export type ReportAssessmentMethod = {
+  method?: "RULA" | "REBA";
+  status: "COMPLETE" | "PARTIAL" | "INSUFFICIENT_DATA";
+  applicability?: "GOOD" | "LIMITED" | "INSUFFICIENT";
+  representative?: ReportAssessmentRepresentative | null;
+  analyzed_posture_count?: number;
+};
+
+export type ReportErgonomicAssessment = {
+  status: "available" | "unavailable";
+  reason?: string;
+  engine_version?: string;
+  calculated_at?: string;
+  rula?: ReportAssessmentMethod;
+  reba?: ReportAssessmentMethod;
+  limitations?: string[];
+  keyframes?: Array<{ storage_path?: string; signed_url?: string; timestamp_seconds?: number; method?: string }>;
 };
 
 export type ReportHandActivity = {

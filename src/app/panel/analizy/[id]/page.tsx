@@ -43,6 +43,7 @@ export default async function AnalysisDetailsPage({
     .from("analyses")
     .select(`
       id,
+      user_id,
       title,
       description,
       status,
@@ -217,6 +218,8 @@ export default async function AnalysisDetailsPage({
       ergonomicsDownload,
       riskDownload,
       reportDownload,
+      assessmentFile,
+      assessmentDownload,
     ] = await Promise.all([
       analysis.result_json_path ? resultsBucket.download(analysis.result_json_path) : emptyAccess,
       analysis.ergonomics_metrics_path ? resultsBucket.download(analysis.ergonomics_metrics_path) : emptyAccess,
@@ -231,13 +234,27 @@ export default async function AnalysisDetailsPage({
       analysis.report_path
         ? resultsBucket.createSignedUrl(analysis.report_path, resultUrlLifetimeSeconds, { download: "analysis-report.json" })
         : emptyAccess,
+      resultsBucket.download(`${analysis.user_id}/${analysis.id}/results/ergonomic-assessment.json`),
+      resultsBucket.createSignedUrl(
+        `${analysis.user_id}/${analysis.id}/results/ergonomic-assessment.json`,
+        resultUrlLifetimeSeconds,
+        { download: "ergonomic-assessment.json" },
+      ),
     ]);
-    const [poseDocument, ergonomicsDocument, riskDocument, reportDocument] = await Promise.all([
+    const [poseDocument, ergonomicsDocument, riskDocument, reportDocument, rawAssessmentDocument] = await Promise.all([
       parseStorageJson(poseFile.data),
       parseStorageJson(ergonomicsFile.data),
       parseStorageJson(riskFile.data),
       parseStorageJson(reportFile.data),
+      parseStorageJson(assessmentFile.data),
     ]);
+    const assessmentDocument = await attachAssessmentSignedUrls(
+      rawAssessmentDocument,
+      async (storagePath) => {
+        const access = await resultsBucket.createSignedUrl(storagePath, resultUrlLifetimeSeconds);
+        return access.data?.signedUrl ?? null;
+      },
+    );
     const sourceDurationSeconds = finiteNumber(analysis.source_duration_seconds);
     const model = normalizeAnalysisReview({
       analysisId: analysis.id,
@@ -245,6 +262,7 @@ export default async function AnalysisDetailsPage({
       ergonomics: ergonomicsDocument,
       risk: riskDocument,
       report: reportDocument,
+      assessment: assessmentDocument,
       fallbackDurationSeconds: sourceDurationSeconds,
       fallbackProcessedFrames: analysis.pose_processed_frames,
     });
@@ -270,6 +288,7 @@ export default async function AnalysisDetailsPage({
           ergonomicsJson: ergonomicsDownload.data?.signedUrl ?? null,
           riskJson: riskDownload.data?.signedUrl ?? null,
           reportJson: reportDownload.data?.signedUrl ?? null,
+          assessmentJson: assessmentDownload.data?.signedUrl ?? null,
         }}
       />
     );
@@ -726,4 +745,21 @@ async function parseStorageJson(file: Blob | null): Promise<unknown> {
 function finiteNumber(value: unknown): number | null {
   const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+async function attachAssessmentSignedUrls(
+  value: unknown,
+  signer: (storagePath: string) => Promise<string | null>,
+): Promise<unknown> {
+  if (!isUnknownRecord(value) || !Array.isArray(value.keyframes)) return value;
+  const keyframes = await Promise.all(value.keyframes.map(async (item) => {
+    if (!isUnknownRecord(item) || typeof item.storage_path !== "string") return item;
+    const signedUrl = await signer(item.storage_path);
+    return signedUrl ? { ...item, signed_url: signedUrl } : item;
+  }));
+  return { ...value, keyframes };
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

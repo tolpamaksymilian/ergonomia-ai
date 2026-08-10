@@ -59,14 +59,25 @@ def build_report_file(
     risk_path: Path,
     output_path: Path,
     *,
+    assessment_path: Path | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     ergonomics = read_ergonomics_document(ergonomics_path)
     risk = read_risk_document(risk_path)
+    assessment = (
+        _read_json_object(
+            assessment_path,
+            "ergonomic-assessment.json",
+            ReportInputInvalidError,
+        )
+        if assessment_path is not None and assessment_path.is_file()
+        else None
+    )
     report = build_analysis_report(
         analysis,
         ergonomics,
         risk,
+        assessment=assessment,
         generated_at=generated_at,
     )
     _write_json_atomically(output_path, report)
@@ -136,6 +147,34 @@ def upload_report_file(
     uploaded_path = str(response.path).strip()
     if uploaded_path != storage_path:
         raise ReportUploadError("Storage zwrócił nieoczekiwaną ścieżkę raportu.")
+    return uploaded_path
+
+
+def upload_result_file(
+    storage_client: StorageClientProtocol,
+    bucket_name: str,
+    local_path: Path,
+    storage_path: str,
+    content_type: str,
+) -> str:
+    if not local_path.is_file() or local_path.stat().st_size <= 0:
+        raise ReportUploadError("Plik wynikowy jest pusty lub nie istnieje.")
+    try:
+        with local_path.open("rb") as file_handle:
+            response = storage_client.from_(bucket_name).upload(
+                path=storage_path,
+                file=file_handle,
+                file_options={
+                    "content-type": content_type,
+                    "cache-control": "3600",
+                    "upsert": "true",
+                },
+            )
+    except Exception as error:
+        raise ReportUploadError("Nie udało się przesłać pliku wynikowego.") from error
+    uploaded_path = str(response.path).strip()
+    if uploaded_path != storage_path:
+        raise ReportUploadError("Storage zwrócił nieoczekiwaną ścieżkę pliku.")
     return uploaded_path
 
 

@@ -1,4 +1,5 @@
 import { Activity, Clock3, FileWarning, Hand, ScanLine, ShieldCheck } from "lucide-react";
+import Image from "next/image";
 
 import { METRIC_DEFINITIONS } from "@/lib/analysis-review/config";
 import { formatAngle, formatDuration, formatPercentage, formatRatio, formatTimestamp, UNKNOWN_VALUE } from "@/lib/analysis-review/formatters";
@@ -80,6 +81,21 @@ export function ReportQuality({ report }: { report: AnalysisReport }) {
   </ReportSection>;
 }
 
+export function ReportAssessment({ report }: { report: AnalysisReport }) {
+  const assessment = report.ergonomic_assessment;
+  return <ReportSection title="Metody RULA / REBA" icon={ScanLine} className="report-break-before">
+    <p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">Metody przesiewowe są prezentowane oddzielnie od własnego Risk Engine. Brakujące parametry nie są zamieniane na zero.</p>
+    {!assessment || assessment.status !== "available" ? <Empty text="Assessment Engine nie był dostępny dla tej analizy." /> : <div className="grid gap-4 md:grid-cols-2">{([assessment.rula, assessment.reba] as const).map((method, index) => {
+      const name = index === 0 ? "RULA" : "REBA";
+      const representative = method?.representative;
+      const score = representative?.final_score ?? null;
+      const range = representative?.score_range;
+      const keyframe = assessment.keyframes?.find((item) => item.method === name && item.signed_url);
+      return <article key={name} className="report-card rounded-2xl border border-sky-300/15 bg-sky-300/[0.035] p-5 print:border-slate-300 print:bg-white">{keyframe?.signed_url && <Image src={keyframe.signed_url} alt={`Pozycja reprezentatywna ${name}`} width={960} height={540} unoptimized className="mb-4 aspect-video w-full rounded-xl border border-white/10 object-cover print:border-slate-300" />}<h3 className="text-lg font-semibold text-slate-100 print:text-black">{name}</h3><p className="mt-2 text-sm text-slate-400 print:text-slate-700">{methodStatus(method?.status)}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Datum label={score !== null ? "Wynik" : "Możliwy zakres"} value={score !== null ? String(score) : range ? `${range.min}–${range.max}` : UNKNOWN_VALUE} /><Datum label="Pozycja" value={formatTimestamp(representative?.timestamp_seconds)} /><Datum label="Strona" value={representative?.side === "left" ? "Lewa" : representative?.side === "right" ? "Prawa" : UNKNOWN_VALUE} /><Datum label="Pokrycie dowodami" value={formatPercentage(representative?.evidence_coverage_ratio)} /></dl>{representative?.missing_inputs?.length ? <div className="mt-4"><p className="text-[9px] uppercase tracking-wider text-slate-500">Brakujące informacje</p><ul className="mt-2 space-y-1 text-xs text-slate-500 print:text-slate-700">{representative.missing_inputs.slice(0, 6).map((item) => <li key={item}>— {humanize(item)}</li>)}</ul></div> : null}</article>;
+    })}</div>}
+  </ReportSection>;
+}
+
 export function ReportLimitations({ report }: { report: AnalysisReport }) {
   return <ReportSection title="Ograniczenia" icon={FileWarning} className="report-break-before"><ul className="space-y-2">{report.limitations.map((item) => <li key={item} className="flex gap-3 text-sm leading-6 text-slate-400 print:text-slate-700"><span aria-hidden="true">—</span>{limitationLabels[item] ?? humanize(item)}</li>)}</ul><p className="mt-6 border-t border-white/10 pt-5 text-sm font-medium text-slate-300 print:border-slate-300 print:text-black">Wynik ma charakter wspierający i nie zastępuje oceny specjalisty.</p></ReportSection>;
 }
@@ -90,3 +106,4 @@ function Empty({ text }: { text: string }) { return <p className="rounded-xl bor
 function formatMetric(metric: ReportMetricSummary, value: number | undefined) { return metric.unit === "deg" ? formatAngle(value) : formatRatio(value); }
 function humanize(value: string) { return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()); }
 function postureLabel(value: string) { return ({ trunk_posture_hold: "Tułów", neck_posture_hold: "Szyja", left_arm_elevation_hold: "Lewe ramię", right_arm_elevation_hold: "Prawe ramię", left_wrist_posture_hold: "Lewy nadgarstek", right_wrist_posture_hold: "Prawy nadgarstek" } as Record<string, string>)[value] ?? value; }
+function methodStatus(value: string | undefined) { return value === "COMPLETE" ? "Wynik kompletny" : value === "PARTIAL" ? "Ocena częściowa — zakres wynika z brakujących danych" : "Niewystarczające dane"; }

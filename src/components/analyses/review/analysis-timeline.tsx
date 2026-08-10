@@ -13,6 +13,7 @@ const LAYERS = [
   ["holding", "Chwyt"],
   ["quality", "Jakość"],
   ["events", "Zdarzenia"],
+  ["assessment", "RULA / REBA"],
 ] as const;
 
 type AnalysisTimelineProps = {
@@ -23,7 +24,7 @@ type AnalysisTimelineProps = {
 };
 
 export function AnalysisTimeline({ segments, duration, currentTime, onSeek }: AnalysisTimelineProps) {
-  const [visible, setVisible] = useState<Set<TimelineSegment["layer"]>>(() => new Set(["posture", "holding", "quality", "events"]));
+  const [visible, setVisible] = useState<Set<TimelineSegment["layer"]>>(() => new Set(["posture", "holding", "quality", "events", "assessment"]));
   const tracks = useMemo(() => {
     const map = new Map<string, TimelineSegment[]>();
     for (const segment of segments) {
@@ -125,6 +126,7 @@ function trackLabel(segment: TimelineSegment | undefined) {
   if (segment.layer === "holding") return `Chwyt · ${segment.label}`;
   if (segment.layer === "hands") return `Dłoń · ${segment.track === "left" ? "lewa" : "prawa"}`;
   if (segment.layer === "events") return "Kluczowe zdarzenia";
+  if (segment.layer === "assessment") return "Pozycje RULA / REBA";
   return segment.track === "body" ? "Jakość sylwetki" : QUALITY_WARNING_LABELS[segment.track] ?? segment.label;
 }
 
@@ -138,6 +140,7 @@ function segmentClass(segment: TimelineSegment) {
   if (segment.layer === "hands") return "bg-cyan-400";
   if (segment.layer === "quality") return "bg-slate-400";
   if (segment.layer === "events") return "bg-violet-400";
+  if (segment.layer === "assessment") return "bg-sky-300";
   return {
     neutral: "bg-lime-400",
     mild: "bg-amber-300",
