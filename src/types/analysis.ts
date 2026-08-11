@@ -193,9 +193,9 @@ export type ReportKeyMoment = {
 };
 
 export type AnalysisReport = {
-  schema_version: "1.0" | "2.0" | "2.1" | "2.2";
+  schema_version: "1.0" | "2.0" | "2.1" | "2.2" | "2.3";
   generated_by: "Ergonomia AI Report Engine";
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1" | "analysis-report-v2.3-beta.1";
   generated_at: string;
   analysis: {
     analysis_id: string;
@@ -206,6 +206,19 @@ export type AnalysisReport = {
     source_duration_seconds?: number;
     source_width?: number;
     source_height?: number;
+  };
+  analysis_context?: {
+    workstation?: { name?: string; code?: string; department?: string; area?: string };
+    process_name?: string;
+    activity_description?: string;
+    department?: string;
+    area?: string;
+    line_machine?: string;
+    notes?: string;
+    author_name?: string;
+    analysis_date?: string;
+    categories?: Array<{ name?: string; group_name?: string }>;
+    traceability?: { source?: string };
   };
   processing: {
     pose_pipeline_version?: string;
@@ -241,7 +254,6 @@ export type AnalysisReport = {
     missing_inputs?: string[];
     limitations?: string[];
     owas?: Record<string, unknown> | null;
-    ejms?: Record<string, unknown> | null;
     risk_score?: Record<string, unknown> | null;
     measurable_factors?: Array<Record<string, unknown>> | null;
     chemical?: Record<string, unknown> | null;
@@ -363,7 +375,7 @@ export type ReportMovementFeature = {
 };
 
 export type ReportSummary = {
-  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1";
+  report_version: "analysis-report-v1.0" | "analysis-report-v2.0-beta.1" | "analysis-report-v2.1-beta.1" | "analysis-report-v2.2-beta.1" | "analysis-report-v2.3-beta.1";
   analysis_id: string;
   overall_level: RiskLevel;
   insufficient_data: boolean;

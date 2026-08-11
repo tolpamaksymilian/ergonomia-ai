@@ -12,7 +12,7 @@ const findingLevelLabels = {
 } as const;
 
 export function ReportV2Summary({ report }: { report: AnalysisReport }) {
-  if (!["analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1", "analysis-report-v2.2-beta.1"].includes(report.report_version)) return null;
+  if (!["analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1", "analysis-report-v2.2-beta.1", "analysis-report-v2.3-beta.1"].includes(report.report_version)) return null;
   return <section className="report-card rounded-[26px] border border-cyan-300/15 bg-cyan-300/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white">
         <h2 className="flex items-center gap-2 text-xl font-semibold text-white print:text-black"><ListChecks className="size-5 text-cyan-300 print:text-black" aria-hidden="true" />Podsumowanie</h2>
         <ul className="mt-5 space-y-2 text-sm leading-6 text-slate-300 print:text-slate-700">{report.executive_summary?.map((line) => <li key={line}>— {line}</li>)}</ul>

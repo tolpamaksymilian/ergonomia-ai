@@ -2,7 +2,7 @@
 
 System do analizy ergonomii pracy na podstawie krótkiego nagrania wideo.
 
-**Aktualna wersja: v0.8.0-beta.1 — metody zakładowe OWAS, EJMS i Report 2.1.**
+**Aktualna wersja: v0.11.0-beta.1 — jasny i ciemny motyw oraz odświeżony design system.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 

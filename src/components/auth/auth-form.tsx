@@ -115,7 +115,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       <button
         type="submit"
         disabled={isPending}
-        className="group flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-5 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/15 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+        className="ui-button-primary group w-full py-3.5"
       >
         {isPending ? (
           <>
@@ -142,7 +142,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             Masz już konto?{" "}
             <Link
               href="/logowanie"
-              className="font-semibold text-emerald-300 transition hover:text-emerald-200"
+              className="font-semibold text-primary transition hover:text-primary-hover"
             >
               Zaloguj się
             </Link>
@@ -152,7 +152,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             Nie masz konta?{" "}
             <Link
               href="/rejestracja"
-              className="font-semibold text-emerald-300 transition hover:text-emerald-200"
+              className="font-semibold text-primary transition hover:text-primary-hover"
             >
               Utwórz konto
             </Link>
@@ -188,7 +188,7 @@ function FormField({
     <div>
       <label
         htmlFor={id}
-        className="mb-2 block text-sm font-medium text-slate-200"
+        className="mb-2 block text-sm font-medium text-foreground"
       >
         {label}
       </label>
@@ -207,10 +207,10 @@ function FormField({
           aria-describedby={
             error ? `${id}-error` : undefined
           }
-          className={`w-full rounded-xl border bg-slate-950/60 py-3.5 pl-12 pr-4 text-white outline-none transition placeholder:text-slate-600 ${
+          className={`w-full rounded-lg border bg-surface py-3.5 pl-12 pr-4 text-foreground outline-none transition placeholder:text-muted-foreground ${
             error
               ? "border-red-400/40 focus:border-red-300"
-              : "border-white/10 focus:border-emerald-400/50"
+              : "border-input focus:border-primary"
           }`}
         />
       </div>
@@ -252,7 +252,7 @@ function PasswordField({
     <div>
       <label
         htmlFor={id}
-        className="mb-2 block text-sm font-medium text-slate-200"
+        className="mb-2 block text-sm font-medium text-foreground"
       >
         {label}
       </label>
@@ -272,10 +272,10 @@ function PasswordField({
           aria-describedby={
             error ? `${id}-error` : undefined
           }
-          className={`w-full rounded-xl border bg-slate-950/60 py-3.5 pl-12 pr-12 text-white outline-none transition placeholder:text-slate-600 ${
+          className={`w-full rounded-lg border bg-surface py-3.5 pl-12 pr-12 text-foreground outline-none transition placeholder:text-muted-foreground ${
             error
               ? "border-red-400/40 focus:border-red-300"
-              : "border-white/10 focus:border-emerald-400/50"
+              : "border-input focus:border-primary"
           }`}
         />
 
@@ -285,7 +285,7 @@ function PasswordField({
           aria-label={
             visible ? "Ukryj hasło" : "Pokaż hasło"
           }
-          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white"
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
         >
           {visible ? (
             <EyeOff className="size-5" />

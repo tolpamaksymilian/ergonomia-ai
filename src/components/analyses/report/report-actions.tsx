@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, Printer } from "lucide-react";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type ReportActionsProps = {
   downloadUrl: string | null;
@@ -9,10 +10,11 @@ type ReportActionsProps = {
 export function ReportActions({ downloadUrl }: ReportActionsProps) {
   return (
     <div className="report-actions flex flex-wrap gap-3" data-print-hidden>
+      <ThemeToggle />
       <button
         type="button"
         onClick={() => window.print()}
-        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+        className="ui-button-primary text-sm"
       >
         <Printer className="size-4" aria-hidden="true" />
         Drukuj raport
@@ -21,7 +23,7 @@ export function ReportActions({ downloadUrl }: ReportActionsProps) {
       {downloadUrl ? (
         <a
           href={downloadUrl}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+          className="ui-button-secondary text-sm"
         >
           <Download className="size-4" aria-hidden="true" />
           Pobierz dane raportu

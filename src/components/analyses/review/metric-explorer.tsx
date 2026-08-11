@@ -68,11 +68,11 @@ export function MetricExplorer({ metrics, selected, currentTime, duration, onSel
             }}
           >
             <defs>
-              <linearGradient id="chart-grid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#22d3ee" stopOpacity="0.08"/><stop offset="1" stopColor="#22d3ee" stopOpacity="0"/></linearGradient>
+              <linearGradient id="chart-grid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#f97316" stopOpacity="0.09"/><stop offset="1" stopColor="#f97316" stopOpacity="0"/></linearGradient>
             </defs>
             <rect x="0" y="0" width="900" height="300" fill="url(#chart-grid)" />
             {[0, 75, 150, 225, 300].map((y) => <line key={y} x1="0" y1={y} x2="900" y2={y} stroke="rgba(148,163,184,.12)" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
-            {chart.paths.map((path, index) => <path key={index} d={path} fill="none" stroke="#67e8f9" strokeWidth="2.25" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
+            {chart.paths.map((path, index) => <path key={index} d={path} fill="none" stroke="#f97316" strokeWidth="2.25" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
             <line x1={Math.min(900, currentTime / chart.duration * 900)} x2={Math.min(900, currentTime / chart.duration * 900)} y1="0" y2="300" stroke="#f8fafc" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
           </svg>
           <div className="mt-2 flex justify-between text-[10px] tabular-nums text-slate-600"><span>00:00</span><span>{formatTimestamp(chart.duration / 2)}</span><span>{formatTimestamp(chart.duration)}</span></div>

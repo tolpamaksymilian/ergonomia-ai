@@ -1,24 +1,97 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #f7f7f7;
+  --foreground: #111111;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-muted: #f5f5f5;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #f97316;
+  --primary-hover: #ea580c;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1f1;
+  --secondary-foreground: #171717;
+  --muted: #f0f0f0;
+  --muted-foreground: #5f5f5f;
+  --accent: #fff7ed;
+  --accent-foreground: #9a3412;
+  --border: #e5e5e5;
+  --input: #d4d4d4;
+  --ring: #f97316;
+  --destructive: #dc2626;
+  --brand: #f97316;
+  --brand-hover: #ea580c;
+  --brand-soft: #fff7ed;
+  --shadow-subtle: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+html.dark,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --surface: #111111;
+  --surface-raised: #171717;
+  --surface-muted: #1c1c1c;
+  --card: #141414;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #f97316;
+  --primary-hover: #fb923c;
+  --primary-foreground: #ffffff;
+  --secondary: #222222;
+  --secondary-foreground: #fafafa;
+  --muted: #202020;
+  --muted-foreground: #a3a3a3;
+  --accent: #2b180d;
+  --accent-foreground: #fdba74;
+  --border: #2a2a2a;
+  --input: #3a3a3a;
+  --ring: #fb923c;
+  --destructive: #ef4444;
+  --brand: #f97316;
+  --brand-hover: #fb923c;
+  --brand-soft: #2b180d;
+  --shadow-subtle: none;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-muted: var(--surface-muted);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html { background: var(--background); }
 body {
   background: var(--background);
   color: var(--foreground);
@@ -26,80 +99,59 @@ body {
   overflow-wrap: anywhere;
 }
 
-::selection {
-  background: rgba(52, 211, 153, 0.25);
-  color: #f8fafc;
-}
-
-button,
-a {
-  -webkit-tap-highlight-color: transparent;
-}
+::selection { background: color-mix(in srgb, var(--brand) 24%, transparent); color: var(--foreground); }
+button, a { -webkit-tap-highlight-color: transparent; }
+:where(a, button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 @layer components {
-  .review-panel {
-    @apply min-w-0 rounded-[26px] border border-white/10 bg-white/[0.035] p-5 sm:p-6;
-  }
+  .ui-page { @apply min-h-screen overflow-x-hidden bg-background text-foreground; }
+  .ui-surface { @apply rounded-xl border border-border bg-surface text-foreground shadow-[var(--shadow-subtle)]; }
+  .ui-card { @apply rounded-xl border border-border bg-card text-card-foreground shadow-[var(--shadow-subtle)]; }
+  .ui-button-primary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50; }
+  .ui-button-secondary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 font-semibold text-foreground transition hover:bg-secondary disabled:opacity-50; }
+  .ui-icon-button { @apply inline-flex size-10 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground transition hover:bg-secondary hover:text-foreground; }
+  .ui-input { @apply min-h-11 w-full rounded-lg border border-input bg-surface px-3 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20; }
+  .ui-chip { @apply rounded-full border border-border bg-surface-muted px-3 py-1 text-xs text-muted-foreground; }
+  .ui-chip-selected { @apply border-primary/40 bg-brand-soft text-accent-foreground; }
 
-  .review-eyebrow {
-    @apply flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300;
-  }
-
-  .review-filter {
-    @apply rounded-lg border border-white/[0.08] bg-slate-950/35 px-3 py-2 text-xs font-semibold text-slate-500 transition hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-200;
-  }
-
-  .review-filter-active {
-    @apply border-cyan-300/25 bg-cyan-300/[0.09] text-cyan-100;
-  }
-
-  .review-icon-button {
-    @apply inline-flex size-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.09] hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-200;
-  }
+  .review-panel { @apply min-w-0 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-[var(--shadow-subtle)] sm:p-6; }
+  .review-eyebrow { @apply flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent-foreground; }
+  .review-filter { @apply rounded-lg border border-border bg-surface-muted px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground; }
+  .review-filter-active { @apply border-primary/40 bg-brand-soft text-accent-foreground; }
+  .review-icon-button { @apply inline-flex size-9 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground transition hover:bg-secondary hover:text-foreground; }
 }
 
+/* Compatibility layer while legacy screens move to semantic utilities. */
+html:not(.dark) :is(main, header, footer)[class*="bg-"] { background-color: var(--background) !important; color: var(--foreground) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-slate-950"] { background-color: var(--surface-muted) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-slate-9"] { background-color: var(--surface-muted) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-white/["] { background-color: var(--surface) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.bg-white, [class*="bg-slate-100"]) { background-color: var(--surface) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="border-white/"] { border-color: var(--border) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="border-slate-"] { border-color: var(--border) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.text-white, .text-slate-100, .text-slate-200, .text-slate-300) { color: var(--foreground) !important; }
+html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.text-slate-400, .text-slate-500, .text-slate-600) { color: var(--muted-foreground) !important; }
+html.dark :is(main, header, footer)[class*="bg-slate-100"], html.dark :is(main, header, footer)[class*="bg-white"] { background-color: var(--background) !important; color: var(--foreground) !important; }
+html.dark :is(main, header, footer) :is(.bg-white, [class*="bg-slate-100"]) { background-color: var(--surface) !important; color: var(--foreground) !important; }
+html.dark :is(main, header, footer) :is(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700) { color: var(--foreground) !important; }
+html.dark :is(main, header, footer) :is(.text-slate-600, .text-slate-500, .text-slate-400) { color: var(--muted-foreground) !important; }
+html.dark :is(main, header, footer) [class*="border-slate-"] { border-color: var(--border) !important; }
+html.dark :is(main, header, footer) :is(input, textarea, select) { background: var(--surface-raised); border-color: var(--input); color: var(--foreground); }
+
+* { scrollbar-color: var(--border) transparent; }
+
 @media (prefers-reduced-motion: reduce) {
-  .review-panel *,
-  .report-page * {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
 @media print {
-  @page {
-    margin: 14mm;
-  }
-
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  [data-print-hidden],
-  .report-actions,
-  .report-screen-only {
-    display: none !important;
-  }
-
-  .report-page {
-    background: #ffffff !important;
-    color: #000000 !important;
-  }
-
-  .report-card,
-  .report-page section,
-  .report-page article,
-  .report-page tr {
-    break-inside: avoid;
-    box-shadow: none !important;
-  }
-
-  .report-break-before {
-    break-before: page;
-  }
+  @page { margin: 14mm; }
+  :root, html, html.dark, html[data-theme="dark"], body { color-scheme: light !important; background: #ffffff !important; color: #111111 !important; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  [data-print-hidden], .report-actions, .report-screen-only { display: none !important; }
+  .report-page, .report-page * { background-color: #ffffff !important; color: #111111 !important; border-color: #d4d4d4 !important; box-shadow: none !important; }
+  .report-page :is(a, h1, h2, h3, strong), .report-page svg { color: #111111 !important; }
+  .report-page [class*="text-cyan"], .report-page [class*="text-orange"] { color: #c2410c !important; }
+  .report-card, .report-page section, .report-page article, .report-page tr { break-inside: avoid; }
+  .report-break-before { break-before: page; }
 }

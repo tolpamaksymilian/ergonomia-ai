@@ -1,5 +1,4 @@
 import chemicalSpec from "../../../method-specs/chemical-inhalation.json" with { type: "json" };
-import ejmsSpec from "../../../method-specs/ejms.json" with { type: "json" };
 import hazardSpec from "../../../method-specs/hazards.json" with { type: "json" };
 import manifestSpec from "../../../method-specs/manifest.json" with { type: "json" };
 import measurableSpec from "../../../method-specs/measurable-factors.json" with { type: "json" };
@@ -12,7 +11,6 @@ export const companyMethodSpecs = {
   riskScore: riskScoreSpec,
   measurable: measurableSpec,
   owas: owasSpec,
-  ejms: ejmsSpec,
   chemical: chemicalSpec,
 } as const;
 

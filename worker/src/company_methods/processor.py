@@ -7,13 +7,12 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from .chemical import evaluate_chemical
-from .ejms import evaluate_ejms
 from .measurable import add_months, evaluate_measurable_factor
 from .owas import evaluate_owas
 from .risk_score import evaluate_risk_score
 from .specs import load_spec
 
-COMPANY_METHODS_VERSION = "company-methods-v1.1-beta.1"
+COMPANY_METHODS_VERSION = "company-methods-v1.2-beta.1"
 
 
 def process_company_methods(
@@ -30,17 +29,16 @@ def process_company_methods(
     measurable_inputs = inputs.get("measurable_factors")
     measurable = [_measurable_result(item) for item in measurable_inputs if isinstance(item, Mapping)] if isinstance(measurable_inputs, list) else []
     owas = evaluate_owas(pose_document, ergonomics_document, _as_mapping(inputs.get("owas")))
-    ejms = evaluate_ejms(ergonomics_document, _as_mapping(inputs.get("ejms")), owas)
     risk_score = evaluate_risk_score(_as_mapping(inputs.get("risk_score")))
     chemical = evaluate_chemical(_as_mapping(inputs.get("chemical")))
-    missing = [*owas["missing_inputs"], *ejms["missing_inputs"], *risk_score["missing_inputs"]]
+    missing = [*owas["missing_inputs"], *risk_score["missing_inputs"]]
     return {
         "schema_version": "1.0", "generated_by": "Ergonomia AI Company Methods Engine",
         "company_methods_version": COMPANY_METHODS_VERSION, "analysis_id": analysis_id,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "source": {"pose_version": _as_mapping(pose_document).get("pose_version"), "metrics_version": ergonomics_document.get("metrics_version"), "method_specs_sha256": load_spec("manifest")["source_workbook_sha256"]},
-        "configuration": {"absolute_video_measurements_enabled": False, "chemical_automatic_scoring_enabled": False, "ejms_global_ranking_enabled": False},
-        "owas": owas, "ejms": ejms, "risk_score": risk_score, "measurable_factors": measurable, "chemical": chemical,
+        "configuration": {"absolute_video_measurements_enabled": False, "chemical_automatic_scoring_enabled": False},
+        "owas": owas, "risk_score": risk_score, "measurable_factors": measurable, "chemical": chemical,
         "missing_inputs": sorted(set(missing)),
         "evidence_sources": load_spec("manifest")["rules"]["evidence_sources"],
         "limitations": ["2d_video_analysis", "unknown_values_are_not_zero", "manual_values_require_user_confirmation", "chemical_requires_IN.06.13"],

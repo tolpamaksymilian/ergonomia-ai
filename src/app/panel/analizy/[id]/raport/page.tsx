@@ -16,6 +16,7 @@ import {
   ReportAssessment,
   ReportCompanyMethods,
   ReportQuality,
+  ReportAnalysisContext,
 } from "@/components/analyses/report/report-sections";
 import { parseAnalysisReport } from "@/lib/analysis-report";
 import { requireUser } from "@/lib/auth/access";
@@ -91,7 +92,6 @@ export default async function ReportPage({ params }: ReportPageProps) {
           missing_inputs: strings(companyMethods.missing_inputs),
           limitations: strings(companyMethods.limitations),
           owas: isRecord(companyMethods.owas) ? companyMethods.owas : null,
-          ejms: isRecord(companyMethods.ejms) ? companyMethods.ejms : null,
           risk_score: isRecord(companyMethods.risk_score) ? companyMethods.risk_score : null,
           measurable_factors: Array.isArray(companyMethods.measurable_factors) ? companyMethods.measurable_factors.filter(isRecord) : [],
           chemical: isRecord(companyMethods.chemical) ? companyMethods.chemical : null,
@@ -114,7 +114,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   }
 
   return (
-    <main className="report-page min-h-screen overflow-x-hidden bg-[#050b14] px-4 py-6 text-white sm:px-8 sm:py-8 print:bg-white print:px-0 print:py-0 print:text-black">
+    <main className="report-page ui-page px-4 py-6 sm:px-8 sm:py-8 print:bg-white print:px-0 print:py-0 print:text-black">
       <div className="mx-auto max-w-6xl space-y-6 print:max-w-none print:space-y-4">
         <ReportHeader
           report={report}
@@ -122,6 +122,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
           downloadUrl={downloadAccess.data?.signedUrl ?? null}
         />
         <ReportV2Summary report={report} />
+        <ReportAnalysisContext report={report} />
         <ReportQuality report={report} />
         <ReportPriorityFindings report={report} />
         <ReportOverview report={report} />
@@ -174,7 +175,7 @@ function ReportUnavailable({
             : "Raport nie jest jeszcze dostępny.";
 
   return (
-    <main className="min-h-screen bg-[#050b14] px-5 py-10 text-white">
+    <main className="ui-page px-5 py-10">
       <section className="mx-auto max-w-2xl rounded-[28px] border border-amber-300/20 bg-amber-300/[0.06] p-7 sm:p-9">
         <FileWarning className="size-8 text-amber-300" aria-hidden="true" />
         <h1 className="mt-5 text-2xl font-semibold">Raport analizy</h1>

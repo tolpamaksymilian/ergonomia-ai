@@ -19,7 +19,7 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
+    <main className="ui-page">
       <SiteHeader />
       <HeroSection isAuthenticated={Boolean(user)} />
       <HomeProjectSections isAuthenticated={Boolean(user)} />

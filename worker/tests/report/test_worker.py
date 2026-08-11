@@ -37,9 +37,9 @@ class FakeBucket:
     def upload(self, *, path, file, file_options):
         document = json.load(file)
         if path.endswith("analysis-report.json"):
-            assert document["report_version"] == "analysis-report-v2.2-beta.1"
+            assert document["report_version"] == "analysis-report-v2.3-beta.1"
         elif path.endswith("company-method-assessment.json"):
-            assert document["company_methods_version"] == "company-methods-v1.1-beta.1"
+            assert document["company_methods_version"] == "company-methods-v1.2-beta.1"
         else:
             raise AssertionError(f"unexpected upload: {path}")
         assert file_options["upsert"] == "true"
@@ -126,7 +126,7 @@ def test_complete_rpc_failure_has_stable_code():
             analysis_id="analysis",
             worker_id="worker",
             report_path="u/a/results/analysis-report.json",
-            report_summary={"report_version": "analysis-report-v2.2-beta.1"},
+            report_summary={"report_version": "analysis-report-v2.3-beta.1"},
         )
     assert error.value.error_code == "REPORT_COMPLETE_RPC_ERROR"
 
@@ -182,7 +182,7 @@ def test_full_worker_flow_generates_uploads_and_completes(monkeypatch, tmp_path)
         payload for name, payload in client.calls if name == report_worker.COMPLETE_RPC_NAME
     ]
     assert len(complete) == 1
-    assert complete[0]["p_report_version"] == "analysis-report-v2.2-beta.1"
+    assert complete[0]["p_report_version"] == "analysis-report-v2.3-beta.1"
     assert complete[0]["p_report_summary"]["overall_level"] == "low"
 
 

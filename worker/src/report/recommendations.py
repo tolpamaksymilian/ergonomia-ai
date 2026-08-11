@@ -16,7 +16,7 @@ RECOMMENDATIONS = {
 }
 
 MANUAL_INPUTS: dict[str, tuple[str, str, str]] = {
-    "handled_load": ("Masa przenoszonego przedmiotu", "high", "Wartość w kilogramach uzupełnia kompatybilne pola OWAS i EJMS. Kategorie RULA i REBA nie są z niej wyznaczane arbitralnie."),
+    "handled_load": ("Masa przenoszonego przedmiotu", "high", "Wartość w kilogramach uzupełnia OWAS. Kategorie RULA i REBA nie są z niej wyznaczane arbitralnie."),
     "rula_force_load": ("Kategoria siły lub obciążenia RULA", "high", "Informacja może zmienić zakres wyniku RULA i musi być podana zgodnie z definicją tej metody."),
     "reba_load_force": ("Kategoria siły lub obciążenia REBA", "high", "Informacja może zmienić zakres wyniku REBA i musi być podana zgodnie z definicją tej metody."),
     "coupling": ("Jakość chwytu lub uchwytu", "high", "Informacja jest potrzebna do oceny jakości chwytu w REBA."),

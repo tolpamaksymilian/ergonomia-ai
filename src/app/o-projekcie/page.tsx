@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function AboutProjectPage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
+    <main className="ui-page">
       <SiteHeader />
       <ProjectOverview />
       <SiteFooter />

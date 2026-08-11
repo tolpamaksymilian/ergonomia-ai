@@ -1,655 +1,85 @@
 import Link from "next/link";
-import {
-  Activity,
-  ArrowLeft,
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
-  FileVideo,
-  LoaderCircle,
-  Plus,
-  Search,
-  TriangleAlert,
-  XCircle,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ArrowLeft, CalendarDays, FileVideo, Plus, Search, SlidersHorizontal } from "lucide-react";
 
-import { AnalysesAutoRefresh } from "@/components/analyses/analyses-auto-refresh";
 import { getAnalysisStatusDefinition } from "@/config/analysis-status";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { requireUser } from "@/lib/auth/access";
-import { parseReportSummary } from "@/lib/analysis-report";
 
 export const dynamic = "force-dynamic";
+const PAGE_SIZE = 24;
+const statuses = ["uploading", "queued", "processing", "completed", "failed", "cancelled"] as const;
 
-const allowedStatuses = [
-  "uploading",
-  "queued",
-  "processing",
-  "completed",
-  "failed",
-  "cancelled",
-] as const;
+type Params = { q?: string; status?: string; workstation?: string; category?: string | string[]; category_mode?: string; group?: string; from?: string; to?: string; sort?: string; page?: string };
+type HistoryRow = { id: string; title: string; description: string | null; status: string; progress: number; processing_stage: string | null; source_file_name: string; created_at: string; analysis_date: string | null; report_path: string | null; workstation: { id: string; name: string; code: string | null } | null; analysis_category_links: Array<{ category: { id: string; name: string; group_name: string } | null }> };
 
-type AnalysisStatus =
-  (typeof allowedStatuses)[number];
-
-type AnalysesPageProps = {
-  searchParams: Promise<{
-    q?: string;
-    status?: string;
-  }>;
-};
-
-export default async function AnalysesPage({
-  searchParams,
-}: AnalysesPageProps) {
-  const params = await searchParams;
+export default async function AnalysesPage({ searchParams }: { searchParams: Promise<Params> }) {
+  const raw = await searchParams;
   const { supabase } = await requireUser();
+  const q = clean(raw.q, 100);
+  const status = statuses.includes(raw.status as typeof statuses[number]) ? raw.status! : "";
+  const workstation = uuid(raw.workstation) ? raw.workstation! : "";
+  const categoryIds = values(raw.category).filter(uuid);
+  const mode = raw.category_mode === "or" ? "or" : "and";
+  const group = clean(raw.group, 80);
+  const page = Math.max(1, Number.parseInt(raw.page ?? "1", 10) || 1);
+  const sort = ["oldest", "name-asc", "name-desc"].includes(raw.sort ?? "") ? raw.sort! : "newest";
 
-  const search = params.q?.trim() ?? "";
+  const [{ data: workstations }, { data: categories }] = await Promise.all([
+    supabase.from("workstations").select("id,name,code").eq("is_active", true).order("name"),
+    supabase.from("analysis_categories").select("id,name,group_name").eq("is_active", true).order("group_name").order("name"),
+  ]);
 
-  const requestedStatus =
-    params.status?.trim() ?? "";
-
-  const selectedStatus =
-    allowedStatuses.includes(
-      requestedStatus as AnalysisStatus,
-    )
-      ? (requestedStatus as AnalysisStatus)
-      : "";
-
-  let query = supabase
-    .from("analyses")
-    .select(`
-      id,
-      title,
-      description,
-      status,
-      progress,
-      source_file_name,
-      source_size_bytes,
-      source_duration_seconds,
-      source_width,
-      source_height,
-      risk_level,
-      final_score,
-      critical_events_count,
-      error_message,
-      created_at,
-      updated_at,
-      processing_stage,
-      risk_overall_level,
-      report_path,
-      report_summary
-    `)
-    .order("created_at", {
-      ascending: false,
-    });
-
-  if (selectedStatus) {
-    query = query.eq(
-      "status",
-      selectedStatus,
-    );
+  let matchingIds: string[] | null = null;
+  if (categoryIds.length) {
+    const { data: links } = await supabase.from("analysis_category_links").select("analysis_id,category_id").in("category_id", categoryIds);
+    const grouped = new Map<string, Set<string>>();
+    for (const link of links ?? []) { const set = grouped.get(link.analysis_id) ?? new Set<string>(); set.add(link.category_id); grouped.set(link.analysis_id, set); }
+    matchingIds = [...grouped].filter(([, found]) => mode === "or" ? found.size > 0 : categoryIds.every((id) => found.has(id))).map(([id]) => id);
+  }
+  if (group && !categoryIds.length) {
+    const groupedCategoryIds = (categories ?? []).filter((item) => item.group_name === group).map((item) => item.id);
+    const { data: groupLinks } = groupedCategoryIds.length ? await supabase.from("analysis_category_links").select("analysis_id").in("category_id", groupedCategoryIds) : { data: [] };
+    matchingIds = [...new Set((groupLinks ?? []).map((item) => item.analysis_id))];
   }
 
-  if (search) {
-    query = query.ilike(
-      "title",
-      `%${search}%`,
-    );
+  let query = supabase.from("analyses").select("id,title,description,status,progress,processing_stage,source_file_name,created_at,analysis_date,report_path,workstation:workstations(id,name,code),analysis_category_links(category:analysis_categories(id,name,group_name))", { count: "exact" });
+  if (status) query = query.eq("status", status);
+  if (workstation) query = query.eq("workstation_id", workstation);
+  if (raw.from && /^\d{4}-\d{2}-\d{2}$/.test(raw.from)) query = query.gte("created_at", `${raw.from}T00:00:00`);
+  if (raw.to && /^\d{4}-\d{2}-\d{2}$/.test(raw.to)) query = query.lte("created_at", `${raw.to}T23:59:59.999`);
+  if (matchingIds) query = matchingIds.length ? query.in("id", matchingIds) : query.eq("id", "00000000-0000-0000-0000-000000000000");
+  if (q) {
+    const lowered = q.toLocaleLowerCase("pl");
+    const workstationIds = (workstations ?? []).filter((item) => item.name.toLocaleLowerCase("pl").includes(lowered) || item.code?.toLocaleLowerCase("pl").includes(lowered)).map((item) => item.id);
+    const matchedCategoryIds = (categories ?? []).filter((item) => item.name.toLocaleLowerCase("pl").includes(lowered)).map((item) => item.id);
+    const { data: categorySearchLinks } = matchedCategoryIds.length ? await supabase.from("analysis_category_links").select("analysis_id").in("category_id", matchedCategoryIds) : { data: [] };
+    const categoryAnalysisIds = [...new Set((categorySearchLinks ?? []).map((item) => item.analysis_id))];
+    const filters = [`title.ilike.%${q}%`, `source_file_name.ilike.%${q}%`, `analysis_context->>process_name.ilike.%${q}%`];
+    if (workstationIds.length) filters.push(`workstation_id.in.(${workstationIds.join(",")})`);
+    if (categoryAnalysisIds.length) filters.push(`id.in.(${categoryAnalysisIds.join(",")})`);
+    query = query.or(filters.join(","));
   }
+  query = sort === "oldest" ? query.order("created_at", { ascending: true }) : sort === "name-asc" ? query.order("title", { ascending: true }) : sort === "name-desc" ? query.order("title", { ascending: false }) : query.order("created_at", { ascending: false });
+  const { data, error, count } = await query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+  const analyses = (data ?? []) as unknown as HistoryRow[];
+  const pages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  const active = Boolean(q || status || workstation || categoryIds.length || raw.from || raw.to || raw.group);
 
-  const {
-    data: analyses,
-    error,
-  } = await query;
-
-  return (
-    <main className="relative min-h-screen overflow-hidden bg-[#050b14] px-5 py-8 text-white sm:px-8">
-      <Background />
-
-      <div className="relative mx-auto max-w-7xl">
-        <header className="flex flex-wrap items-center justify-between gap-4 rounded-[26px] border border-white/10 bg-slate-950/65 px-6 py-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
-          <Link
-            href="/panel"
-            className="flex items-center gap-3"
-          >
-            <span className="flex size-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10">
-              <Activity className="size-6 text-emerald-300" />
-            </span>
-
-            <span>
-              <span className="block font-bold">
-                Ergonomia AI
-              </span>
-
-              <span className="block text-xs text-slate-500">
-                Historia analiz
-              </span>
-            </span>
-          </Link>
-
-          <div className="flex flex-wrap gap-3">
-            <AnalysesAutoRefresh
-              enabled={Boolean(
-                analyses?.some((analysis) =>
-                  getAnalysisStatusDefinition(
-                    analysis.status,
-                    analysis.processing_stage,
-                  ).active,
-                ),
-              )}
-            />
-            <Link
-              href="/panel"
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
-            >
-              <ArrowLeft className="size-4" />
-              Panel użytkownika
-            </Link>
-
-            <Link
-              href="/panel/analizy/nowa"
-              className="flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
-            >
-              <Plus className="size-4" />
-              Nowa analiza
-            </Link>
-          </div>
-        </header>
-
-        <section className="mt-8 overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-emerald-400/[0.08] via-slate-900/65 to-cyan-400/[0.08] p-8 sm:p-10">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
-            Analizy ergonomiczne
-          </p>
-
-          <h1 className="mt-5 text-4xl font-bold tracking-[-0.04em] sm:text-5xl">
-            Historia Twoich nagrań
-          </h1>
-
-          <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-400">
-            Sprawdź status, postęp i wyniki przesłanych nagrań.
-          </p>
-        </section>
-
-        <section className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-          <form
-            method="get"
-            className="grid gap-4 lg:grid-cols-[1fr_260px_auto]"
-          >
-            <div>
-              <label
-                htmlFor="analysis-search"
-                className="mb-2 block text-sm font-medium text-slate-300"
-              >
-                Szukaj po tytule
-              </label>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-500" />
-
-                <input
-                  id="analysis-search"
-                  type="search"
-                  name="q"
-                  defaultValue={search}
-                  placeholder="Np. stanowisko montażowe"
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 py-3.5 pl-12 pr-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400/50"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label
-                htmlFor="analysis-status"
-                className="mb-2 block text-sm font-medium text-slate-300"
-              >
-                Status
-              </label>
-
-              <select
-                id="analysis-status"
-                name="status"
-                defaultValue={selectedStatus}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3.5 text-white outline-none transition focus:border-emerald-400/50"
-              >
-                <option value="">
-                  Wszystkie statusy
-                </option>
-
-                <option value="uploading">
-                  Przesyłanie
-                </option>
-
-                <option value="queued">
-                  Oczekuje w kolejce
-                </option>
-
-                <option value="processing">
-                  Analiza w toku
-                </option>
-
-                <option value="completed">
-                  Ukończone
-                </option>
-
-                <option value="failed">
-                  Nieudane
-                </option>
-
-                <option value="cancelled">
-                  Anulowane
-                </option>
-              </select>
-            </div>
-
-            <div className="flex items-end gap-3">
-              <button
-                type="submit"
-                className="flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 font-semibold text-slate-950 transition hover:bg-cyan-300"
-              >
-                <Search className="size-4" />
-                Filtruj
-              </button>
-
-              <Link
-                href="/panel/analizy"
-                className="flex min-h-[50px] items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold transition hover:bg-white/[0.08]"
-              >
-                Wyczyść
-              </Link>
-            </div>
-          </form>
-        </section>
-
-        {error && (
-          <section className="mt-6 rounded-[26px] border border-red-400/20 bg-red-400/[0.07] p-6">
-            <div className="flex items-start gap-4">
-              <TriangleAlert className="mt-0.5 size-6 shrink-0 text-red-300" />
-
-              <div>
-                <p className="font-semibold text-red-200">
-                  Nie udało się pobrać analiz
-                </p>
-
-                <p className="mt-2 text-sm leading-6 text-red-200/75">
-                  {error.message}
-                </p>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {!error &&
-          analyses &&
-          analyses.length === 0 && (
-            <EmptyState
-              filtered={Boolean(
-                search || selectedStatus,
-              )}
-            />
-          )}
-
-        {!error &&
-          analyses &&
-          analyses.length > 0 && (
-            <>
-              <div className="mt-6 flex items-center justify-between gap-4">
-                <p className="text-sm text-slate-500">
-                  Znalezione analizy
-                </p>
-
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300">
-                  {analyses.length}
-                </span>
-              </div>
-
-              <section className="mt-4 grid gap-5 lg:grid-cols-2">
-                {analyses.map((analysis) => {
-                  const status =
-                    getStatusDetails(
-                      analysis.status,
-                      analysis.processing_stage,
-                    );
-
-                  const StatusIcon =
-                    status.icon;
-
-                  const reportSummary =
-                    parseReportSummary(
-                      analysis.report_summary,
-                    );
-
-                  const riskSummaryLabel =
-                    reportSummary?.insufficient_data
-                      ? "Niewystarczające dane"
-                      : formatRiskLevel(
-                          analysis.risk_overall_level ??
-                            reportSummary?.overall_level ??
-                            null,
-                        );
-
-                  return (
-                    <article
-                      key={analysis.id}
-                      className="group overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] transition duration-300 hover:-translate-y-1 hover:border-emerald-400/25 hover:bg-white/[0.05]"
-                    >
-                      <div className="p-6">
-                        <div className="flex items-start justify-between gap-5">
-                          <div className="flex min-w-0 items-start gap-4">
-                            <div
-                              className={`flex size-12 shrink-0 items-center justify-center rounded-2xl ${status.iconClass}`}
-                            >
-                              <StatusIcon
-                                className={`size-6 ${
-                                  status.animated
-                                    ? "animate-spin"
-                                    : ""
-                                }`}
-                              />
-                            </div>
-
-                            <div className="min-w-0">
-                              <h2 className="truncate text-xl font-semibold transition group-hover:text-emerald-200">
-                                <Link
-                                  href={`/panel/analizy/${analysis.id}`}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                                >
-                                  {analysis.title}
-                                </Link>
-                              </h2>
-
-                              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
-                                {analysis.description ||
-                                  "Nie dodano opisu analizy."}
-                              </p>
-                            </div>
-                          </div>
-
-                          <span
-                            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${status.badgeClass}`}
-                          >
-                            {status.label}
-                          </span>
-                        </div>
-
-                        {analysis.status === "completed" &&
-                          riskSummaryLabel && (
-                            <div className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] px-4 py-3 text-sm">
-                              <span className="text-slate-500">
-                                Ogólny poziom:
-                                {" "}
-                              </span>
-                              <span className="font-semibold text-emerald-200">
-                                {riskSummaryLabel}
-                              </span>
-                            </div>
-                          )}
-
-                        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                          <SmallMetric
-                            label="Plik"
-                            value={
-                              analysis.source_file_name
-                            }
-                          />
-
-                          <SmallMetric
-                            label="Rozmiar"
-                            value={formatBytes(
-                              Number(
-                                analysis.source_size_bytes,
-                              ),
-                            )}
-                          />
-
-                          <SmallMetric
-                            label="Długość"
-                            value={formatDuration(
-                              analysis.source_duration_seconds,
-                            )}
-                          />
-                        </div>
-
-                        <div className="mt-6">
-                          <div className="flex items-center justify-between gap-4 text-xs">
-                            <span className="text-slate-500">
-                              Postęp
-                            </span>
-
-                            <span className="font-semibold text-cyan-300">
-                              {analysis.progress}%
-                            </span>
-                          </div>
-
-                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-                              style={{
-                                width: `${analysis.progress}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-white/[0.07] pt-5">
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <CalendarDays className="size-4" />
-
-                            {formatDate(
-                              analysis.created_at,
-                            )}
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Link
-                              href={`/panel/analizy/${analysis.id}`}
-                              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                            >
-                              Szczegóły
-                            </Link>
-
-                            {analysis.status === "completed" &&
-                              analysis.report_path && (
-                                <Link
-                                  href={`/panel/analizy/${analysis.id}/raport`}
-                                  className="rounded-xl bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                                >
-                                  Raport
-                                </Link>
-                              )}
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </section>
-            </>
-          )}
-      </div>
-    </main>
-  );
-}
-
-function EmptyState({
-  filtered,
-}: {
-  filtered: boolean;
-}) {
-  return (
-    <section className="mt-6 rounded-[30px] border border-dashed border-white/10 bg-white/[0.025] px-6 py-16 text-center">
-      <div className="mx-auto flex size-16 items-center justify-center rounded-3xl border border-cyan-400/15 bg-cyan-400/[0.07]">
-        <FileVideo className="size-8 text-cyan-300" />
-      </div>
-
-      <h2 className="mt-6 text-2xl font-semibold">
-        {filtered
-          ? "Brak analiz spełniających filtry"
-          : "Nie utworzono jeszcze żadnej analizy"}
-      </h2>
-
-      <p className="mx-auto mt-3 max-w-xl leading-7 text-slate-500">
-        {filtered
-          ? "Zmień wyszukiwaną frazę lub wybierz inny status."
-          : "Prześlij pierwsze nagranie stanowiska pracy i utwórz zadanie analizy."}
-      </p>
-
-      <div className="mt-7 flex flex-wrap justify-center gap-3">
-        {filtered && (
-          <Link
-            href="/panel/analizy"
-            className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 font-semibold transition hover:bg-white/[0.08]"
-          >
-            Wyczyść filtry
-          </Link>
-        )}
-
-        <Link
-          href="/panel/analizy/nowa"
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
-        >
-          <Plus className="size-5" />
-          Nowa analiza
-        </Link>
-      </div>
-    </section>
-  );
-}
-
-function SmallMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4">
-      <p className="text-[9px] uppercase tracking-[0.15em] text-slate-600">
-        {label}
-      </p>
-
-      <p className="mt-2 truncate text-sm font-semibold text-slate-200">
-        {value}
-      </p>
+  return <main className="ui-page px-4 py-6 sm:px-8">
+    <div className="mx-auto max-w-7xl space-y-6">
+      <header className="ui-surface flex flex-wrap items-center justify-between gap-4 p-5"><div><Link href="/panel" className="inline-flex items-center gap-2 text-sm text-muted-foreground"><ArrowLeft className="size-4" />Panel</Link><h1 className="mt-3 text-3xl font-bold tracking-tight">Historia analiz</h1><p className="mt-1 text-sm text-muted-foreground">Wyszukuj analizy według stanowiska, procesu, kategorii i daty.</p></div><div className="flex flex-wrap items-center gap-2"><ThemeToggle /><Link href="/panel/ustawienia/kategorie" className="ui-button-secondary text-sm">Kategorie</Link><Link href="/panel/analizy/nowa" className="ui-button-primary text-sm"><Plus className="size-4" />Nowa analiza</Link></div></header>
+      <form className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="grid gap-4 lg:grid-cols-4"><label className="lg:col-span-2 text-sm font-medium">Szukaj analiz…<span className="relative mt-1 block"><Search className="absolute left-3 top-3.5 size-4 text-slate-400" /><input name="q" defaultValue={q} className="min-h-11 w-full rounded-xl border border-slate-300 pl-10 pr-3" placeholder="Nazwa, plik lub proces" /></span></label><Select name="status" label="Status" value={status} options={[["", "Wszystkie"], ...statuses.map((item) => [item, getAnalysisStatusDefinition(item, null).shortLabel] as const)]} /><Select name="workstation" label="Stanowisko" value={workstation} options={[["", "Wszystkie"], ...(workstations ?? []).map((item) => [item.id, item.name] as const)]} /><label className="text-sm font-medium">Data od<input type="date" name="from" defaultValue={raw.from ?? ""} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label><label className="text-sm font-medium">Data do<input type="date" name="to" defaultValue={raw.to ?? ""} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label><Select name="sort" label="Sortowanie" value={sort} options={[["newest","Najnowsze"],["oldest","Najstarsze"],["name-asc","Nazwa A–Z"],["name-desc","Nazwa Z–A"]]} /><Select name="group" label="Grupa kategorii" value={group} options={[["","Wszystkie"], ...[...new Set((categories ?? []).map((item) => item.group_name))].map((item) => [item,item] as const)]} /><Select name="category_mode" label="Dopasuj kategorie" value={mode} options={[["and","Wszystkie (AND)"],["or","Dowolną (OR)"]]} /></div><details className="mt-4"><summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="size-4" />Kategorie</summary><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{(categories ?? []).map((item) => <label key={item.id} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm"><input type="checkbox" name="category" value={item.id} defaultChecked={categoryIds.includes(item.id)} />{item.group_name}: {item.name}</label>)}</div></details><div className="mt-5 flex flex-wrap gap-2"><button className="min-h-11 rounded-xl bg-slate-900 px-5 font-semibold text-white">Zastosuj filtry</button>{active && <Link href="/panel/analizy" className="min-h-11 rounded-xl border border-slate-300 px-5 py-3 font-semibold">Wyczyść filtry</Link>}</div></form>
+      {active && <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-500">Aktywne filtry:</span>{q && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Szukaj: {q}</span>}{status && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Status: {getAnalysisStatusDefinition(status,null).shortLabel}</span>}{workstation && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Stanowisko: {(workstations??[]).find((item)=>item.id===workstation)?.name}</span>}{group && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Grupa: {group}</span>}{categoryIds.map((id)=><span key={id} className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Kategoria: {(categories??[]).find((item)=>item.id===id)?.name}</span>)}</div>}
+      {error && <p className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">Nie udało się pobrać historii analiz.</p>}
+      {!error && !analyses.length && <section className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center"><FileVideo className="mx-auto size-9 text-slate-400" /><h2 className="mt-4 text-xl font-bold">Nie znaleziono analiz spełniających wybrane kryteria.</h2>{active && <Link href="/panel/analizy" className="mt-4 inline-block font-semibold text-emerald-700">Pokaż wszystkie</Link>}</section>}
+      {!!analyses.length && <><div className="flex justify-between text-sm text-slate-500"><span>Znaleziono {count ?? analyses.length} analiz</span><span>Strona {page} z {pages}</span></div><section className="grid gap-4 lg:grid-cols-2">{analyses.map((analysis) => { const statusDef = getAnalysisStatusDefinition(analysis.status, analysis.processing_stage); const chips = analysis.analysis_category_links.map((link) => link.category).filter((item): item is NonNullable<typeof item> => Boolean(item)); return <article key={analysis.id} className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-lg font-bold"><Link href={`/panel/analizy/${analysis.id}`}>{analysis.title}</Link></h2><p className="mt-1 text-sm text-slate-500">{analysis.workstation?.name ?? "Bez stanowiska"}{analysis.workstation?.code ? ` · ${analysis.workstation.code}` : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">{statusDef.shortLabel}</span></div><div className="mt-4 flex flex-wrap gap-2">{chips.slice(0,3).map((item) => <span key={item.id} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">{item.name}</span>)}{chips.length > 3 && <span className="rounded-full bg-slate-100 px-3 py-1 text-xs">+{chips.length - 3}</span>}</div><div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4"><span className="flex items-center gap-2 text-xs text-slate-500"><CalendarDays className="size-4" />{formatDate(analysis.analysis_date ?? analysis.created_at)}</span><div className="flex gap-2"><Link href={`/panel/analizy/${analysis.id}`} className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold">Otwórz</Link>{analysis.report_path && <Link href={`/panel/analizy/${analysis.id}/raport`} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Raport</Link>}</div></div></article>; })}</section><nav className="flex justify-center gap-3">{page > 1 && <Link href={pageHref(raw, page - 1)} className="rounded-xl border border-slate-300 bg-white px-4 py-2">Poprzednia</Link>}{page < pages && <Link href={pageHref(raw, page + 1)} className="rounded-xl border border-slate-300 bg-white px-4 py-2">Następna</Link>}</nav></>}
     </div>
-  );
+  </main>;
 }
 
-type StatusDetails = {
-  label: string;
-  icon: LucideIcon;
-  animated: boolean;
-  iconClass: string;
-  badgeClass: string;
-};
-
-function getStatusDetails(
-  statusValue: string,
-  processingStage: string | null,
-): StatusDetails {
-  const definition = getAnalysisStatusDefinition(
-    statusValue,
-    processingStage,
-  );
-  const visual = {
-    neutral: { icon: Clock3, className: "bg-white/[0.06] text-slate-400" },
-    queued: { icon: Clock3, className: "bg-amber-400/10 text-amber-300" },
-    active: { icon: LoaderCircle, className: "bg-cyan-400/10 text-cyan-300" },
-    success: { icon: CheckCircle2, className: "bg-emerald-400/10 text-emerald-300" },
-    error: { icon: XCircle, className: "bg-red-400/10 text-red-300" },
-  }[definition.visualType];
-
-  return {
-    label: definition.shortLabel,
-    icon: visual.icon,
-    animated: definition.visualType === "active",
-    iconClass: visual.className,
-    badgeClass: visual.className,
-  };
-}
-
-
-function formatBytes(
-  bytes: number,
-) {
-  if (!Number.isFinite(bytes)) {
-    return "Brak danych";
-  }
-
-  return `${(
-    bytes /
-    (1024 * 1024)
-  ).toFixed(1)} MB`;
-}
-
-function formatDuration(
-  value: number | string | null,
-) {
-  const seconds = Number(value);
-
-  if (!Number.isFinite(seconds)) {
-    return "Brak danych";
-  }
-
-  const totalSeconds =
-    Math.max(0, Math.round(seconds));
-
-  const minutes =
-    Math.floor(totalSeconds / 60);
-
-  const remainingSeconds =
-    totalSeconds % 60;
-
-  return `${minutes}:${String(
-    remainingSeconds,
-  ).padStart(2, "0")}`;
-}
-
-function formatDate(
-  value: string,
-) {
-  return new Intl.DateTimeFormat("pl-PL", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Europe/Warsaw",
-  }).format(new Date(value));
-}
-
-function Background() {
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      <div className="absolute -left-52 -top-40 size-[620px] rounded-full bg-emerald-500/[0.07] blur-[160px]" />
-
-      <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-cyan-500/[0.07] blur-[170px]" />
-
-      <div
-        className="absolute inset-0 opacity-[0.02]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.8) 1px, transparent 1px)",
-          backgroundSize: "54px 54px",
-        }}
-      />
-    </div>
-  );
-}
-
-function formatRiskLevel(value: string | null) {
-  switch (value) {
-    case "low":
-      return "niski";
-    case "moderate":
-      return "umiarkowany";
-    case "high":
-      return "wysoki";
-    case "critical":
-      return "krytyczny";
-    case "insufficient_data":
-      return "niewystarczające dane";
-    default:
-      return null;
-  }
-}
+function Select({ name, label, value, options }: { name: string; label: string; value: string; options: ReadonlyArray<readonly [string,string]> }) { return <label className="text-sm font-medium">{label}<select name={name} defaultValue={value} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3">{options.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>; }
+function values(value: string | string[] | undefined) { return Array.isArray(value) ? value : value ? [value] : []; }
+function uuid(value: string | undefined): value is string { return Boolean(value && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)); }
+function clean(value: string | undefined, max: number) { return (value ?? "").trim().slice(0,max).replace(/[,%()]/g, " "); }
+function formatDate(value: string) { return new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium" }).format(new Date(value)); }
+function pageHref(raw: Params, page: number) { const params = new URLSearchParams(); for (const [key,value] of Object.entries(raw)) for (const item of values(value)) if (item) params.append(key,item); params.set("page",String(page)); return `/panel/analizy?${params}`; }

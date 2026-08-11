@@ -11,7 +11,7 @@ from .schemas import CompanyMethodsError
 
 SPEC_ROOT = Path(__file__).resolve().parents[3] / "method-specs"
 ALLOWED_SPECS = frozenset(
-    {"manifest", "hazards", "risk-score", "measurable-factors", "owas", "ejms", "chemical-inhalation", "source-anomalies"}
+    {"manifest", "hazards", "risk-score", "measurable-factors", "owas", "chemical-inhalation", "source-anomalies"}
 )
 
 

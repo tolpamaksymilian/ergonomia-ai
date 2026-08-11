@@ -8,6 +8,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { AuthForm } from "@/components/auth/auth-form";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type AuthPageProps = {
   mode: "login" | "register";
@@ -21,18 +22,20 @@ export function AuthPage({
   const isRegister = mode === "register";
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#050b14] px-5 py-8 text-white sm:px-6">
+    <main className="ui-page relative px-5 py-8 sm:px-6">
       <Background />
 
-      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden rounded-[34px] border border-white/10 bg-slate-950/50 shadow-2xl shadow-black/40 backdrop-blur-xl lg:grid-cols-[0.95fr_1.05fr]">
-        <section className="relative hidden overflow-hidden border-r border-white/10 p-12 lg:flex lg:flex-col lg:justify-between">
+      <div className="absolute right-5 top-5 z-20"><ThemeToggle /></div>
+
+      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden rounded-3xl border border-border bg-surface shadow-xl backdrop-blur-xl lg:grid-cols-[0.95fr_1.05fr]">
+        <section className="relative hidden overflow-hidden border-r border-border bg-surface-muted p-12 lg:flex lg:flex-col lg:justify-between">
           <div>
             <Link
               href="/"
               className="inline-flex items-center gap-3"
             >
-              <span className="flex size-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10">
-                <Activity className="size-6 text-emerald-300" />
+              <span className="flex size-11 items-center justify-center rounded-xl bg-brand-soft">
+                <Activity className="size-6 text-primary" />
               </span>
 
               <span>
@@ -48,7 +51,7 @@ export function AuthPage({
 
             <h1 className="mt-24 max-w-xl text-5xl font-bold leading-[1.06] tracking-[-0.045em]">
               Analiza ergonomii oparta na{" "}
-              <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+              <span className="text-primary">
                 mierzalnych danych.
               </span>
             </h1>
@@ -87,8 +90,8 @@ export function AuthPage({
               href="/"
               className="mb-10 inline-flex items-center gap-3 lg:hidden"
             >
-              <span className="flex size-10 items-center justify-center rounded-xl bg-emerald-400/10">
-                <Activity className="size-5 text-emerald-300" />
+              <span className="flex size-10 items-center justify-center rounded-xl bg-brand-soft">
+                <Activity className="size-5 text-primary" />
               </span>
 
               <span className="font-bold">
@@ -96,7 +99,7 @@ export function AuthPage({
               </span>
             </Link>
 
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-400">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-primary">
               {isRegister
                 ? "Nowe konto"
                 : "Panel użytkownika"}
@@ -138,9 +141,9 @@ function Benefit({
   description: string;
 }) {
   return (
-    <article className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-      <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-400/10">
-        <Icon className="size-5 text-cyan-300" />
+    <article className="flex gap-4 rounded-xl border border-border bg-card p-5">
+      <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-soft">
+        <Icon className="size-5 text-primary" />
       </div>
 
       <div>
@@ -157,9 +160,9 @@ function Benefit({
 function Background() {
   return (
     <div className="pointer-events-none absolute inset-0">
-      <div className="absolute -left-40 -top-40 size-[600px] rounded-full bg-emerald-500/[0.08] blur-[160px]" />
+      <div className="absolute -left-40 -top-40 size-[600px] rounded-full bg-orange-500/[0.08] blur-[160px]" />
 
-      <div className="absolute -bottom-48 -right-40 size-[650px] rounded-full bg-cyan-500/[0.08] blur-[170px]" />
+      <div className="absolute -bottom-48 -right-40 size-[650px] rounded-full bg-orange-400/[0.06] blur-[170px]" />
 
       <div
         className="absolute inset-0 opacity-[0.025]"

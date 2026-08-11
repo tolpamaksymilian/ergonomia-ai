@@ -40,11 +40,11 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
               return (
                 <article
                   key={capability.name}
-                  className="rounded-[22px] border border-white/[0.08] bg-white/[0.03] p-5"
+                  className="ui-card p-5"
                 >
-                  <Icon className="size-5 text-cyan-300" aria-hidden="true" />
-                  <h3 className="mt-4 font-semibold text-white">{capability.name}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{capability.description}</p>
+                  <Icon className="size-5 text-primary" aria-hidden="true" />
+                  <h3 className="mt-4 font-semibold text-foreground">{capability.name}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{capability.description}</p>
                 </article>
               );
             })}
@@ -100,14 +100,14 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
       </section>
 
       <section className="px-5 pb-24 sm:px-6 sm:pb-28">
-        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 rounded-[28px] border border-cyan-300/15 bg-[#0a1724] p-7 sm:flex-row sm:items-center sm:p-9">
+        <div className="ui-card mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 p-7 sm:flex-row sm:items-center sm:p-9">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-300">Sprawdź nagranie</p>
             <h2 className="mt-3 text-2xl font-bold sm:text-3xl">Rozpocznij nową analizę</h2>
           </div>
           <Link
             href={isAuthenticated ? "/panel/analizy/nowa" : "/logowanie"}
-            className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            className="ui-button-primary min-h-12 px-6 py-3"
           >
             Rozpocznij analizę
             <ArrowRight className="size-4" aria-hidden="true" />
@@ -121,8 +121,8 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
 function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div className="max-w-3xl">
-      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">{eyebrow}</p>
-      <h2 className="mt-3 text-3xl font-bold tracking-[-0.035em] text-white sm:text-4xl">{title}</h2>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">{eyebrow}</p>
+      <h2 className="mt-3 text-3xl font-bold tracking-[-0.035em] text-foreground sm:text-4xl">{title}</h2>
     </div>
   );
 }

@@ -54,7 +54,7 @@ def test_builds_complete_versioned_report(
     risk_document,
 ):
     report = build(analysis_metadata, ergonomics_document, risk_document)
-    assert report["schema_version"] == "2.2"
+    assert report["schema_version"] == "2.3"
     assert report["report_version"] == REPORT_VERSION
     assert report["generated_at"] == GENERATED_AT
     assert report["analysis"]["analysis_id"] == analysis_metadata["id"]

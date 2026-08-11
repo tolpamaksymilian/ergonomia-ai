@@ -431,6 +431,20 @@ def process_claimed_analysis(
     claimed_row: Mapping[str, Any],
 ) -> bool:
     claimed = parse_claimed_analysis(claimed_row, settings.worker_id)
+    try:
+        context_response = (
+            client.table("analyses")
+            .select("analysis_date,analysis_context,workstation:workstations(name,code,department,area),analysis_category_links(category:analysis_categories(name,group_name))")
+            .eq("id", claimed.analysis_id)
+            .single()
+            .execute()
+        )
+        context_data = context_response.data if isinstance(context_response.data, Mapping) else {}
+        links = context_data.pop("analysis_category_links", [])
+        context_data["categories"] = [item["category"] for item in links if isinstance(item, Mapping) and isinstance(item.get("category"), Mapping)] if isinstance(links, list) else []
+        claimed.metadata.update(context_data)
+    except Exception as context_error:
+        LOGGER.warning("analysis_id=%s analysis_context=unavailable reason=%s", claimed.analysis_id, sanitize_error_message(context_error, settings))
     job_directory = DATA_DIRECTORY / claimed.analysis_id
     ergonomics_path = job_directory / "ergonomics-metrics.json"
     risk_path = job_directory / "risk-assessment.json"
@@ -589,11 +603,10 @@ def process_claimed_analysis(
             company_methods_storage_path,
         )
         LOGGER.info(
-            "analysis_id=%s company_methods_version=%s owas=%s ejms=%s missing_inputs=%s output=%s",
+            "analysis_id=%s company_methods_version=%s owas=%s missing_inputs=%s output=%s",
             claimed.analysis_id,
             company_methods.get("company_methods_version"),
             company_methods.get("owas", {}).get("status"),
-            company_methods.get("ejms", {}).get("status"),
             len(company_methods.get("missing_inputs", [])),
             company_methods_storage_path,
         )

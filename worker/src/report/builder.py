@@ -112,6 +112,7 @@ def build_analysis_report(
         "report_version": REPORT_VERSION,
         "generated_at": generated_at_value,
         "analysis": _analysis_section(analysis, analysis_id, risk_quality),
+        "analysis_context": _analysis_context_section(analysis),
         "processing": _processing_section(analysis, ergonomics, risk),
         "data_quality": _quality_section(
             analysis,
@@ -221,7 +222,7 @@ def _company_methods_section(company_methods: Mapping[str, Any] | None) -> dict[
         "missing_inputs": list(company_methods.get("missing_inputs", [])) if isinstance(company_methods.get("missing_inputs"), list) else [],
         "limitations": list(company_methods.get("limitations", [])) if isinstance(company_methods.get("limitations"), list) else [],
     }
-    for key in ("owas", "ejms", "risk_score", "measurable_factors", "chemical"):
+    for key in ("owas", "risk_score", "measurable_factors", "chemical"):
         value = company_methods.get(key)
         if key == "owas" and isinstance(value, Mapping):
             output[key] = {
@@ -495,6 +496,27 @@ def _analysis_section(
         value = finite_number(analysis.get(field))
         if value is not None and value >= 0:
             output[field] = int(value) if field in {"source_width", "source_height"} else value
+    return output
+
+
+def _analysis_context_section(analysis: Mapping[str, Any]) -> dict[str, Any]:
+    context = analysis.get("analysis_context")
+    context = context if isinstance(context, Mapping) else {}
+    output: dict[str, Any] = {"traceability": {"source": "USER_PROVIDED"}}
+    workstation = analysis.get("workstation")
+    if isinstance(workstation, Mapping):
+        normalized = {key: optional_text(workstation.get(key)) for key in ("name", "code", "department", "area")}
+        output["workstation"] = {key: value for key, value in normalized.items() if value is not None}
+    for key in ("process_name", "activity_description", "department", "area", "line_machine", "notes", "author_name"):
+        value = optional_text(context.get(key))
+        if value is not None:
+            output[key] = value
+    analysis_date = optional_text(analysis.get("analysis_date"))
+    if analysis_date is not None:
+        output["analysis_date"] = analysis_date
+    categories = analysis.get("categories")
+    if isinstance(categories, list):
+        output["categories"] = [dict(item) for item in categories if isinstance(item, Mapping) and optional_text(item.get("name"))]
     return output
 
 

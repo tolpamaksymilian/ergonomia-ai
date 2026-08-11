@@ -30,7 +30,7 @@ class FakeBucket:
     def upload(self, *, path, file, file_options):
         if self.fail:
             raise RuntimeError("storage unavailable")
-        assert json.load(file)["report_version"] == "analysis-report-v2.2-beta.1"
+        assert json.load(file)["report_version"] == "analysis-report-v2.3-beta.1"
         self.options = file_options
         return SimpleNamespace(path=path)
 
@@ -97,7 +97,7 @@ def test_database_summary_is_small_and_has_no_frames(
     )
     summary = build_database_summary(report)
     serialized = json.dumps(summary)
-    assert summary["report_version"] == "analysis-report-v2.2-beta.1"
+    assert summary["report_version"] == "analysis-report-v2.3-beta.1"
     assert summary["overall_level"] == report["risk_summary"]["overall_level"]
     assert "frames" not in serialized
     assert "body_areas" not in serialized
@@ -108,7 +108,7 @@ def test_storage_path_and_upload_are_deterministic(tmp_path):
     storage_path = build_report_storage_path("user", "analysis")
     assert storage_path == "user/analysis/results/analysis-report.json"
     local_path = tmp_path / "analysis-report.json"
-    local_path.write_text('{"report_version":"analysis-report-v2.2-beta.1"}', encoding="utf-8")
+    local_path.write_text('{"report_version":"analysis-report-v2.3-beta.1"}', encoding="utf-8")
     bucket = FakeBucket()
     assert upload_report_file(
         FakeStorage(bucket), "analysis-results", local_path, storage_path

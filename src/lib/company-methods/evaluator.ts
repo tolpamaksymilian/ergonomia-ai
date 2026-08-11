@@ -1,7 +1,6 @@
 import { companyMethodSpecs } from "./specs.ts";
 
 export type EvidenceSource = "VIDEO_DERIVED" | "USER_PROVIDED" | "MEASUREMENT" | "WORKBOOK_RULE" | "UNKNOWN";
-export type EjmsLevel = "LOW" | "MOD" | "HIGH";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -34,34 +33,6 @@ export function evaluateMeasurableFactor(measurement: number, limit: number) {
   return { status: "MANUAL", level: "small", label: "Małe", acceptability: "Dopuszczalne", ratio } as const;
 }
 
-export function ejmsMatrixScore(posture: EjmsLevel, frequency: EjmsLevel): number {
-  return companyMethodSpecs.ejms.rules.matrix[posture][frequency];
-}
-
-export function ejmsSectionTwoScore(input: UnknownRecord) {
-  const thresholds = companyMethodSpecs.ejms.thresholds.section_ii;
-  const numericFields = ["weight_kg", "horizontal_distance_cm", "start_hand_height_from_waist_cm", "vertical_travel_cm", "frequency_per_minute", "twist_deg", "distance_m"] as const;
-  const components: Record<string, { value: unknown; score: number | null; source: EvidenceSource }> = {};
-  for (const field of numericFields) {
-    const value = finite(input[field]);
-    components[field] = { value, score: bandScore(value, thresholds[field]), source: value === null ? "UNKNOWN" : "USER_PROVIDED" };
-  }
-  const grip = typeof input.grip === "string" && input.grip in thresholds.grip ? input.grip as keyof typeof thresholds.grip : null;
-  components.grip = { value: grip, score: grip ? thresholds.grip[grip] : null, source: grip ? "USER_PROVIDED" : "UNKNOWN" };
-  const missing_inputs = Object.entries(components).filter(([, item]) => item.score === null).map(([name]) => `ejms.section_ii.${name}`);
-  const known_score = Object.values(components).reduce((sum, item) => sum + (item.score ?? 0), 0);
-  let possible_score_min = known_score;
-  let possible_score_max = known_score;
-  for (const [name, item] of Object.entries(components)) {
-    if (item.score !== null) continue;
-    const options = name === "grip"
-      ? Object.values(thresholds.grip)
-      : (thresholds[name as typeof numericFields[number]] as ReadonlyArray<ReadonlyArray<number | null>>).flatMap((band) => typeof band[2] === "number" ? [band[2]] : []);
-    possible_score_min += Math.min(...options);
-    possible_score_max += Math.max(...options);
-  }
-  return { status: missing_inputs.length ? "PARTIAL" : "MANUAL", score: missing_inputs.length ? null : known_score, known_score, possible_score_min, possible_score_max, components, missing_inputs } as const;
-}
 
 export function resolveOwasCode(codePrefix: string, loadKg: number | null) {
   if (!/^[1-4][1-3][1-7]$/.test(codePrefix)) return { status: "REQUIRES_DATA", code: null, category: null, possible_categories: [] };
@@ -73,15 +44,4 @@ export function resolveOwasCode(codePrefix: string, loadKg: number | null) {
   });
   const exact = possible.length === 1 && possible[0].status === "VERIFIED" && possible[0].categories.length === 1 ? possible[0] : null;
   return { status: exact ? "MANUAL" : possible.some((item) => item.status === "SOURCE_AMBIGUOUS") ? "SOURCE_ERROR" : "PARTIAL", code: exact?.code ?? null, category: exact?.categories[0] ?? null, possible_categories: possible };
-}
-
-function bandScore(value: number | null, bands: ReadonlyArray<ReadonlyArray<number | null>>): number | null {
-  if (value === null) return null;
-  const match = bands.find(([minimum, maximum]) => (minimum === null || value >= minimum) && (maximum === null || value <= maximum));
-  const score = match?.[2];
-  return typeof score === "number" ? score : null;
-}
-
-function finite(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

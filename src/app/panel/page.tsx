@@ -11,6 +11,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { signOutAction } from "@/actions/auth";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -33,9 +34,9 @@ export default async function UserPanelPage() {
     .single();
 
   return (
-    <main className="min-h-screen bg-[#050b14] p-5 text-white sm:p-8">
+    <main className="ui-page p-5 sm:p-8">
       <div className="mx-auto max-w-7xl">
-        <header className="flex flex-wrap items-center justify-between gap-5 rounded-[26px] border border-white/10 bg-slate-950/60 px-6 py-5 backdrop-blur-xl">
+        <header className="ui-surface flex flex-wrap items-center justify-between gap-5 px-6 py-5 backdrop-blur-xl">
           <div className="flex items-center gap-3">
             <span className="flex size-11 items-center justify-center rounded-2xl bg-emerald-400/10">
               <Activity className="size-6 text-emerald-300" />
@@ -50,19 +51,19 @@ export default async function UserPanelPage() {
             </div>
           </div>
 
-          <form action={signOutAction}>
+          <div className="flex items-center gap-2"><ThemeToggle /><form action={signOutAction}>
             <button
               type="submit"
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
+              className="ui-button-secondary text-sm"
             >
               <LogOut className="size-4" />
               Wyloguj się
             </button>
-          </form>
+          </form></div>
         </header>
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.36fr]">
-          <div className="rounded-[30px] border border-white/10 bg-gradient-to-br from-emerald-400/[0.08] via-slate-900/60 to-cyan-400/[0.08] p-8 sm:p-10">
+          <div className="ui-card bg-gradient-to-br from-brand-soft via-card to-card p-8 sm:p-10">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-400">
               Witaj w systemie
             </p>
@@ -78,7 +79,7 @@ export default async function UserPanelPage() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
                 href="/panel/analizy/nowa"
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+                className="ui-button-primary"
               >
                 <Plus className="size-5" />
                 Utwórz nową analizę
@@ -86,7 +87,7 @@ export default async function UserPanelPage() {
 
               <Link
                 href="/panel/analizy"
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 font-semibold text-white transition hover:bg-white/[0.08]"
+                className="ui-button-secondary"
               >
                 <FileVideo className="size-5 text-cyan-300" />
                 Historia analiz
@@ -95,7 +96,7 @@ export default async function UserPanelPage() {
 
           </div>
 
-          <div className="rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
+          <div className="ui-card p-7">
             <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-400/10">
               <UserRound className="size-6 text-cyan-300" />
             </div>
@@ -155,7 +156,7 @@ function DashboardCard({
 }) {
   return (
     <article
-      className={`rounded-[26px] border bg-white/[0.03] p-7 ${
+      className={`ui-card p-7 ${
         available
           ? "border-emerald-400/20"
           : "border-white/10 opacity-60"

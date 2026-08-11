@@ -1,6 +1,6 @@
 # Company Methods Engine V1
 
-`company-methods-v1.1-beta.1` jest lekkim, deterministycznym modułem CPU, który uzupełnia Risk Engine, RULA i REBA o metody zakładowe odtworzone z audytowanego skoroszytu `testy.xlsx`.
+`company-methods-v1.2-beta.1` jest lekkim, deterministycznym modułem CPU, który uzupełnia Risk Engine, RULA i REBA o OWAS oraz opcjonalne metody kontekstowe.
 
 ## Źródło reguł
 
@@ -9,7 +9,6 @@ Python i TypeScript czytają te same wersjonowane pliki w `method-specs/`. Skoro
 ## Metody
 
 - OWAS: pozycja pleców, ramion i nóg może być wyprowadzona z danych wideo, jeśli dowody są wystarczające. Masa zawsze pochodzi od użytkownika albo z pomiaru. Lookup jest ścisły; 3133 pozostaje niejednoznaczne.
-- EJMS: sekcja I używa postawy i zmian w czasie; dane o sile są manualne. Sekcja II może wykorzystywać częstotliwość i skręt, lecz kg/cm/m i jakość chwytu wymagają danych użytkownika lub kalibracji.
 - Risk Score: skale i progi są źródłowe. Wzór E×S×P jest jawnie oznaczony `NORMALIZED_INTERPRETATION`, ponieważ komórki wartości ryzyka nie zawierają formuły.
 - Czynniki mierzalne: dokładne granice P/Pmax oraz ważność +60 miesięcy.
 - Chemia: część manualna. Automatyczny scoring jest wyłączony do czasu dostarczenia IN.06.13.

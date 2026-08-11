@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 
 import { NewAnalysisForm } from "@/components/analyses/new-analysis-form";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,12 @@ export default async function NewAnalysisPage() {
   const { user } = await requireUser();
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#050b14] px-5 py-8 text-white sm:px-8">
+    <main className="ui-page relative px-5 py-8 sm:px-8">
       <Background />
 
       <div className="relative mx-auto max-w-5xl">
-        <header className="flex flex-wrap items-center justify-between gap-4 rounded-[26px] border border-white/10 bg-slate-950/65 px-6 py-5 backdrop-blur-xl">
-          <Link
+        <header className="ui-surface flex flex-wrap items-center justify-between gap-4 px-6 py-5 backdrop-blur-xl">
+          <div className="flex items-center gap-2"><ThemeToggle /><Link
             href="/panel"
             className="flex items-center gap-3"
           >
@@ -40,14 +41,14 @@ export default async function NewAnalysisPage() {
 
           <Link
             href="/panel"
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
+            className="ui-button-secondary text-sm"
           >
             <ArrowLeft className="size-4" />
             Powrót do panelu
-          </Link>
+          </Link></div>
         </header>
 
-        <section className="mt-8 overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-emerald-400/[0.08] via-slate-900/65 to-cyan-400/[0.08] p-8 sm:p-10">
+        <section className="ui-card mt-8 overflow-hidden bg-gradient-to-br from-brand-soft via-card to-card p-8 sm:p-10">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">
             <ShieldCheck className="size-4" />
             Prywatne przesyłanie

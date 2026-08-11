@@ -29,8 +29,6 @@
     "OWAS_TIME_DISTRIBUTION_OVERLAP",
     "RISK_SCORE_FORMULA_MISSING",
     "RISK_SCORE_BROKEN_REFS",
-    "EJMS_RANKING_CONFLICT",
-    "EJMS_BROKEN_REFERENCE",
     "CHEM_EXTERNAL_REFERENCE",
     "BROKEN_DEFINED_NAMES"
   ],
@@ -39,7 +37,6 @@
     "risk-score.json",
     "measurable-factors.json",
     "owas.json",
-    "ejms.json",
     "chemical-inhalation.json",
     "source-anomalies.json"
   ],
@@ -49,7 +46,6 @@
     "pose": "pose-v5.0-beta.1",
     "pose_schema": "5.0",
     "owas": "owas-company-v1.0-beta.1",
-    "ejms": "ejms-company-v1.0-beta.1",
     "report": "analysis-report-v2.1-beta.1"
   }
 }

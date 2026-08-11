@@ -62,14 +62,14 @@ export function HeroSection({
 
       <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.86fr_1.14fr] lg:items-center xl:gap-16">
         <div>
-          <h1 className="max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-white min-[420px]:text-5xl sm:text-6xl">
+          <h1 className="max-w-4xl text-4xl font-bold leading-[1.03] tracking-[-0.045em] text-foreground min-[420px]:text-5xl sm:text-6xl">
             Sprawdź ergonomię pracy na podstawie{" "}
-            <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-sky-300 bg-clip-text text-transparent">
+            <span className="text-primary">
               filmu
             </span>
           </h1>
 
-          <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-300">
+          <p className="mt-7 max-w-2xl text-lg leading-8 text-muted-foreground">
             System analizuje ruch, oblicza metryki postawy i przygotowuje czytelny raport.
           </p>
 
@@ -80,7 +80,7 @@ export function HeroSection({
                   ? "/panel/analizy/nowa"
                   : "/logowanie"
               }
-              className="group flex items-center gap-2 rounded-xl bg-emerald-400 px-6 py-3.5 font-semibold text-slate-950 shadow-xl shadow-emerald-500/20 transition hover:-translate-y-0.5 hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 motion-reduce:transition-none"
+              className="ui-button-primary group px-6 py-3.5 motion-reduce:transition-none"
             >
               Rozpocznij analizę
               <ArrowRight className="size-5 transition group-hover:translate-x-1" />
@@ -88,16 +88,16 @@ export function HeroSection({
 
             <Link
               href="#jak-to-dziala"
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-3.5 font-semibold text-white backdrop-blur transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 motion-reduce:transition-none"
+              className="ui-button-secondary px-6 py-3.5 backdrop-blur motion-reduce:transition-none"
             >
-              <ScanSearch className="size-5 text-cyan-300" />
+              <ScanSearch className="size-5 text-primary" />
               Zobacz, jak to działa
             </Link>
           </div>
         </div>
 
         <div className="relative">
-          <div className="absolute inset-10 rounded-full bg-emerald-400/10 blur-[120px]" />
+          <div className="absolute inset-10 rounded-full bg-primary/10 blur-[120px]" />
 
           <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[#07111f]/90 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:rounded-[34px]">
             <PreviewHeader />
@@ -179,7 +179,7 @@ export function HeroSection({
             </div>
           </div>
 
-          <div className="pointer-events-none absolute -bottom-5 left-10 right-10 h-12 rounded-full bg-emerald-400/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-5 left-10 right-10 h-12 rounded-full bg-primary/10 blur-3xl" />
         </div>
       </div>
     </section>

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0-beta.1] - 2026-08-11
+
+- Centralny system tokenów dla jasnego i ciemnego motywu; jasny pozostaje ustawieniem domyślnym.
+- Zapamiętywany wybór motywu bez zależności od ustawień systemowych i bez migotania przy starcie strony.
+- Ujednolicone powierzchnie, karty, przyciski, pola, focus ring i pomarańczowa identyfikacja marki.
+- Odświeżone widoki publiczne, uwierzytelnianie, panel, workspace analizy, wykresy oraz raport do druku.
+- Zachowane semantyczne kolory powodzenia, ostrzeżenia i błędu oraz obsługa ograniczonego ruchu.
+
 ## [0.9.0-beta.1] - 2026-08-10
 
 - Lokalny Pipeline Supervisor uruchamiany razem z Next.js, z preflightem, heartbeat, blokadą pojedynczej instancji i kontrolowanym restartem.

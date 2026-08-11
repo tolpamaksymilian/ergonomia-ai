@@ -39,6 +39,18 @@ const limitationLabels: Record<string, string> = {
   right_holding_object_unclassified: "Nie udało się wiarygodnie sklasyfikować obiektu trzymanego prawą dłonią.",
 };
 
+export function ReportAnalysisContext({ report }: { report: AnalysisReport }) {
+  const context = report.analysis_context;
+  if (!context) return null;
+  const workstation = context.workstation;
+  const fields = [
+    ["Stanowisko", workstation?.name], ["Kod stanowiska", workstation?.code], ["Proces / czynność", context.process_name],
+    ["Dział", context.department ?? workstation?.department], ["Obszar", context.area ?? workstation?.area], ["Linia / maszyna", context.line_machine], ["Data analizy", context.analysis_date],
+  ].filter((item): item is [string, string] => typeof item[1] === "string" && Boolean(item[1]));
+  if (!fields.length && !context.categories?.length) return null;
+  return <ReportSection title="Kontekst analizy" icon={Factory}><dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{fields.map(([label,value]) => <Datum key={label} label={label} value={value} card />)}</dl>{context.categories?.length ? <div className="mt-4 flex flex-wrap gap-2">{context.categories.map((item,index) => item.name ? <span key={`${item.group_name}-${item.name}-${index}`} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 print:border-slate-300 print:text-black">{item.group_name ? `${item.group_name}: ` : ""}{item.name}</span> : null)}</div> : null}</ReportSection>;
+}
+
 export function ReportBodyAreas({ report }: { report: AnalysisReport }) {
   return <ReportSection title="Obszary ciała" icon={ScanLine}>
     {report.body_areas.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{report.body_areas.map((area) => <article key={area.area_id} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-slate-100 print:text-black">{area.label}</h3><span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase text-slate-300 print:border-slate-400 print:text-black">{levelLabels[area.level]}</span></div>{area.coverage !== undefined && <p className="mt-3 text-xs text-slate-500 print:text-slate-700">Pokrycie danych: {formatPercentage(area.coverage)}</p>}</article>)}</div> : <Empty text="Brak obszarów możliwych do podsumowania." />}
@@ -110,15 +122,15 @@ export function ReportAssessment({ report }: { report: AnalysisReport }) {
 export function ReportCompanyMethods({ report }: { report: AnalysisReport }) {
   const methods = report.company_methods;
   if (!methods || methods.status !== "available") return <ReportSection title="Metody zakładowe" icon={Factory}><Empty text="Metody zakładowe nie były dostępne dla tej analizy." /></ReportSection>;
-  const items = [["OWAS", methods.owas], ["EJMS", methods.ejms]] as const;
+  const items = [["OWAS", methods.owas]] as const;
   const hasAdditionalMethods = Boolean(
     (asRecord(methods.risk_score)?.status && asRecord(methods.risk_score)?.status !== "REQUIRES_DATA")
     || (Array.isArray(methods.measurable_factors) && methods.measurable_factors.length)
     || (asRecord(methods.chemical)?.status && asRecord(methods.chemical)?.status !== "REQUIRES_DATA"),
   );
-  return <ReportSection title="OWAS i EJMS" icon={Factory} className="report-break-before">
-    <p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">OWAS i EJMS uzupełniają Risk Engine, RULA oraz REBA; nie są łączone w jeden wynik 0–100.</p>
-    <div className="grid gap-3 sm:grid-cols-2">{items.map(([name, raw]) => { const item = asRecord(raw); const status = typeof item?.status === "string" ? item.status : "REQUIRES_DATA"; return <article key={name} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><h3 className="font-semibold text-slate-100 print:text-black">{name}</h3><p className="mt-2 text-xs font-semibold uppercase text-cyan-200 print:text-black">{companyStatus(status)}</p>{name === "OWAS" && <OwasReportSummary value={item} />}{name === "EJMS" && <EjmsReportSummary value={item} />}</article>; })}</div>
+  return <ReportSection title="OWAS" icon={Factory} className="report-break-before">
+    <p className="mb-5 text-sm leading-6 text-slate-500 print:text-slate-700">OWAS uzupełnia Risk Engine, RULA oraz REBA i pozostaje odrębną metodą oceny.</p>
+    <div className="grid gap-3 sm:grid-cols-2">{items.map(([name, raw]) => { const item = asRecord(raw); const status = typeof item?.status === "string" ? item.status : "REQUIRES_DATA"; return <article key={name} className="report-card rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 print:border-slate-300 print:bg-white"><h3 className="font-semibold text-slate-100 print:text-black">{name}</h3><p className="mt-2 text-xs font-semibold uppercase text-cyan-200 print:text-black">{companyStatus(status)}</p><OwasReportSummary value={item} /></article>; })}</div>
     {!hasAdditionalMethods && <p className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 text-sm text-slate-500">Dodatkowe metody kontekstowe wymagają danych wejściowych i nie są rozwijane w głównej części raportu.</p>}
   </ReportSection>;
 }
@@ -132,7 +144,6 @@ function OwasReportSummary({ value }: { value: Record<string, unknown> | null })
   const category = typeof summary?.dominant_category === "number" ? String(summary.dominant_category) : "Wymaga masy";
   return <dl className="mt-3 space-y-1 text-xs text-slate-500 print:text-slate-700"><div>Postura: <strong>{dominantPosture ? `${dominantPosture}?` : UNKNOWN_VALUE}</strong></div><div>Pełna kategoria: <strong>{category}</strong></div><div>Rozpoznana postura: <strong>{formatDuration(postureDuration)}{postureCoverage !== undefined ? ` / ${formatPercentage(postureCoverage)}` : ""}</strong></div></dl>;
 }
-function EjmsReportSummary({ value }: { value: Record<string, unknown> | null }) { const section = asRecord(value?.section_i); const known = typeof section?.known_score === "number" ? section.known_score : null; const minimum = typeof section?.possible_score_min === "number" ? section.possible_score_min : null; const maximum = typeof section?.possible_score_max === "number" ? section.possible_score_max : null; return <p className="mt-3 text-xs text-slate-500 print:text-slate-700">Wynik z rozpoznanych danych: <strong>{known !== null ? `${known} pkt` : UNKNOWN_VALUE}</strong>. Możliwy zakres: <strong>{minimum !== null && maximum !== null ? `${minimum}–${maximum}` : UNKNOWN_VALUE}</strong>. Ranking globalny pozostaje wyłączony z powodu konfliktu źródła.</p>; }
 function asRecord(value: unknown): Record<string, unknown> | null { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function companyStatus(value: string) { return ({ AUTOMATIC: "Automatyczna", PARTIAL: "Częściowa", REQUIRES_DATA: "Wymaga danych", MANUAL: "Manualna", UNAVAILABLE: "Niedostępna", SOURCE_ERROR: "Błąd źródła" } as Record<string, string>)[value] ?? "Niepełne dane"; }
 

@@ -19,11 +19,13 @@ import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
 import { RiskAssessmentCard } from "@/components/analyses/risk-assessment-card";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
 import { AnalysisReviewWorkspace } from "@/components/analyses/review/analysis-review-workspace";
+import { AnalysisContextEditor } from "@/components/analyses/analysis-context-editor";
 import { getSafeAnalysisErrorMessage } from "@/config/analysis-status";
 import { normalizeAnalysisReview } from "@/lib/analysis-review/normalize";
 import { normalizeCompanyMethods } from "@/lib/company-methods/normalize";
 import { requireUser } from "@/lib/auth/access";
 import type { RiskAssessmentSummary } from "@/types/analysis";
+import { normalizeAnalysisContext, type AnalysisCategory, type Workstation } from "@/types/analysis-context";
 
 import { retryFailedAnalysisStage } from "./actions";
 
@@ -48,6 +50,9 @@ export default async function AnalysisDetailsPage({
       user_id,
       title,
       description,
+      workstation_id,
+      analysis_context,
+      analysis_date,
       status,
       progress,
       attempts,
@@ -126,6 +131,17 @@ export default async function AnalysisDetailsPage({
   if (error || !analysis) {
     notFound();
   }
+
+  const [{ data: workstationsData }, { data: categoriesData }, { data: categoryLinks }] = await Promise.all([
+    supabase.from("workstations").select("id,name,code,description,department,area,is_active").eq("is_active", true).order("name"),
+    supabase.from("analysis_categories").select("id,name,group_name,description,is_active").eq("is_active", true).order("group_name").order("name"),
+    supabase.from("analysis_category_links").select("category:analysis_categories(id,name,group_name,description,is_active)").eq("analysis_id", analysis.id),
+  ]);
+  const workstations = (workstationsData ?? []) as unknown as Workstation[];
+  const categories = (categoriesData ?? []) as unknown as AnalysisCategory[];
+  const assignedCategories = (categoryLinks ?? []).flatMap((link) => link.category ? [link.category as unknown as AnalysisCategory] : []);
+  const workstation = workstations.find((item) => item.id === analysis.workstation_id) ?? null;
+  const metadata = { title: analysis.title, description: analysis.description, analysis_date: analysis.analysis_date, workstation, categories: assignedCategories, context: normalizeAnalysisContext(analysis.analysis_context) };
 
   const signedUrlLifetimeSeconds = 10 * 60;
 
@@ -284,6 +300,9 @@ export default async function AnalysisDetailsPage({
       <AnalysisReviewWorkspace
         model={model}
         companyMethods={companyMethods}
+        metadata={metadata}
+        workstations={workstations}
+        categories={categories}
         analysis={{
           id: analysis.id,
           title: analysis.title,
@@ -391,6 +410,8 @@ export default async function AnalysisDetailsPage({
             />
           </div>
         </section>
+
+        <div className="mt-6"><AnalysisContextEditor analysisId={analysis.id} metadata={metadata} workstations={workstations} categories={categories} /></div>
 
         <section className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <Metric

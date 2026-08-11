@@ -1,7 +1,6 @@
 export type CompanyMethodsView = {
   version: string | null;
   owas: Record<string, unknown> | null;
-  ejms: Record<string, unknown> | null;
   riskScore: Record<string, unknown> | null;
   measurableFactors: Record<string, unknown>[];
   chemical: Record<string, unknown> | null;
@@ -9,11 +8,10 @@ export type CompanyMethodsView = {
 };
 
 export function normalizeCompanyMethods(value: unknown): CompanyMethodsView | null {
-  if (!record(value) || value.schema_version !== "1.0" || !["company-methods-v1.0-beta.1", "company-methods-v1.1-beta.1"].includes(String(value.company_methods_version))) return null;
+  if (!record(value) || value.schema_version !== "1.0" || !["company-methods-v1.0-beta.1", "company-methods-v1.1-beta.1", "company-methods-v1.2-beta.1"].includes(String(value.company_methods_version))) return null;
   return {
     version: text(value.company_methods_version),
     owas: record(value.owas) ? value.owas : null,
-    ejms: record(value.ejms) ? value.ejms : null,
     riskScore: record(value.risk_score) ? value.risk_score : null,
     measurableFactors: Array.isArray(value.measurable_factors) ? value.measurable_factors.filter(record) : [],
     chemical: record(value.chemical) ? value.chemical : null,

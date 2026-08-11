@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ejmsMatrixScore, ejmsSectionTwoScore, evaluateMeasurableFactor, evaluateRiskScore, resolveOwasCode, type EjmsLevel } from "@/lib/company-methods/evaluator";
+import { evaluateMeasurableFactor, evaluateRiskScore, resolveOwasCode } from "@/lib/company-methods/evaluator";
 import { record } from "@/lib/company-methods/normalize";
 import { companyMethodSpecs } from "@/lib/company-methods/specs";
 import { requireUser } from "@/lib/auth/access";
@@ -38,8 +38,8 @@ export async function saveCompanyMethodInputs(formData: FormData): Promise<void>
   await uploadJson(bucket, assessmentPath, updatedAssessment);
   if (analysis.report_path && record(report)) {
     report.company_methods = reportCompanySection(updatedAssessment);
-    report.report_version = "analysis-report-v2.2-beta.1";
-    report.schema_version = "2.2";
+    report.report_version = "analysis-report-v2.3-beta.1";
+    report.schema_version = "2.3";
     await uploadJson(bucket, analysis.report_path, report);
   }
   revalidatePath(`/panel/analizy/${analysis.id}`);
@@ -53,18 +53,6 @@ function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
     activity: optionalText(formData, "risk_activity"), hazard_source: optionalText(formData, "risk_hazard_source"), hazard: optionalText(formData, "risk_hazard"), effect: optionalText(formData, "risk_effect"), controls: optionalText(formData, "risk_controls"),
     psif_sif: optionalText(formData, "risk_psif"), factor_type: optionalText(formData, "risk_factor_type"), work_type: optionalText(formData, "risk_work_type"),
   };
-  const sectionTwo: JsonRecord = Object.fromEntries([
-    "horizontal_distance_cm", "start_hand_height_from_waist_cm", "vertical_travel_cm", "frequency_per_minute", "twist_deg", "distance_m",
-  ].map((name) => [name, optionalNumber(formData, `ejms_${name}`)]));
-  sectionTwo.weight_kg = sharedLoadKg;
-  sectionTwo.grip = optionalText(formData, "ejms_grip");
-  const oldEjms = record(previous.ejms) ? previous.ejms : {};
-  const oldSectionOne = record(oldEjms.section_i) ? oldEjms.section_i : {};
-  const sectionOne = Object.fromEntries(EJMS_AREAS.map((area) => [area, {
-    ...(record(oldSectionOne[area]) ? oldSectionOne[area] : {}),
-    force_level: optionalText(formData, `ejms_force_${area}`),
-    frequency_per_minute: optionalNumber(formData, `ejms_frequency_${area}`),
-  }]));
   const measurement = optionalNumber(formData, "measurement");
   const limit = optionalNumber(formData, "measurement_limit");
   const measurable = measurement !== null || limit !== null ? [{ measurement, limit, label: optionalText(formData, "measurement_label"), updated_at: optionalText(formData, "measurement_updated_at") }] : [];
@@ -72,7 +60,6 @@ function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
     ...previous,
     schema_version: "1.0", analysis_id: requiredText(formData, "analysis_id"), updated_at: new Date().toISOString(),
     owas: { ...(record(previous.owas) ? previous.owas : {}), load_kg: sharedLoadKg, forced_posture: optionalText(formData, "owas_forced_posture") },
-    ejms: { ...oldEjms, section_i: sectionOne, section_ii: sectionTwo },
     risk_score: riskScore,
     measurable_factors: measurable,
     chemical: {
@@ -88,45 +75,13 @@ function mergeInputs(previous: JsonRecord, formData: FormData): JsonRecord {
 
 function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysisId: string): JsonRecord {
   const output: JsonRecord = record(current) ? structuredClone(current) : {
-    schema_version: "1.0", generated_by: "Ergonomia AI Company Methods Engine", company_methods_version: "company-methods-v1.1-beta.1", analysis_id: analysisId,
+    schema_version: "1.0", generated_by: "Ergonomia AI Company Methods Engine", company_methods_version: "company-methods-v1.2-beta.1", analysis_id: analysisId,
   };
   output.generated_at = new Date().toISOString();
   const riskInput = record(inputs.risk_score) ? inputs.risk_score : {};
   output.risk_score = { ...evaluateRiskScore(riskInput), context: riskInput };
   const measurableInputs = Array.isArray(inputs.measurable_factors) ? inputs.measurable_factors.filter(record) : [];
   output.measurable_factors = measurableInputs.map((item) => ({ ...evaluateMeasurableFactor(number(item.measurement), number(item.limit)), label: item.label ?? null, updated_at: item.updated_at ?? null, valid_until: addSixtyMonths(item.updated_at) }));
-  const ejms = record(output.ejms) ? output.ejms : {};
-  const sectionOneInputs = record(inputs.ejms) && record(inputs.ejms.section_i) ? inputs.ejms.section_i : {};
-  if (record(ejms.section_i) && record(ejms.section_i.areas)) {
-    const areas = ejms.section_i.areas;
-    for (const area of EJMS_AREAS) {
-      if (!record(areas[area])) continue;
-      const result = areas[area];
-      const force = ejmsLevel(record(sectionOneInputs[area]) ? sectionOneInputs[area].force_level : null);
-      const posture = ejmsLevel(result.posture_level);
-      const manualFrequency = record(sectionOneInputs[area]) ? nullableNumber(sectionOneInputs[area].frequency_per_minute) : null;
-      const frequency = manualFrequency === null ? ejmsLevel(result.frequency_duration_level) : classifyEjmsFrequency(area, manualFrequency);
-      const postureForce = mergeEjmsPostureForce(posture, force);
-      const score = postureForce && frequency ? ejmsMatrixScore(postureForce, frequency) : null;
-      const missing = [
-        force === null && posture !== "HIGH" ? `ejms.section_i.${area}.force_level` : null,
-        frequency === null ? `ejms.section_i.${area}.frequency_or_duration` : null,
-      ].filter((item): item is string => item !== null);
-      areas[area] = { ...result, force_level: force ?? "UNKNOWN", posture_force_level: postureForce ?? "UNKNOWN", frequency_duration_level: frequency ?? "UNKNOWN", frequency_per_minute: manualFrequency ?? result.frequency_per_minute, frequency_source: manualFrequency === null ? "VIDEO_DERIVED" : "USER_PROVIDED", final_level: score === null ? "UNKNOWN" : postureForce, score, data_status: missing.length ? "PARTIAL" : "COMPLETE", missing_inputs: missing };
-    }
-    let knownScore = 0;
-    let possibleMinimum = 0;
-    let possibleMaximum = 0;
-    let complete = true;
-    for (const item of Object.values(areas)) if (record(item)) {
-      if (typeof item.score === "number") knownScore += item.score; else complete = false;
-      if (typeof item.possible_score_min === "number") possibleMinimum += item.possible_score_min;
-      if (typeof item.possible_score_max === "number") possibleMaximum += item.possible_score_max;
-    }
-    ejms.section_i = { ...ejms.section_i, areas, score: complete ? knownScore : null, known_score: knownScore, possible_score_min: possibleMinimum, possible_score_max: possibleMaximum };
-  }
-  ejms.section_ii = ejmsSectionTwoScore(record(inputs.ejms) && record(inputs.ejms.section_ii) ? inputs.ejms.section_ii : {});
-  output.ejms = ejms;
   output.chemical = chemicalResult(record(inputs.chemical) ? inputs.chemical : {});
   const loadKg = record(inputs.owas) ? nullableNumber(inputs.owas.load_kg) : null;
   const forcedPosture = record(inputs.owas) && (inputs.owas.forced_posture === "forced" || inputs.owas.forced_posture === "unforced") ? inputs.owas.forced_posture : null;
@@ -153,32 +108,12 @@ function recalculateAssessment(current: JsonRecord, inputs: JsonRecord, analysis
   const missing = [
     ...(loadKg === null ? ["owas.load_kg"] : []),
     ...(forcedPosture === null ? ["owas.forced_posture"] : []),
-    ...(record(output.ejms) && record(output.ejms.section_ii) && Array.isArray(output.ejms.section_ii.missing_inputs) ? output.ejms.section_ii.missing_inputs.filter((item): item is string => typeof item === "string") : []),
-    ...(record(output.ejms) && record(output.ejms.section_i) && record(output.ejms.section_i.areas) ? Object.values(output.ejms.section_i.areas).flatMap((area) => record(area) && Array.isArray(area.missing_inputs) ? area.missing_inputs.filter((item): item is string => typeof item === "string") : []) : []),
     ...(record(output.risk_score) && Array.isArray(output.risk_score.missing_inputs) ? output.risk_score.missing_inputs.filter((item): item is string => typeof item === "string").map((item) => `risk_score.${item}`) : []),
   ];
   output.missing_inputs = [...new Set(missing)];
   return output;
 }
 
-const EJMS_AREAS = ["neck", "arm", "trunk", "forearm_elbow", "wrist", "fingers_hands", "legs", "static_load"] as const;
-
-function ejmsLevel(value: unknown): EjmsLevel | null { return value === "LOW" || value === "MOD" || value === "HIGH" ? value : null; }
-function mergeEjmsPostureForce(posture: EjmsLevel | null, force: EjmsLevel | null): EjmsLevel | null {
-  if (posture === "HIGH" || force === "HIGH") return "HIGH";
-  if (posture === null) return force;
-  if (force === null) return posture === "LOW" ? null : posture;
-  const levels: EjmsLevel[] = ["LOW", "MOD", "HIGH"];
-  return levels[Math.max(levels.indexOf(posture), levels.indexOf(force))];
-}
-function classifyEjmsFrequency(area: typeof EJMS_AREAS[number], value: number): EjmsLevel {
-  const rules = companyMethodSpecs.ejms.rules.section_i.areas[area];
-  const low = "frequency_low_per_minute" in rules && typeof rules.frequency_low_per_minute === "number" ? rules.frequency_low_per_minute : null;
-  const high = "frequency_high_per_minute" in rules && typeof rules.frequency_high_per_minute === "number" ? rules.frequency_high_per_minute : null;
-  if (high !== null && value > high) return "HIGH";
-  if (low !== null && value < low) return "LOW";
-  return "MOD";
-}
 function addSixtyMonths(value: unknown): string | null {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -239,7 +174,7 @@ function rebuildOwasSummary(frames: unknown[], previous: JsonRecord): JsonRecord
 }
 
 function reportCompanySection(value: JsonRecord): JsonRecord {
-  return { status: "available", company_methods_version: value.company_methods_version, missing_inputs: value.missing_inputs, limitations: value.limitations, owas: value.owas, ejms: value.ejms, risk_score: value.risk_score, measurable_factors: value.measurable_factors, chemical: value.chemical };
+  return { status: "available", company_methods_version: value.company_methods_version, missing_inputs: value.missing_inputs, limitations: value.limitations, owas: value.owas, risk_score: value.risk_score, measurable_factors: value.measurable_factors, chemical: value.chemical };
 }
 
 async function parseJson(blob: Blob | null): Promise<JsonRecord> { if (!blob) return {}; try { const value: unknown = JSON.parse(await blob.text()); return record(value) ? value : {}; } catch { return {}; } }
