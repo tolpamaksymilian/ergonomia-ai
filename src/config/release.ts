@@ -1,6 +1,6 @@
 export const release = {
-  version: "0.14.0-beta.1",
-  name: "Perspective-aware Photo Scene Builder Beta",
+  version: "0.15.0-beta.1",
+  name: "Coordinate Engine V2 and Photo Analysis Control Beta",
   channel: "beta",
   statusLabel: "Wersja testowa",
   releasedAt: "2026-08-12",

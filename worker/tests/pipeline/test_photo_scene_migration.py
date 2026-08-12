@@ -4,6 +4,7 @@ from pathlib import Path
 MIGRATION = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812120000_add_photo_scene_builder_beta.sql"
 UPGRADE = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812150000_upgrade_photo_scene_builder_v02.sql"
 V03_UPGRADE = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812170000_upgrade_photo_scene_builder_v03.sql"
+V04_REANALYSIS = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812190000_enable_photo_scene_reanalysis.sql"
 
 
 def source() -> str:
@@ -54,3 +55,16 @@ def test_scene_v03_migration_allows_v12_without_rewriting_existing_documents():
     assert "photo-scene-builder-v0.3-beta.1" in sql
     assert "update public.photo_scenes" not in sql
     assert "notify pgrst, 'reload schema'" in sql
+
+
+def test_scene_v04_reanalysis_preserves_manual_scene_and_checks_owner():
+    sql = V04_REANALYSIS.read_text(encoding="utf-8").lower()
+    assert "create or replace function public.retry_scene_detection(p_analysis_id uuid)" in sql
+    assert "analysis_type = 'photo_scene'" in sql
+    assert "user_id = (select auth.uid())" in sql
+    assert "public.is_admin()" in sql
+    assert "processing_stage in ('scene-detection-failed', 'scene-ready')" in sql
+    assert "interval '2 minutes'" in sql
+    assert "grant execute on function public.retry_scene_detection(uuid) to authenticated" in sql
+    assert "detection_result =" not in sql
+    assert "scene_state =" not in sql

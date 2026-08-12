@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { buildAnthropometricPose, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, renderedHeightPixels } from "../anthropometry.ts";
-import { calibrationAssistant, calibrationQuality, estimateLocalScale, rebuildPerspectiveField } from "../calibration.ts";
+import { calibrationAssistant, calibrationQuality, calibrationSpatialCoverage, estimateLocalScale, rebuildPerspectiveField } from "../calibration.ts";
 import { distance, moveHumanJointWithConstraints, segmentLengthPixels, solveTwoBoneIk } from "../geometry.ts";
 import { layoutMeasurementLabels } from "../label-layout.ts";
 import { dimensionsFor, objectCompleteness } from "../object-dimensions.ts";
@@ -47,6 +47,15 @@ test("single reference remains local only", () => {
   const scene = emptySceneState(); scene.calibration.references = [reference("a", .5, .8, 300, 100)];
   assert.equal(rebuildPerspectiveField(scene.calibration).scaleField.status, "LOCAL_ONLY");
   assert.equal(calibrationQuality(scene.calibration), "PARTIAL");
+});
+
+test("consistent references clustered in one local region cannot claim good calibration", () => {
+  const scene = emptySceneState();
+  scene.calibration.references = [reference("a", .46, .55, 300, 100), reference("b", .51, .58, 294, 100), reference("c", .55, .51, 287, 100)];
+  const calibration = rebuildPerspectiveField(scene.calibration);
+  assert.equal(calibration.scaleField.status, "PERSPECTIVE_PARTIAL");
+  assert.equal(calibrationQuality(calibration), "PARTIAL");
+  assert.equal(calibrationSpatialCoverage(calibration.references).adequate, false);
 });
 
 test("calibration assistant points to a missing scene region", () => {

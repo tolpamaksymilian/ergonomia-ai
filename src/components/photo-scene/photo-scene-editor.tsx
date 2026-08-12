@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle, Box, ChevronRight, Copy, Eye, EyeOff, Focus, Grid2X2, HelpCircle,
   ImagePlus, LocateFixed, Lock, Minus, MousePointer2, Move, Plus, Redo2, RotateCcw,
-  Ruler, Save, Sparkles, Trash2, Undo2, Unlock, UserRound, UsersRound,
+  Ruler, Save, ScanSearch, Sparkles, Trash2, Undo2, Unlock, UserRound, UsersRound, WifiOff,
 } from "lucide-react";
 
 import { HumanMannequin, type HumanDragKind } from "@/components/photo-scene/human-mannequin";
 import { HUMAN_PRESETS, buildAnthropometricPose, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, resetHumanPose, withUserSegment } from "@/lib/photo-scene/anthropometry";
+import { derivePhotoAnalysisUi, mergeSceneDetection } from "@/lib/photo-scene/analysis-control";
 import { calibrationAssistant, calibrationQuality, calibrationStatus, duplicateReference, estimateLocalScale, rebuildPerspectiveField, referencePixelDistance } from "@/lib/photo-scene/calibration";
+import { getSceneSvgTransform, getSceneTransform, pointerCoordinates, type EditorViewportRect, type PointerCoordinates } from "@/lib/photo-scene/coordinates";
 import { moveHumanJointWithConstraints, moveHumanRootUniform } from "@/lib/photo-scene/geometry";
 import { layoutMeasurementLabels } from "@/lib/photo-scene/label-layout";
 import { dimensionsFor, objectCompleteness } from "@/lib/photo-scene/object-dimensions";
@@ -25,7 +28,7 @@ import type {
 type Tool = "SELECT" | "PAN" | "ADD_OBJECT" | "FLOOR" | "REFERENCE" | "HUMAN";
 type Tab = "SCENE" | "OBJECTS" | "HUMANS" | "DIMENSIONS" | "SUGGESTIONS";
 type DraftMeasurement = { start: NormalizedPoint; end: NormalizedPoint; objectId: string | null };
-type Drag = { kind: HumanDragKind | "OBJECT" | "RESIZE" | "PAN"; id?: string; joint?: HumanJointName; start: NormalizedPoint; snapshot: SceneState };
+type Drag = { kind: HumanDragKind | "OBJECT" | "RESIZE" | "PAN"; id?: string; joint?: HumanJointName; start: NormalizedPoint; startScreen: { x: number; y: number }; snapshot: SceneState };
 
 const objectLabels: Record<SceneObjectType, string> = {
   WORK_SURFACE: "Powierzchnia robocza", TABLE: "Stół", SHELF: "Półka", RACK: "Regał",
@@ -44,24 +47,86 @@ const controlClass = "w-full rounded-lg border border-border bg-card px-3 py-2 t
 export function PhotoSceneEditor(props: {
   analysisId: string; title: string; imageUrl: string; imageWidth: number; imageHeight: number;
   initialState: SceneState; detection: SceneDetection | null; processingStage: string | null;
-  detectionError: string | null; lastSavedAt: string;
+  detectionError: string | null; lastSavedAt: string; analysisHeartbeatAt: string | null;
+  analysisUpdatedAt: string | null; detectionCompletedAt: string | null; detectionAttempts: number;
+  detectionVersion: string | null; sceneBuilderVersion: string | null;
 }) {
-  const initial = useMemo(() => refreshInsights(mergeDetections(props.initialState, props.detection)), [props.initialState, props.detection]);
+  const router = useRouter();
+  const initial = useMemo(() => refreshInsights(mergeSceneDetection(props.initialState, props.detection)), [props.initialState, props.detection]);
   const [state, setState] = useState(initial);
   const [history, setHistory] = useState<SceneState[]>([]), [future, setFuture] = useState<SceneState[]>([]);
   const [tool, setTool] = useState<Tool>("SELECT"), [tab, setTab] = useState<Tab>("SCENE");
   const [saveStatus, setSaveStatus] = useState<"SAVED" | "DIRTY" | "SAVING" | "ERROR">("SAVED");
   const [draftStart, setDraftStart] = useState<NormalizedPoint | null>(null), [draftPoint, setDraftPoint] = useState<NormalizedPoint | null>(null);
   const [draftMeasurement, setDraftMeasurement] = useState<DraftMeasurement | null>(null), [drag, setDrag] = useState<Drag | null>(null);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [editorRect, setEditorRect] = useState<EditorViewportRect | null>(null);
+  const [coordinateDebug, setCoordinateDebug] = useState<PointerCoordinates | null>(null);
+  const [pointerOutside, setPointerOutside] = useState(false), [showDetectedObjects, setShowDetectedObjects] = useState(false);
+  const [analysisStarting, setAnalysisStarting] = useState(false), [analysisActionError, setAnalysisActionError] = useState<string | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
+  const [worker, setWorker] = useState<{ status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown"; controlAllowed: boolean } | null>(null);
   const debugScene = useSyncExternalStore(
     () => () => undefined,
     () => process.env.NODE_ENV === "development" && new URLSearchParams(window.location.search).get("debugScene") === "1",
     () => false,
   );
+  const debugCoordinates = useSyncExternalStore(
+    () => () => undefined,
+    () => process.env.NODE_ENV === "development" && new URLSearchParams(window.location.search).get("debugSceneCoordinates") === "1",
+    () => false,
+  );
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const latestRef = useRef(state);
   const previewStateRef = useRef<SceneState | null>(null), animationFrameRef = useRef<number | null>(null);
   useEffect(() => { latestRef.current = state; }, [state]);
   useEffect(() => () => { if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const image = new window.Image();
+    image.onload = () => { if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) setImageSize({ width: image.naturalWidth, height: image.naturalHeight }); };
+    image.src = props.imageUrl;
+    return () => { cancelled = true; };
+  }, [props.imageUrl]);
+  useEffect(() => {
+    const element = svgRef.current;
+    if (!element) return;
+    const readRect = () => { const rect = element.getBoundingClientRect(); setEditorRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }); };
+    const observer = new ResizeObserver(readRect); observer.observe(element); readRect();
+    return () => observer.disconnect();
+  }, [imageSize]);
+  useEffect(() => {
+    let active = true;
+    const readHealth = async () => {
+      const response = await fetch(`/api/system/pipeline-health?analysisId=${encodeURIComponent(props.analysisId)}`, { cache: "no-store" }).catch(() => null);
+      if (!active || !response?.ok) return;
+      const result = await response.json() as { health?: { status?: string }; control_allowed?: boolean };
+      const status = result.health?.status;
+      if (["online", "offline", "degraded", "restarting", "crash_loop", "unknown"].includes(String(status))) setWorker({ status: status as NonNullable<typeof worker>["status"], controlAllowed: result.control_allowed === true });
+    };
+    void readHealth();
+    const interval = window.setInterval(() => void readHealth(), 10_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [props.analysisId]);
+  useEffect(() => {
+    if (!['ready-for-scene-detection', 'scene-detection-processing'].includes(props.processingStage ?? '')) return;
+    const interval = window.setInterval(() => router.refresh(), 3_000);
+    return () => window.clearInterval(interval);
+  }, [props.processingStage, router]);
+  useEffect(() => {
+    const key = `photo-scene-analysis:${props.analysisId}`;
+    if (!props.detectionCompletedAt || window.sessionStorage.getItem(key) !== "pending") return;
+    window.sessionStorage.removeItem(key);
+    const count = props.detection?.candidates.length ?? 0, suggestions = props.detection?.dimension_suggestions?.length ?? 0;
+    const message = count ? `Analiza zdjęcia zakończona. Wykryto ${count} elementów i przygotowano ${suggestions} sugestii.` : "Analiza zdjęcia zakończona. Nie wykryto elementów do automatycznej klasyfikacji.";
+    const showTimeout = window.setTimeout(() => setAnalysisNotice(message), 0);
+    const hideTimeout = window.setTimeout(() => setAnalysisNotice(null), 8_000);
+    return () => { window.clearTimeout(showTimeout); window.clearTimeout(hideTimeout); };
+  }, [props.analysisId, props.detection, props.detectionCompletedAt]);
+
+  const imageWidth = imageSize?.width ?? props.imageWidth;
+  const imageHeight = imageSize?.height ?? props.imageHeight;
+  const geometryReady = imageSize !== null && editorRect !== null;
 
   function queuePreview(next: SceneState) {
     previewStateRef.current = next;
@@ -81,6 +146,7 @@ export function PhotoSceneEditor(props: {
     setSaveStatus("SAVING");
     const response = await fetch(`/api/photo-scenes/${props.analysisId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ scene_state: latestRef.current }) });
     setSaveStatus(response.ok ? "SAVED" : "ERROR");
+    return response.ok;
   }, [props.analysisId]);
   useEffect(() => { if (saveStatus !== "DIRTY") return; const timeout = window.setTimeout(() => void save(), 900); return () => window.clearTimeout(timeout); }, [save, saveStatus, state]);
 
@@ -102,74 +168,145 @@ export function PhotoSceneEditor(props: {
     window.addEventListener("keydown", keyboard); return () => window.removeEventListener("keydown", keyboard);
   });
 
-  function point(event: React.PointerEvent<SVGSVGElement>): NormalizedPoint { const rect = event.currentTarget.getBoundingClientRect(); return { x: clamp((event.clientX - rect.left) / rect.width), y: clamp((event.clientY - rect.top) / rect.height) }; }
+  function transformFor(viewport = state.viewport) {
+    const element = svgRef.current;
+    if (!element || !imageSize) return null;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return getSceneTransform({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, imageWidth, imageHeight, viewport);
+  }
+  function coordinatesFor(event: React.PointerEvent<SVGElement>, clampOutside = false, viewport = state.viewport) {
+    const transform = transformFor(viewport);
+    return transform ? pointerCoordinates(transform, { x: event.clientX, y: event.clientY }, clampOutside) : null;
+  }
+  function updatePointerFeedback(event: React.PointerEvent<SVGElement>) {
+    const transform = transformFor();
+    if (!transform) return;
+    const result = pointerCoordinates(transform, { x: event.clientX, y: event.clientY }, true);
+    const outside = !result?.insideImage;
+    setPointerOutside((current) => current === outside ? current : outside);
+    if (debugCoordinates) setCoordinateDebug(result);
+  }
   function pointerDown(event: React.PointerEvent<SVGSVGElement>) {
+    if (!geometryReady) return;
     if (event.target !== event.currentTarget && !["ADD_OBJECT", "FLOOR", "REFERENCE", "HUMAN"].includes(tool)) return;
-    const p = point(event); event.currentTarget.setPointerCapture(event.pointerId);
-    if (tool === "HUMAN" && state.selectedHumanId) { commit(placeHumanAt(state, state.selectedHumanId, p, props.imageWidth, props.imageHeight)); setTool("SELECT"); return; }
+    const coordinates = coordinatesFor(event, tool === "PAN");
+    if (!coordinates) { setPointerOutside(true); return; }
+    const p = coordinates.imageNormalized; event.currentTarget.setPointerCapture(event.pointerId);
+    if (tool === "HUMAN" && state.selectedHumanId) { commit(placeHumanAt(state, state.selectedHumanId, p, imageWidth, imageHeight)); setTool("SELECT"); return; }
     if (["ADD_OBJECT", "FLOOR", "REFERENCE"].includes(tool)) { setDraftStart(p); setDraftPoint(p); }
-    if (tool === "PAN") setDrag({ kind: "PAN", start: p, snapshot: state });
+    if (tool === "PAN") setDrag({ kind: "PAN", start: p, startScreen: coordinates.screen, snapshot: state });
   }
   function pointerMove(event: React.PointerEvent<SVGSVGElement>) {
-    const p = point(event); if (draftStart) setDraftPoint(p); if (!drag) return;
+    updatePointerFeedback(event);
+    const coordinates = coordinatesFor(event, Boolean(draftStart || drag), drag?.snapshot.viewport ?? state.viewport);
+    if (!coordinates) return;
+    const p = coordinates.imageNormalized; if (draftStart) setDraftPoint(p); if (!drag) return;
     const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
     let preview: SceneState | null = null;
-    if (drag.kind === "PAN") preview = { ...drag.snapshot, viewport: { ...drag.snapshot.viewport, pan_x: drag.snapshot.viewport.pan_x + dx, pan_y: drag.snapshot.viewport.pan_y + dy } };
+    if (drag.kind === "PAN") {
+      const transform = transformFor(drag.snapshot.viewport);
+      if (transform) preview = { ...drag.snapshot, viewport: { ...drag.snapshot.viewport, pan_x: drag.snapshot.viewport.pan_x + (coordinates.screen.x - drag.startScreen.x) / transform.displayedImageRect.width, pan_y: drag.snapshot.viewport.pan_y + (coordinates.screen.y - drag.startScreen.y) / transform.displayedImageRect.height } };
+    }
     if ((drag.kind === "OBJECT" || drag.kind === "RESIZE") && drag.id) preview = { ...drag.snapshot, objects: drag.snapshot.objects.map((object) => object.id !== drag.id || object.locked ? object : { ...object, bbox: drag.kind === "OBJECT" ? moveBox(object.bbox, dx, dy) : resizeBox(object.bbox, dx, dy), status: object.status === "DETECTED" ? "USER_MODIFIED" : object.status }) };
-    if ((drag.kind === "HUMAN_ROOT" || drag.kind === "STANDING") && drag.id) preview = moveHumanInPerspective(drag.snapshot, drag.id, dx, dy, props.imageWidth, props.imageHeight);
-    if (drag.kind === "JOINT" && drag.id && drag.joint) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => { if (human.id !== drag.id || human.locked) return human; const scale = estimateLocalScale(drag.snapshot.calibration, human.placement.contactPoint, props.imageWidth, props.imageHeight)?.pixelsPerCm ?? human.placement.lastScalePxPerCm ?? 3; return moveHumanJointWithConstraints(human, drag.joint!, p, scale, props.imageWidth, props.imageHeight); }) };
-    if (drag.kind === "ORIENTATION" && drag.id) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => human.id === drag.id ? rotateHuman(human, p, props.imageWidth, props.imageHeight) : human) };
+    if ((drag.kind === "HUMAN_ROOT" || drag.kind === "STANDING") && drag.id) preview = moveHumanInPerspective(drag.snapshot, drag.id, dx, dy, imageWidth, imageHeight);
+    if (drag.kind === "JOINT" && drag.id && drag.joint) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => { if (human.id !== drag.id || human.locked) return human; const scale = estimateLocalScale(drag.snapshot.calibration, human.placement.contactPoint, imageWidth, imageHeight)?.pixelsPerCm ?? human.placement.lastScalePxPerCm ?? 3; return moveHumanJointWithConstraints(human, drag.joint!, p, scale, imageWidth, imageHeight); }) };
+    if (drag.kind === "ORIENTATION" && drag.id) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => human.id === drag.id ? rotateHuman(human, p, imageWidth, imageHeight) : human) };
     if (preview) queuePreview(preview);
   }
   function pointerUp(event: React.PointerEvent<SVGSVGElement>) {
-    const p = point(event);
+    const coordinates = coordinatesFor(event, Boolean(draftStart || drag), drag?.snapshot.viewport ?? state.viewport);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!coordinates) return;
+    const p = coordinates.imageNormalized;
     if (drag) { if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current); const next = refreshInsights(previewStateRef.current ?? state); previewStateRef.current = null; animationFrameRef.current = null; setState(next); setHistory((items) => [...items.slice(-49), drag.snapshot]); setFuture([]); setDrag(null); setSaveStatus("DIRTY"); }
     if (!draftStart) return;
     if (tool === "ADD_OBJECT") { const bbox = boxFromPoints(draftStart, p); if (bbox.width > .01 && bbox.height > .01) commit({ ...state, objects: [...state.objects, newObject(bbox)] }); }
     if (tool === "FLOOR") commit({ ...state, calibration: { ...state.calibration, floorBaseline: { start: draftStart, end: p } } });
-    if (tool === "REFERENCE" && referencePixelDistance(draftStart, p, props.imageWidth, props.imageHeight) > 2) { setDraftMeasurement({ start: draftStart, end: p, objectId: state.selectedObjectId }); setTab("DIMENSIONS"); }
+    if (tool === "REFERENCE" && referencePixelDistance(draftStart, p, imageWidth, imageHeight) > 2) { setDraftMeasurement({ start: draftStart, end: p, objectId: state.selectedObjectId }); setTab("DIMENSIONS"); }
     setDraftStart(null); setDraftPoint(null); if (tool !== "REFERENCE") setTool("SELECT");
+  }
+  function pointerCancel(event: React.PointerEvent<SVGSVGElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag) setState(drag.snapshot);
+    previewStateRef.current = null; setDrag(null); setDraftStart(null); setDraftPoint(null);
   }
   function addReference(input: { name: string; type: ReferenceDimensionType; valueCm: number; affectsScale: boolean }) {
     if (!draftMeasurement || !Number.isFinite(input.valueCm) || input.valueCm <= 0) return;
-    const reference: CalibrationReference = { id: crypto.randomUUID(), name: input.name.trim() || referenceLabels[input.type], dimensionType: input.type, valueCm: input.valueCm, unit: "cm", start: draftMeasurement.start, end: draftMeasurement.end, pixelDistance: referencePixelDistance(draftMeasurement.start, draftMeasurement.end, props.imageWidth, props.imageHeight), objectId: draftMeasurement.objectId, active: true, visible: true, locked: false, affectsScale: input.affectsScale, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
-    update((current) => { const calibration = { ...current.calibration, references: [...current.calibration.references, reference] }; calibration.status = calibrationStatus(calibration); return rescaleLockedHumans({ ...current, calibration }, props.imageWidth, props.imageHeight); });
+    const reference: CalibrationReference = { id: crypto.randomUUID(), name: input.name.trim() || referenceLabels[input.type], dimensionType: input.type, valueCm: input.valueCm, unit: "cm", start: draftMeasurement.start, end: draftMeasurement.end, pixelDistance: referencePixelDistance(draftMeasurement.start, draftMeasurement.end, imageWidth, imageHeight), objectId: draftMeasurement.objectId, active: true, visible: true, locked: false, affectsScale: input.affectsScale, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
+    update((current) => { const calibration = { ...current.calibration, references: [...current.calibration.references, reference] }; calibration.status = calibrationStatus(calibration); return rescaleLockedHumans({ ...current, calibration }, imageWidth, imageHeight); });
     setDraftMeasurement(null); setTool("SELECT");
+  }
+
+  function beginOverlayDrag(kind: HumanDragKind | "OBJECT" | "RESIZE", id: string, event: React.PointerEvent<SVGElement>, joint?: HumanJointName) {
+    event.stopPropagation();
+    const coordinates = coordinatesFor(event);
+    if (!coordinates) return;
+    svgRef.current?.setPointerCapture(event.pointerId);
+    setDrag({ kind, id, joint, start: coordinates.imageNormalized, startScreen: coordinates.screen, snapshot: state });
+  }
+
+  async function startPhotoAnalysis() {
+    if (analysisStarting) return;
+    setAnalysisStarting(true); setAnalysisActionError(null);
+    if (!(await save())) { setAnalysisActionError("Najpierw zapisz scenę i spróbuj ponownie."); setAnalysisStarting(false); return; }
+    const response = await fetch(`/api/photo-scenes/${props.analysisId}`, { method: "POST" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      setAnalysisActionError(result?.error ?? "Nie udało się uruchomić analizy zdjęcia."); setAnalysisStarting(false); return;
+    }
+    window.sessionStorage.setItem(`photo-scene-analysis:${props.analysisId}`, "pending");
+    router.refresh(); window.setTimeout(() => setAnalysisStarting(false), 1_500);
+  }
+
+  async function restartWorker() {
+    const response = await fetch("/api/system/pipeline-health", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "restart" }) });
+    if (!response.ok) { setAnalysisActionError("Nie udało się zrestartować lokalnego Workera."); return; }
+    setWorker((current) => current ? { ...current, status: "restarting" } : current); router.refresh();
   }
 
   const selectedObject = state.objects.find((object) => object.id === state.selectedObjectId) ?? null;
   const selectedHuman = state.humans.find((human) => human.id === state.selectedHumanId) ?? null;
   const quality = calibrationQuality(state.calibration), completion = sceneCompleteness(state);
+  const analysisUi = derivePhotoAnalysisUi({ processingStage: props.processingStage, detection: props.detection, heartbeatAt: props.analysisHeartbeatAt, updatedAt: props.analysisUpdatedAt, workerStatus: worker?.status });
+  const oldCoordinateScene = Boolean(props.sceneBuilderVersion && !props.sceneBuilderVersion.includes("v0.4") && (state.calibration.references.length || state.geometryMeasurements.length || state.objects.some((object) => object.geometryMeasurements.length)));
+  const visibleObjects = state.objects.filter((object) => object.visible && object.status !== "USER_REJECTED" && (showDetectedObjects || object.status !== "DETECTED"));
 
   return <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_390px]">
     <section className="ui-card min-w-0 overflow-hidden">
       <Toolbar state={state} tool={tool} setTool={setTool} history={history.length} future={future.length} undo={undo} redo={redo} update={update} setTab={setTab} />
       <div className="relative overflow-hidden bg-neutral-950 p-2 sm:p-4">
-        <svg viewBox={`0 0 ${props.imageWidth} ${props.imageHeight}`} role="application" aria-label="Edytor sceny ze zdjęcia" className="mx-auto block max-h-[76vh] w-full touch-none select-none" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} style={{ aspectRatio: `${props.imageWidth}/${props.imageHeight}`, transform: `translate(${state.viewport.pan_x * 100}%,${state.viewport.pan_y * 100}%) scale(${state.viewport.zoom})`, transformOrigin: "center" }}>
+        <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} preserveAspectRatio="xMidYMid meet" role="application" aria-label="Edytor sceny ze zdjęcia" aria-disabled={!geometryReady} className="mx-auto block max-h-[76vh] w-full touch-none select-none" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} style={{ aspectRatio: `${imageWidth}/${imageHeight}` }}>
           <defs><marker id="dimension-arrow" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto-start-reverse"><path d="M7 0L0 3.5L7 7" fill="none" stroke="context-stroke" strokeWidth="1.5" /></marker><marker id="facing-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="context-stroke" /></marker></defs>
-          <image href={props.imageUrl} width={props.imageWidth} height={props.imageHeight} pointerEvents="none" />
-          {state.objects.filter((object) => object.visible && object.status !== "USER_REJECTED").map((object) => <ObjectOverlay key={object.id} object={object} selected={object.id === state.selectedObjectId} width={props.imageWidth} height={props.imageHeight} onStart={(kind, event) => { event.stopPropagation(); setState((current) => ({ ...current, selectedObjectId: object.id })); setDrag({ kind, id: object.id, start: pointFromSvg(event), snapshot: state }); }} />)}
-          {state.view.layers.CALIBRATION && state.calibration.floorBaseline && <line {...lineProps(state.calibration.floorBaseline.start, state.calibration.floorBaseline.end, props.imageWidth, props.imageHeight)} stroke="#22d3ee" strokeWidth="3" strokeDasharray="14 9" />}
-          {visibleReferences(state).map((reference) => <MeasurementOverlay key={reference.id} reference={reference} width={props.imageWidth} height={props.imageHeight} selected={reference.id === state.selectedReferenceId} zoom={state.viewport.zoom} onSelect={() => { setState((current) => ({ ...current, selectedReferenceId: reference.id })); setTab("DIMENSIONS"); }} />)}
-          <GeometryMeasurementsOverlay state={state} width={props.imageWidth} height={props.imageHeight} />
-          {state.objects.flatMap((object) => object.interactionPoints.map((interaction) => ({ ...interaction, objectId: object.id }))).map((interaction) => interaction.visible && <g key={interaction.id}><circle cx={interaction.position.x * props.imageWidth} cy={interaction.position.y * props.imageHeight} r="7" fill="#0f172a" stroke="#f59e0b" strokeWidth="2" /><text x={interaction.position.x * props.imageWidth + 10} y={interaction.position.y * props.imageHeight + 4} fill="white" fontSize="11">{interaction.name}</text></g>)}
-          {state.humans.filter((human) => human.visible).map((human) => <HumanMannequin key={human.id} human={human} width={props.imageWidth} height={props.imageHeight} calibration={state.calibration} reachVisible={state.reachVisible && state.view.layers.HUMAN_REACH} reachMode={state.view.reachMode} debug={debugScene} zoom={state.viewport.zoom} selected={human.id === state.selectedHumanId} onSelect={() => { setState((current) => ({ ...current, selectedHumanId: human.id })); setTab("HUMANS"); }} onStart={(kind, joint, event) => { event.stopPropagation(); setDrag({ kind, id: human.id, joint, start: pointFromSvg(event), snapshot: state }); }} />)}
-          {draftStart && draftPoint && <line {...lineProps(draftStart, draftPoint, props.imageWidth, props.imageHeight)} stroke="#f97316" strokeWidth="4" strokeDasharray="12 8" />}
+          <g transform={getSceneSvgTransform(imageWidth, imageHeight, state.viewport)}>
+            <image href={props.imageUrl} width={imageWidth} height={imageHeight} pointerEvents="none" />
+            {visibleObjects.map((object) => <ObjectOverlay key={object.id} object={object} selected={object.id === state.selectedObjectId} width={imageWidth} height={imageHeight} onStart={(kind, event) => { setState((current) => ({ ...current, selectedObjectId: object.id })); beginOverlayDrag(kind, object.id, event); }} />)}
+            {state.view.layers.CALIBRATION && state.calibration.floorBaseline && <line {...lineProps(state.calibration.floorBaseline.start, state.calibration.floorBaseline.end, imageWidth, imageHeight)} stroke="#22d3ee" strokeWidth="3" strokeDasharray="14 9" />}
+            {visibleReferences(state).map((reference) => <MeasurementOverlay key={reference.id} reference={reference} width={imageWidth} height={imageHeight} selected={reference.id === state.selectedReferenceId} zoom={state.viewport.zoom} onSelect={() => { setState((current) => ({ ...current, selectedReferenceId: reference.id })); setTab("DIMENSIONS"); }} />)}
+            <GeometryMeasurementsOverlay state={state} width={imageWidth} height={imageHeight} />
+            {state.objects.flatMap((object) => object.interactionPoints.map((interaction) => ({ ...interaction, objectId: object.id }))).map((interaction) => interaction.visible && <g key={interaction.id}><circle cx={interaction.position.x * imageWidth} cy={interaction.position.y * imageHeight} r="7" fill="#0f172a" stroke="#f59e0b" strokeWidth="2" /><text x={interaction.position.x * imageWidth + 10} y={interaction.position.y * imageHeight + 4} fill="white" fontSize="11">{interaction.name}</text></g>)}
+            {state.humans.filter((human) => human.visible).map((human) => <HumanMannequin key={human.id} human={human} width={imageWidth} height={imageHeight} calibration={state.calibration} reachVisible={state.reachVisible && state.view.layers.HUMAN_REACH} reachMode={state.view.reachMode} debug={debugScene} zoom={state.viewport.zoom} selected={human.id === state.selectedHumanId} onSelect={() => { setState((current) => ({ ...current, selectedHumanId: human.id })); setTab("HUMANS"); }} onStart={(kind, joint, event) => beginOverlayDrag(kind, human.id, event, joint)} />)}
+            {draftStart && draftPoint && <line {...lineProps(draftStart, draftPoint, imageWidth, imageHeight)} stroke="#f97316" strokeWidth="4" strokeDasharray="12 8" />}
+            {debugCoordinates && coordinateDebug && <g pointerEvents="none"><line x1={coordinateDebug.imagePixels.x - 18} y1={coordinateDebug.imagePixels.y} x2={coordinateDebug.imagePixels.x + 18} y2={coordinateDebug.imagePixels.y} stroke="#fb7185" strokeWidth="2" /><line x1={coordinateDebug.imagePixels.x} y1={coordinateDebug.imagePixels.y - 18} x2={coordinateDebug.imagePixels.x} y2={coordinateDebug.imagePixels.y + 18} stroke="#fb7185" strokeWidth="2" /><circle cx={coordinateDebug.imagePixels.x} cy={coordinateDebug.imagePixels.y} r="6" fill="none" stroke="#fff" strokeWidth="2" /></g>}
+          </g>
         </svg>
+        {!geometryReady && <div className="absolute inset-0 grid place-items-center bg-neutral-950/75 text-sm font-semibold text-white">Ładowanie geometrii zdjęcia…</div>}
+        {debugCoordinates && coordinateDebug && <CoordinateDebugPanel coordinates={coordinateDebug} rect={editorRect} />}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-3 text-xs text-muted-foreground"><span>Oryginał pozostaje niezmieniony · geometria zapisywana w układzie 0–1</span><span className={saveStatus === "ERROR" ? "text-red-500" : ""}>{saveStatus === "SAVED" ? "Zapisano" : saveStatus === "SAVING" ? "Zapisywanie…" : saveStatus === "DIRTY" ? "Niezapisane zmiany" : "Błąd zapisu"}</span></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-3 text-xs text-muted-foreground"><span>{pointerOutside ? <strong className="text-amber-600">Poza obszarem zdjęcia</strong> : "Oryginał pozostaje niezmieniony · geometria zapisywana w układzie 0–1"}</span><span className={saveStatus === "ERROR" ? "text-red-500" : ""}>{saveStatus === "SAVED" ? "Zapisano" : saveStatus === "SAVING" ? "Zapisywanie…" : saveStatus === "DIRTY" ? "Niezapisane zmiany" : "Błąd zapisu"}</span></footer>
     </section>
     <aside className="ui-card min-w-0 overflow-hidden">
       <div className={`border-b px-4 py-3 text-xs font-semibold ${quality === "GOOD" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : quality === "ATTENTION_REQUIRED" ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300" : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{qualityLabel(quality)} · kompletność danych {Math.round(completion.ratio * 100)}%</div>
       <nav className="grid grid-cols-5 border-b border-border">{(["SCENE", "OBJECTS", "HUMANS", "DIMENSIONS", "SUGGESTIONS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[10px] font-bold sm:text-xs ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
       <div className="max-h-[76vh] space-y-5 overflow-y-auto p-4">
-        {tab === "SCENE" && <ScenePanel {...props} state={state} quality={quality} completion={completion} save={save} setTab={setTab} />}
+        {tab === "SCENE" && <ScenePanel {...props} state={state} quality={quality} completion={completion} save={save} setTab={setTab} analysisUi={analysisUi} analysisStarting={analysisStarting} analysisActionError={analysisActionError} startPhotoAnalysis={startPhotoAnalysis} worker={worker} restartWorker={restartWorker} showDetectedObjects={showDetectedObjects} setShowDetectedObjects={setShowDetectedObjects} oldCoordinateScene={oldCoordinateScene} />}
         {tab === "OBJECTS" && <ObjectsPanel state={state} selected={selectedObject} update={update} setTool={setTool} setTab={setTab} />}
-        {tab === "HUMANS" && <HumansPanel state={state} selected={selectedHuman} update={update} setTool={setTool} imageWidth={props.imageWidth} imageHeight={props.imageHeight} />}
+        {tab === "HUMANS" && <HumansPanel state={state} selected={selectedHuman} update={update} setTool={setTool} imageWidth={imageWidth} imageHeight={imageHeight} />}
         {tab === "DIMENSIONS" && <DimensionsPanel state={state} draft={draftMeasurement} addReference={addReference} cancelDraft={() => setDraftMeasurement(null)} update={update} setTool={setTool} />}
         {tab === "SUGGESTIONS" && <SuggestionsPanel state={state} update={update} setTab={setTab} setTool={setTool} />}
       </div>
     </aside>
+    {analysisNotice && <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-emerald-500/40 bg-slate-950 p-4 text-sm text-white shadow-2xl"><p>{analysisNotice}</p>{props.detection?.dimension_suggestions?.length ? <button onClick={() => { setTab("SUGGESTIONS"); setAnalysisNotice(null); }} className="mt-2 text-xs font-bold text-cyan-300">Zobacz sugestie →</button> : null}</div>}
   </div>;
 }
 
@@ -184,18 +321,35 @@ function Toolbar({ state, tool, setTool, history, future, undo, redo, update, se
   </div>;
 }
 
-function ScenePanel({ analysisId, title, state, processingStage, detectionError, quality, completion, save, setTab }: Parameters<typeof PhotoSceneEditor>[0] & { state: SceneState; quality: ReturnType<typeof calibrationQuality>; completion: ReturnType<typeof sceneCompleteness>; save: () => Promise<void>; setTab: (tab: Tab) => void }) {
-  async function retry() { const response = await fetch(`/api/photo-scenes/${analysisId}`, { method: "POST" }); if (response.ok) window.location.reload(); }
+function ScenePanel({ title, state, detection, detectionError, detectionCompletedAt, detectionAttempts, detectionVersion, quality, completion, save, setTab, analysisUi, analysisStarting, analysisActionError, startPhotoAnalysis, worker, restartWorker, showDetectedObjects, setShowDetectedObjects, oldCoordinateScene }: Parameters<typeof PhotoSceneEditor>[0] & {
+  state: SceneState; quality: ReturnType<typeof calibrationQuality>; completion: ReturnType<typeof sceneCompleteness>;
+  save: () => Promise<boolean>; setTab: (tab: Tab) => void; analysisUi: ReturnType<typeof derivePhotoAnalysisUi>;
+  analysisStarting: boolean; analysisActionError: string | null; startPhotoAnalysis: () => Promise<void>;
+  worker: { status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown"; controlAllowed: boolean } | null;
+  restartWorker: () => Promise<void>; showDetectedObjects: boolean; setShowDetectedObjects: (value: boolean) => void; oldCoordinateScene: boolean;
+}) {
   const next = nextBestAction(state);
   return <><div><p className="text-xs uppercase tracking-wider text-muted-foreground">Projekt sceny</p><h2 className="mt-1 text-xl font-bold">{title}</h2></div>
+    <section className="space-y-3 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4" aria-labelledby="photo-analysis-heading">
+      <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">Analiza zdjęcia</p><h3 id="photo-analysis-heading" className="mt-1 text-sm font-bold">{analysisUi.label}</h3></div><ScanSearch className="size-5 text-cyan-600" /></div>
+      {analysisUi.indeterminateProgress && <div className="h-1.5 overflow-hidden rounded-full bg-cyan-950/15"><div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-500" /></div>}
+      <dl className="grid grid-cols-2 gap-2 text-xs"><Datum label="Wykryte elementy" value={String(detection?.candidates.length ?? 0)} /><Datum label="Sugestie wymiarów" value={String(detection?.dimension_suggestions?.length ?? 0)} /><Datum label="Geometria" value={String(detection?.geometry_candidates?.length ?? 0)} /><Datum label="Podłoga" value={String(detection?.floor_candidates?.length ?? 0)} /></dl>
+      <p className="text-xs leading-5 text-muted-foreground">{analysisUi.status === "NOT_ANALYZED" ? "Zdjęcie nie zostało jeszcze przeanalizowane." : analysisUi.status === "NO_DETECTIONS" ? "Nie wykryto elementów, które system potrafi automatycznie sklasyfikować. Możesz dodać elementy ręcznie." : analysisUi.status === "WORKER_OFFLINE" ? "Worker analizy zdjęcia nie odpowiada. Ręczna edycja sceny pozostaje dostępna." : analysisUi.status === "READY" ? `Analiza zakończona${detection?.candidates.length ? ` — wykryto ${detection.candidates.length} elementów.` : "."}` : "Worker przygotowuje propozycje; ręczne dane nie zostaną nadpisane."}</p>
+      {analysisActionError && <p role="alert" className="rounded-lg bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">{analysisActionError}</p>}
+      {detectionError && analysisUi.status === "ERROR" && <p role="alert" className="rounded-lg bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">Automatyczna detekcja nie powiodła się. Scenę można nadal zbudować ręcznie.</p>}
+      <button disabled={!analysisUi.buttonEnabled || analysisStarting} onClick={() => void startPhotoAnalysis()} className="ui-button-primary w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"><ScanSearch className="size-4" />{analysisStarting ? "Uruchamiam analizę…" : analysisUi.buttonLabel}</button>
+      {analysisUi.status === "WORKER_OFFLINE" && worker?.controlAllowed && <button onClick={() => void restartWorker()} className="ui-button-secondary w-full justify-center"><WifiOff className="size-4" />Uruchom / zrestartuj Worker</button>}
+      {detection && <label className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-xs"><span>Pokaż wykryte elementy</span><input type="checkbox" checked={showDetectedObjects} onChange={(event) => setShowDetectedObjects(event.target.checked)} /></label>}
+      <details className="text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold text-foreground">Szczegóły techniczne</summary><dl className="mt-2 space-y-1"><div className="flex justify-between gap-3"><dt>Ostatnia analiza</dt><dd>{formatDate(detectionCompletedAt)}</dd></div><div className="flex justify-between gap-3"><dt>Scene Detection</dt><dd>{detectionVersion ?? detection?.detection_version ?? "—"}</dd></div><div className="flex justify-between gap-3"><dt>Próby</dt><dd>{detectionAttempts}</dd></div><div className="flex justify-between gap-3"><dt>Worker</dt><dd>{workerStatusLabel(worker?.status)}</dd></div></dl></details>
+    </section>
+    {oldCoordinateScene && <div className="flex gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p>Ta scena została utworzona w starszej wersji edytora. Sprawdź położenie punktów kalibracyjnych.</p></div>}
     <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-primary">Następny krok</p><h3 className="mt-1 text-sm font-bold">{next.title}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{next.message}</p>{next.cta && <button onClick={() => setTab(next.kind === "HUMAN" ? "HUMANS" : next.kind === "OBJECT" ? "OBJECTS" : "DIMENSIONS")} className="mt-3 text-xs font-bold text-primary">{next.cta} →</button>}</div>
     <div className="grid grid-cols-2 gap-2"><Datum label="Geometria" value={`${completion.categories.geometry.completed}/${completion.categories.geometry.total}`} /><Datum label="Kalibracja" value={`${completion.categories.calibration.completed}/${completion.categories.calibration.total}`} /><Datum label="Obiekty" value={`${completion.categories.objects.completed}/${completion.categories.objects.total}`} /><Datum label="Człowiek" value={completion.categories.human.completed ? "Profil kompletny" : "Wymaga ustawienia"} /></div>
     {quality !== "GOOD" && <ActionCard icon={Ruler} title="Potrzebna kalibracja" text="Aby poprawnie ustawić postać, dodaj przynajmniej 2–3 wymiary referencyjne w różnych obszarach zdjęcia." action="Przejdź do wymiarów" onClick={() => setTab("DIMENSIONS")} />}
     {completion.missingCritical > 0 && <ActionCard icon={Sparkles} title={`${completion.missingCritical} ważnych danych do uzupełnienia`} text="System przygotował sugestie na podstawie potwierdzonych obiektów." action="Pokaż sugestie" onClick={() => setTab("SUGGESTIONS")} />}
-    {detectionError && <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm"><p>Detekcja nie powiodła się. Scenę można zbudować ręcznie.</p><button onClick={() => void retry()} className="ui-button-secondary mt-3 w-full justify-center">Ponów detekcję</button></div>}
     <p className="rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">To techniczny model 2D/pseudo-2.5D. Nie wykonuje oceny ergonomicznej ani nie odtwarza niewidocznej głębokości.</p>
     <button onClick={() => void save()} className="ui-button-primary w-full justify-center"><Save className="size-4" />Zapisz teraz</button>
-    <p className="text-center text-[11px] text-muted-foreground">Etap: {stageLabel(processingStage)}</p></>;
+    </>;
 }
 
 function ObjectsPanel({ state, selected, update, setTool, setTab }: { state: SceneState; selected: SceneObject | null; update: (fn: (state: SceneState) => SceneState) => void; setTool: (tool: Tool) => void; setTab: (tab: Tab) => void }) {
@@ -244,7 +398,7 @@ function DimensionsPanel({ state, draft, addReference, cancelDraft, update, setT
   const assistant = calibrationAssistant(state.calibration);
   return <><div className="grid grid-cols-2 gap-2"><button onClick={() => setTool("REFERENCE")} className="ui-button-primary justify-center"><Ruler className="size-4" />Nowy wymiar</button><button onClick={() => setTool("FLOOR")} className="ui-button-secondary justify-center"><LocateFixed className="size-4" />Podłoga</button></div>
     <p className="text-xs leading-5 text-muted-foreground">Narysuj odcinek na zdjęciu, a następnie opisz jego rodzaj i rzeczywistą długość. Referencje z różnych miejsc budują lokalny model skali.</p>
-    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs"><strong>Model skali: {scaleStatusLabel(state.calibration.scaleField.status)}</strong><p className="mt-1 leading-5 text-muted-foreground">{assistant.message}</p>{state.calibration.scaleField.residualRms !== null && <small className="mt-1 block">Błąd modelu: {(state.calibration.scaleField.residualRms * 100).toFixed(1)}%</small>}</div>
+    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs"><strong>Model skali: {scaleStatusLabel(state.calibration.scaleField.status)}</strong><p className="mt-1 leading-5 text-muted-foreground">{assistant.message}</p>{state.calibration.scaleField.residualRms !== null && <small className="mt-1 block">Błąd modelu: {(state.calibration.scaleField.residualRms * 100).toFixed(1)}%</small>}<button onClick={() => update((current) => { const calibration = rebuildPerspectiveField(current.calibration); calibration.status = calibrationStatus(calibration); return { ...current, calibration }; })} className="ui-button-secondary mt-3 w-full justify-center"><RotateCcw className="size-4" />Przelicz kalibrację</button></div>
     {draft && <ReferenceDraftForm objectName={state.objects.find((object) => object.id === draft.objectId)?.name ?? null} add={addReference} cancel={cancelDraft} />}
     <Field label="Widoczne pomiary"><select value={state.measurementFilter} onChange={(event) => update((state) => ({ ...state, measurementFilter: event.target.value as SceneState["measurementFilter"] }))} className={controlClass}><option value="ALL">Wszystkie</option><option value="ACTIVE">Tylko aktywne</option><option value="SELECTED_OBJECT">Wybrany obiekt</option><option value="CALIBRATION">Tylko kalibracja</option></select></Field>
     <div className="space-y-2">{state.calibration.references.map((reference) => <ReferenceCard key={reference.id} reference={reference} update={update} />)}</div>
@@ -379,13 +533,6 @@ function addInteractionPoint(update: (fn: (state: SceneState) => SceneState) => 
   updateObject(update, object.id, { interactionPoints: [...object.interactionPoints, { id: crypto.randomUUID(), name, type, position: { x: clamp(position.x), y: clamp(position.y) }, visible: true }] });
 }
 function newObject(bbox: NormalizedBox): SceneObject { return { id: crypto.randomUUID(), sourceClass: null, type: "OTHER", name: "Nowy element", bbox, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null }; }
-function mergeDetections(state: SceneState, detection: SceneDetection | null): SceneState {
-  if (!detection) return state;
-  const objects = state.objects.length ? state.objects : detection.candidates.map((candidate) => ({ ...newObject(candidate.bounding_box), id: candidate.id, sourceClass: candidate.source_class, type: candidate.suggested_scene_type, name: objectLabels[candidate.suggested_scene_type], detectorConfidence: candidate.confidence, source: candidate.source, status: "DETECTED" as const }));
-  const known = new Set(state.workerSuggestions.map((suggestion) => suggestion.id));
-  const workerSuggestions = [...state.workerSuggestions, ...(detection.dimension_suggestions ?? []).filter((suggestion) => !known.has(suggestion.id))];
-  return { ...state, objects, workerSuggestions };
-}
 function updateObject(update: (fn: (state: SceneState) => SceneState) => void, id: string, patch: Partial<SceneObject>) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id ? { ...object, ...patch } : object) })); }
 function updateMeasurement(update: (fn: (state: SceneState) => SceneState) => void, id: string, key: ObjectDimensionKey, value: number | null) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id ? { ...object, measurements: { ...object.measurements, [key]: value }, status: object.status === "DETECTED" ? "USER_MODIFIED" : object.status } : object) })); }
 
@@ -411,8 +558,8 @@ function moveBox(box: NormalizedBox, dx: number, dy: number): NormalizedBox { re
 function resizeBox(box: NormalizedBox, dx: number, dy: number): NormalizedBox { return { ...box, width: Math.max(.02, Math.min(1 - box.x, box.width + dx)), height: Math.max(.02, Math.min(1 - box.y, box.height + dy)) }; }
 function svgBox(box: NormalizedBox, width: number, height: number) { return { x: box.x * width, y: box.y * height, width: box.width * width, height: box.height * height }; }
 function lineProps(a: NormalizedPoint, b: NormalizedPoint, width: number, height: number) { return { x1: a.x * width, y1: a.y * height, x2: b.x * width, y2: b.y * height }; }
-function pointFromSvg(event: React.PointerEvent<SVGElement>): NormalizedPoint { const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect(); return rect ? { x: clamp((event.clientX - rect.left) / rect.width), y: clamp((event.clientY - rect.top) / rect.height) } : { x: 0, y: 0 }; }
 function clamp(value: number, min = 0, max = 1) { return Math.max(min, Math.min(max, value)); }
+function CoordinateDebugPanel({ coordinates, rect }: { coordinates: PointerCoordinates; rect: EditorViewportRect | null }) { const display = coordinates.displayedImageRect, transformed = coordinates.transformedImageRect; return <div className="pointer-events-none absolute left-3 top-3 z-30 max-w-[min(360px,calc(100%-1.5rem))] rounded-lg border border-rose-400/60 bg-slate-950/90 p-3 font-mono text-[10px] leading-4 text-rose-100"><strong className="text-rose-300">Coordinate Engine V2</strong><div>screen: {coordinates.screen.x.toFixed(1)}, {coordinates.screen.y.toFixed(1)}</div><div>viewport: {coordinates.viewport.x.toFixed(1)}, {coordinates.viewport.y.toFixed(1)} / {rect?.width.toFixed(1) ?? "—"}×{rect?.height.toFixed(1) ?? "—"}</div><div>normalized: {coordinates.imageNormalized.x.toFixed(6)}, {coordinates.imageNormalized.y.toFixed(6)}</div><div>pixels: {coordinates.imagePixels.x.toFixed(1)}, {coordinates.imagePixels.y.toFixed(1)}</div><div>display rect: {display.left.toFixed(1)}, {display.top.toFixed(1)}, {display.width.toFixed(1)}×{display.height.toFixed(1)}</div><div>zoomed rect: {transformed.left.toFixed(1)}, {transformed.top.toFixed(1)}, {transformed.width.toFixed(1)}×{transformed.height.toFixed(1)}</div><div>inside: {coordinates.insideImage ? "true" : "false"}</div></div>; }
 function ToolButton({ icon: Icon, label, active = false, disabled = false, onClick }: { icon: typeof Move; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) { return <button title={label} aria-pressed={active} disabled={disabled} onClick={onClick} className={`flex min-h-10 items-center gap-2 rounded-lg px-2 text-xs font-semibold disabled:opacity-30 ${active ? "bg-primary text-white" : "bg-muted hover:bg-primary/10"}`}><Icon className="size-4" /><span className="hidden lg:inline">{label}</span></button>; }
 function ToolbarGroup({ label, children }: { label: string; children: React.ReactNode }) { return <div className="flex items-center gap-1 rounded-xl border border-border p-1" aria-label={label}>{children}</div>; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-xs font-semibold">{label}<span className="mt-1 block">{children}</span></label>; }
@@ -421,7 +568,8 @@ function Datum({ label, value }: { label: string; value: string }) { return <div
 function ActionCard({ icon: Icon, title, text, action, onClick }: { icon: typeof Ruler; title: string; text: string; action: string; onClick: () => void }) { return <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3"><div className="flex gap-2"><Icon className="mt-0.5 size-4 shrink-0" /><div><strong className="text-sm">{title}</strong><p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p></div></div><button onClick={onClick} className="mt-3 text-xs font-semibold text-primary">{action} →</button></div>; }
 function EmptyState({ text }: { text: string }) { return <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs leading-5 text-muted-foreground"><HelpCircle className="mx-auto mb-2 size-5" />{text}</div>; }
 function qualityLabel(quality: ReturnType<typeof calibrationQuality>) { return quality === "GOOD" ? "Dobra kalibracja" : quality === "PARTIAL" ? "Częściowa kalibracja" : quality === "ATTENTION_REQUIRED" ? "Kalibracja wymaga uwagi" : "Brak kalibracji"; }
-function stageLabel(stage: string | null) { return stage === "scene-ready" ? "Scena gotowa" : stage === "scene-detection-failed" ? "Tryb ręczny" : stage === "scene-detection-processing" ? "Wykrywanie obiektów" : "Oczekiwanie"; }
+function formatDate(value: string | null) { if (!value) return "—"; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString("pl-PL") : "—"; }
+function workerStatusLabel(status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown" | undefined) { return ({ online: "Online", offline: "Offline", degraded: "Ograniczony", restarting: "Restart", crash_loop: "Błąd uruchamiania", unknown: "Nieznany" })[status ?? "unknown"]; }
 function tabLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Człowiek", DIMENSIONS: "Wymiary", SUGGESTIONS: "Sugestie" })[tab]; }
 function tabShortLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Osoby", DIMENSIONS: "Wymiary", SUGGESTIONS: "Sugestie" })[tab]; }
 function priorityLabel(priority: "CRITICAL" | "RECOMMENDED" | "OPTIONAL") { return priority === "CRITICAL" ? "Krytyczne" : priority === "RECOMMENDED" ? "Zalecane" : "Opcjonalne"; }

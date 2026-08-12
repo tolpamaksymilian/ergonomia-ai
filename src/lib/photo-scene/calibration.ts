@@ -42,7 +42,10 @@ export function rebuildPerspectiveField(calibration: SceneCalibration): SceneCal
   coefficients = fitInverseAffine(inliers);
   if (!coefficients) return applyResiduals({ ...calibration, scaleField: localOrVerticalField(candidates) }, candidates);
   const rms = Math.sqrt(inliers.reduce((sum, reference) => sum + normalizedResidual(reference, coefficients!) ** 2, 0) / inliers.length);
-  const status: PerspectiveScaleStatus = inliers.length >= 3 && rms <= .12 ? "PERSPECTIVE_GOOD" : rms <= .28 ? "PERSPECTIVE_PARTIAL" : "INCONSISTENT";
+  const spatialCoverage = calibrationSpatialCoverage(inliers);
+  const status: PerspectiveScaleStatus = inliers.length >= 3 && rms <= .12 && spatialCoverage.adequate
+    ? "PERSPECTIVE_GOOD"
+    : rms <= .28 ? "PERSPECTIVE_PARTIAL" : "INCONSISTENT";
   const field: PerspectiveScaleField = { status, coefficients, model: "INVERSE_AFFINE_2D", anchorCount: candidates.length, inlierCount: inliers.length, residualRms: rms, uncertainty: Math.min(1, rms + 1 / Math.max(3, inliers.length) * .18), generatedAt: new Date().toISOString() };
   return applyResiduals({ ...calibration, scaleField: field }, candidates);
 }
@@ -76,6 +79,15 @@ export function calibrationQuality(calibration: SceneCalibration): CalibrationQu
   return "PARTIAL";
 }
 
+export function calibrationSpatialCoverage(references: CalibrationReference[]) {
+  if (!references.length) return { xSpan: 0, ySpan: 0, diagonalSpan: 0, adequate: false };
+  const points = references.map(midpoint);
+  const xSpan = Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x));
+  const ySpan = Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y));
+  const diagonalSpan = Math.hypot(xSpan, ySpan);
+  return { xSpan, ySpan, diagonalSpan, adequate: diagonalSpan >= .38 && (xSpan >= .25 || ySpan >= .25) };
+}
+
 export function calibrationStatus(calibration: SceneCalibration): SceneCalibration["status"] {
   const quality = calibrationQuality(calibration);
   return quality === "NONE" ? "UNCALIBRATED" : quality === "GOOD" ? "CALIBRATED_2D" : "PARTIALLY_CALIBRATED";
@@ -88,6 +100,7 @@ export function calibrationAssistant(calibration: SceneCalibration) {
   if (!left) return { region: "LEFT" as const, message: "Dodaj pionową referencję po lewej stronie sceny, aby opisać zmianę skali." };
   if (!right) return { region: "RIGHT" as const, message: "Dodaj pionową referencję po prawej stronie sceny, aby lepiej skalować postać w tym obszarze." };
   if (active.length < 3) return { region: "CENTER" as const, message: "Dodaj trzeci wymiar pionowy w innej głębokości sceny." };
+  if (!calibrationSpatialCoverage(active).adequate) return { region: "CENTER" as const, message: "Referencje są skupione zbyt blisko siebie. Dodaj wymiar w odległym obszarze zdjęcia; jakość pozostaje lokalna/częściowa." };
   if (calibration.scaleField.status === "INCONSISTENT") return { region: "OUTLIER" as const, message: "Sprawdź referencje oznaczone jako odstające lub potwierdź je ręcznie." };
   return { region: "NONE" as const, message: "Pole skali ma wystarczające pokrycie do projektowania 2D." };
 }

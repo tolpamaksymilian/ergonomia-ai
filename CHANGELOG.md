@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0-beta.1] - 2026-08-12
+
+### Added
+
+- Coordinate Engine V2 z jednym odwracalnym mapowaniem screen ↔ viewport ↔ displayed image ↔ normalized image ↔ intrinsic pixels.
+- Jawna kontrola „Analizuj zdjęcie”, stany kolejki/Workera, bezpieczna ponowna analiza oraz panel wyników Scene Detection.
+- Tryb diagnostyczny `?debugSceneCoordinates=1` i testy regresyjne dla formatów pionowych, ultrawide, zoomu, panowania i resize.
+
+### Changed
+
+- Kalibracja wymaga przestrzennego rozłożenia referencji, aby uzyskać status „Dobra”.
+- Overlay obrazu, obiektów, pomiarów i postaci korzysta z jednej transformacji SVG bez niezależnego CSS scale/translate.
+
 ## [0.14.0-beta.1] - 2026-08-12
 
 ### Added

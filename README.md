@@ -1,13 +1,13 @@
 # Ergonomia AI
 
-Wersja `0.14.0-beta.1` udostępnia dwa niezależne tryby pracy:
+Wersja `0.15.0-beta.1` udostępnia dwa niezależne tryby pracy:
 
 1. **Analiza filmu** — istniejący pipeline Pose, Metrics, Risk, RULA, REBA, OWAS i raport.
-2. **Projekt stanowiska ze zdjęcia — Beta** — prywatne zdjęcie, perspektywiczne pole skali, techniczny manekin z niezmiennymi długościami segmentów, geometria wymiarów i sugestie Workera. Ten tryb nie wykonuje jeszcze oceny ergonomicznej.
+2. **Projekt stanowiska ze zdjęcia — Beta** — prywatne zdjęcie, precyzyjny Coordinate Engine V2, jawna kontrola analizy zdjęcia, perspektywiczne pole skali, techniczny manekin, geometria wymiarów i sugestie Workera. Ten tryb nie wykonuje jeszcze oceny ergonomicznej.
 
 System do analizy ruchu z filmu oraz projektowania interaktywnej sceny stanowiska na podstawie zdjęcia.
 
-**Aktualna wersja: v0.14.0-beta.1 — Perspective-aware Photo Scene Builder Beta.**
+**Aktualna wersja: v0.15.0-beta.1 — Coordinate Engine V2 and Photo Analysis Control Beta.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 
