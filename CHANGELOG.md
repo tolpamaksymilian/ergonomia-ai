@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0-beta.1] - 2026-08-12
+
+### Added
+
+- Photo Scene Builder v0.2: wielopunktowa kalibracja lokalna, wiele postaci i typowane wymiary obiektów.
+- Antropometrycznie ograniczone IK z czytelnym stanem przekroczenia naturalnego zasięgu.
+- Sugestie brakujących wymiarów, kompletność sceny i techniczne insights bez scoringu ergonomicznego.
+
+### Changed
+
+- Schemat sceny 1.1 zachowuje automatyczną normalizację istniejących dokumentów 1.0.
+- Edytor ma uporządkowany toolbar oraz zakładki Scena, Obiekty, Osoby, Wymiary i Sugestie.
+
 ## [0.12.0-beta.1] - 2026-08-12
 
 ### Added

@@ -63,7 +63,7 @@ const stages = [
   { id: "company-method-specs", title: "Specyfikacja metod zakładowych", description: "Audyt źródłowego skoroszytu i wersjonowane reguły JSON.", status: "completed", group: "risk" },
   { id: "owas-company", title: "OWAS zakładowy", description: "Klasyfikacja pozycji z jawnym manualnym obciążeniem.", status: "completed", group: "risk" },
   { id: "analysis-context", title: "Kontekst analizy i stanowiska", description: "Wersjonowany kontekst, słownik stanowisk i wielokrotne kategorie.", status: "completed", group: "infrastructure" },
-  { id: "photo-scene-builder", title: "Projektowanie stanowiska ze zdjęcia — Beta", description: "Prywatny obraz, detekcja kandydatów, kalibracja 2D i edytowalny manekin.", status: "in_progress", group: "scene_builder" },
+  { id: "photo-scene-builder", title: "Projektowanie stanowiska ze zdjęcia — Beta", description: "Prywatny obraz, lokalna kalibracja wielopunktowa, typowane wymiary obiektów i wiele modeli operatorów.", status: "in_progress", group: "scene_builder" },
   { id: "photo-scene-worker", title: "Scene Detection Worker", description: "Automatyczny, odseparowany etap YOLOX-X z ręcznym fallbackiem.", status: "in_progress", group: "scene_builder" },
   { id: "photo-scene-assessment", title: "Ocena ergonomii projektowanej sceny", description: "Przyszły silnik korzystający z zatwierdzonej geometrii sceny.", status: "planned", group: "scene_builder" },
   { id: "company-method-inputs", title: "Dane kontekstowe metod", description: "Prywatny zapis i przeliczanie bez ponownego uruchamiania GPU.", status: "completed", group: "risk" },
@@ -84,7 +84,7 @@ const stages = [
   { id: "pipeline-supervisor", title: "Pipeline Supervisor", description: "Automatyczny start, heartbeat, preflight i kontrolowany restart lokalnego pipeline’u.", status: "completed", group: "infrastructure" },
   { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
   { id: "history-v2", title: "Historia analiz 2.0", description: "Wyszukiwanie, filtry URL, kategorie AND/OR i paginacja serwerowa.", status: "completed", group: "infrastructure" },
-  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu oraz Photo Scenario Builder w v0.12.0-beta.1.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu oraz Photo Scenario Builder w v0.13.0-beta.1.", status: "completed", group: "infrastructure" },
   { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
   { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
@@ -110,8 +110,8 @@ export const projectStageGroups: ReadonlyArray<{
 export const projectStatus = {
   projectName: "Ergonomia AI",
   versions: {
-    application: "v0.12.0-beta.1",
-    sceneBuilder: "scene-builder-v0.1-beta.1",
+    application: "v0.13.0-beta.1",
+    sceneBuilder: "photo-scene-builder-v0.2-beta.1",
     sceneDetection: "scene-detection-v0.1-beta.1",
     worker: "v0.7.0-beta.1",
     supervisor: "pipeline-supervisor-v1.0-beta.1",

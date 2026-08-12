@@ -4,7 +4,7 @@ import { ArrowLeft, Image as ImageIcon } from "lucide-react";
 
 import { PhotoSceneEditor } from "@/components/photo-scene/photo-scene-editor";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { emptySceneState, validateSceneState } from "@/lib/photo-scene/schema";
+import { normalizeSceneState } from "@/lib/photo-scene/schema";
 import { requireUser } from "@/lib/auth/access";
 import type { SceneDetection, SceneState } from "@/types/photo-scene";
 
@@ -27,13 +27,13 @@ export default async function PhotoScenePage({ params }: { params: Promise<{ id:
   if (!scene || !analysis.source_image_path) notFound();
   const { data: signed } = await supabase.storage.from("analysis-scenes").createSignedUrl(analysis.source_image_path, 3600);
   if (!signed?.signedUrl) throw new Error("Nie udało się przygotować prywatnego podglądu zdjęcia.");
-  const state: SceneState = validateSceneState(scene.scene_state) ? scene.scene_state : emptySceneState();
+  const state: SceneState = normalizeSceneState(scene.scene_state);
 
   return <main className="ui-page min-h-screen px-3 py-4 sm:px-6">
     <div className="mx-auto max-w-[1800px] space-y-4">
       <header className="ui-surface flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-3"><Link href="/panel/analizy" className="ui-button-secondary"><ArrowLeft className="size-4" />Historia</Link><div><p className="text-xs font-bold uppercase tracking-wider text-primary">Projekt ze zdjęcia · Beta</p><h1 className="text-xl font-bold sm:text-2xl">{analysis.title}</h1></div></div>
-        <div className="flex items-center gap-2"><span className="hidden rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary sm:inline-flex"><ImageIcon className="mr-2 size-4" />Scene Builder v0.1</span><ThemeToggle /></div>
+        <div className="flex items-center gap-2"><span className="hidden rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary sm:inline-flex"><ImageIcon className="mr-2 size-4" />Scene Builder v0.2 Beta</span><ThemeToggle /></div>
       </header>
       <PhotoSceneEditor
         analysisId={id}

@@ -11,7 +11,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Nieprawidłowy JSON." }, { status: 400 }); }
   const state = (body as { scene_state?: unknown } | null)?.scene_state;
   if (!validateSceneState(state)) return NextResponse.json({ error: "Nieprawidłowy stan sceny." }, { status: 422 });
-  const { error } = await supabase.from("photo_scenes").update({ scene_state: state, last_saved_at: new Date().toISOString() }).eq("analysis_id", id);
+  const { error } = await supabase.from("photo_scenes").update({
+    scene_state: state,
+    scene_schema_version: "1.1",
+    scene_builder_version: "photo-scene-builder-v0.2-beta.1",
+    last_saved_at: new Date().toISOString(),
+  }).eq("analysis_id", id);
   if (error) return NextResponse.json({ error: "Nie udało się zapisać sceny." }, { status: 500 });
   return NextResponse.json({ saved: true, saved_at: new Date().toISOString() });
 }

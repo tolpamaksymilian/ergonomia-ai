@@ -1,13 +1,13 @@
 # Ergonomia AI
 
-Wersja `0.12.0-beta.1` udostępnia dwa niezależne tryby pracy:
+Wersja `0.13.0-beta.1` udostępnia dwa niezależne tryby pracy:
 
 1. **Analiza filmu** — istniejący pipeline Pose, Metrics, Risk, RULA, REBA, OWAS i raport.
-2. **Projekt stanowiska ze zdjęcia — Beta** — prywatne zdjęcie, detekcja kandydatów elementów, ręczna kalibracja 2D oraz interaktywny model człowieka. Ten tryb nie wykonuje jeszcze oceny ergonomicznej.
+2. **Projekt stanowiska ze zdjęcia — Beta** — prywatne zdjęcie, detekcja kandydatów elementów, wielopunktowa kalibracja lokalna, typowane wymiary obiektów i wiele ograniczonych antropometrycznie modeli człowieka. Ten tryb nie wykonuje jeszcze oceny ergonomicznej.
 
 System do analizy ruchu z filmu oraz projektowania interaktywnej sceny stanowiska na podstawie zdjęcia.
 
-**Aktualna wersja: v0.12.0-beta.1 — Photo Scenario Builder Beta.**
+**Aktualna wersja: v0.13.0-beta.1 — Intelligent Photo Scene Builder Beta.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 
