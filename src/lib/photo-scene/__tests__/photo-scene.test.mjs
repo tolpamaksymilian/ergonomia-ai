@@ -1,90 +1,183 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { createHuman } from "../anthropometry.ts";
-import { calibrationQuality, estimateLocalScale } from "../calibration.ts";
-import { distance, solveTwoBoneIk } from "../geometry.ts";
-import { objectCompleteness } from "../object-dimensions.ts";
+import { buildAnthropometricPose, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, renderedHeightPixels } from "../anthropometry.ts";
+import { calibrationAssistant, calibrationQuality, estimateLocalScale, rebuildPerspectiveField } from "../calibration.ts";
+import { distance, moveHumanJointWithConstraints, segmentLengthPixels, solveTwoBoneIk } from "../geometry.ts";
+import { layoutMeasurementLabels } from "../label-layout.ts";
+import { dimensionsFor, objectCompleteness } from "../object-dimensions.ts";
 import { emptyMeasurements, emptySceneState, normalizeSceneState, validateSceneState } from "../schema.ts";
-import { missingDimensionSuggestions, sceneCompleteness } from "../suggestions.ts";
+import { missingDimensionSuggestions, nextBestAction, sceneCompleteness } from "../suggestions.ts";
+
+const WIDTH = 1200;
+const HEIGHT = 900;
 
 function reference(id, x, y, pixels, cm, type = "HEIGHT") {
-  return { id, name: id, dimensionType: type, valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, affectsScale: true, source: "USER_PROVIDED" };
+  return { id, name: id, dimensionType: type, valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, affectsScale: true, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
 }
 
-test("empty schema 1.1 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
+function sceneObject(id = "table", type = "TABLE") {
+  return { id, sourceClass: type === "TABLE" ? "dining table" : null, type, name: id, bbox: { x: .1, y: .3, width: .5, height: .4 }, detectorConfidence: null, source: "USER", status: "USER_CONFIRMED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null };
+}
 
-test("multipoint calibration uses nearby references and rejects a distant outlier", () => {
+test("empty schema 1.2 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
+
+test("consistent non-collinear references create a perspective scale field", () => {
   const scene = emptySceneState();
-  scene.calibration.references = [reference("near-a", .2, .8, 300, 100), reference("near-b", .3, .7, 315, 100), reference("far-outlier", .95, .15, 900, 100)];
-  const scale = estimateLocalScale(scene.calibration, { x: .25, y: .75 }, 1000, 1000);
-  assert.ok(scale);
-  assert.ok(scale.pixelsPerCm > 2.9 && scale.pixelsPerCm < 3.3);
-  assert.ok(scale.referencesUsed.includes("near-a"));
+  scene.calibration.references = [reference("a", .15, .85, 400, 100), reference("b", .82, .78, 350, 100), reference("c", .52, .28, 210, 100)];
+  const calibration = rebuildPerspectiveField(scene.calibration);
+  assert.equal(calibration.scaleField.status, "PERSPECTIVE_GOOD");
+  assert.equal(calibration.scaleField.model, "INVERSE_AFFINE_2D");
+  assert.equal(calibration.scaleField.inlierCount, 3);
 });
 
-test("three consistent references produce good calibration quality", () => {
+test("a distant inconsistent reference is marked as outlier and excluded", () => {
   const scene = emptySceneState();
-  scene.calibration.references = [reference("a", .2, .8, 300, 100), reference("b", .5, .7, 310, 100), reference("c", .8, .6, 290, 100)];
-  assert.equal(calibrationQuality(scene.calibration), "GOOD");
+  scene.calibration.references = [
+    reference("a", .1, .85, 390, 100), reference("b", .8, .82, 370, 100), reference("c", .45, .38, 240, 100),
+    reference("bad", .92, .2, 900, 100),
+  ];
+  const calibration = rebuildPerspectiveField(scene.calibration);
+  assert.equal(calibration.references.find((item) => item.id === "bad")?.residualStatus, "OUTLIER");
+  assert.ok(calibration.scaleField.inlierCount < calibration.scaleField.anchorCount);
 });
 
-test("single reference remains partial rather than pretending full calibration", () => {
+test("single reference remains local only", () => {
   const scene = emptySceneState(); scene.calibration.references = [reference("a", .5, .8, 300, 100)];
+  assert.equal(rebuildPerspectiveField(scene.calibration).scaleField.status, "LOCAL_ONLY");
   assert.equal(calibrationQuality(scene.calibration), "PARTIAL");
 });
 
-test("two-bone IK preserves both segment lengths for a reachable target", () => {
-  const result = solveTwoBoneIk({ x: 0, y: 0 }, { x: .3, y: .2 }, .25, .2);
-  assert.ok(Math.abs(distance({ x: 0, y: 0 }, result.joint) - .25) < 1e-9);
-  assert.ok(Math.abs(distance(result.joint, result.end) - .2) < 1e-6);
-  assert.equal(result.reachState, "NATURAL");
+test("calibration assistant points to a missing scene region", () => {
+  const scene = emptySceneState(); scene.calibration.references = [reference("right", .8, .7, 300, 100)];
+  assert.equal(calibrationAssistant(scene.calibration).region, "LEFT");
 });
 
-test("unreachable IK target never stretches and reports out of reach", () => {
-  const result = solveTwoBoneIk({ x: 0, y: 0 }, { x: 2, y: 0 }, .3, .2);
-  assert.ok(Math.abs(distance({ x: 0, y: 0 }, result.end) - .5) < 1e-9);
-  assert.equal(result.reachState, "OUT_OF_REACH");
-});
-
-test("near-limit target reports comfort exceeded", () => {
-  assert.equal(solveTwoBoneIk({ x: 0, y: 0 }, { x: .46, y: 0 }, .3, .2).reachState, "COMFORT_EXCEEDED");
-});
-
-test("table suggestions ask for work surface height and geometry", () => {
+test("170 cm human preserves real height at A B and C while pixel size changes", () => {
   const scene = emptySceneState();
-  scene.objects.push({ id: "table", sourceClass: "dining table", type: "TABLE", name: "Stół", bbox: { x: .1, y: .3, width: .5, height: .4 }, detectorConfidence: null, source: "YOLOX_X_COCO", status: "USER_CONFIRMED", visible: true, locked: false, measurements: emptyMeasurements(), referencePoint: null });
+  scene.calibration.references = [reference("a", .15, .85, 400, 100), reference("b", .82, .78, 350, 100), reference("c", .52, .28, 210, 100)];
+  const calibration = rebuildPerspectiveField(scene.calibration), profile = profileFromHeight("Operator", 170);
+  const renderedPixels = [];
+  for (const point of [{ x: .2, y: .82 }, { x: .52, y: .58 }, { x: .7, y: .35 }]) {
+    const scale = estimateLocalScale(calibration, point, WIDTH, HEIGHT); assert.ok(scale);
+    const pose = buildAnthropometricPose(profile, point, scale.pixelsPerCm, WIDTH, HEIGHT, "STANDING", 0);
+    const actualCm = renderedHeightPixels(pose, HEIGHT) / scale.pixelsPerCm;
+    assert.ok(Math.abs(actualCm - 170) < .001);
+    renderedPixels.push(renderedHeightPixels(pose, HEIGHT));
+  }
+  assert.ok(Math.max(...renderedPixels) - Math.min(...renderedPixels) > 40);
+});
+
+test("perspective workstation regression fixture remains finite and correctly scaled", () => {
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/perspective-scene-v12.json", import.meta.url), "utf8"));
+  const scene = emptySceneState();
+  scene.calibration.references = fixture.references.map((item) => reference(item.id, item.x, item.y, item.pixels, item.cm));
+  const calibration = rebuildPerspectiveField(scene.calibration), profile = profileFromHeight("Fixture operator", fixture.human_height_cm);
+  for (const point of fixture.standing_points) {
+    const scale = estimateLocalScale(calibration, point, fixture.image.width, fixture.image.height); assert.ok(scale && Number.isFinite(scale.pixelsPerCm));
+    const pose = buildAnthropometricPose(profile, point, scale.pixelsPerCm, fixture.image.width, fixture.image.height, "STANDING", 0);
+    assert.ok(Object.values(pose.joints).every((joint) => Number.isFinite(joint.x) && Number.isFinite(joint.y)));
+    assert.ok(Math.abs(renderedHeightPixels(pose, fixture.image.height) / scale.pixelsPerCm - fixture.human_height_cm) < .001);
+  }
+});
+
+test("two-bone IK preserves both segment lengths for reachable and extreme targets", () => {
+  const reachable = solveTwoBoneIk({ x: 0, y: 0 }, { x: .3, y: .2 }, .25, .2);
+  assert.ok(Math.abs(distance({ x: 0, y: 0 }, reachable.joint) - .25) < 1e-9);
+  assert.ok(Math.abs(distance(reachable.joint, reachable.end) - .2) < 1e-6);
+  const extreme = solveTwoBoneIk({ x: 0, y: 0 }, { x: 20, y: -10 }, .3, .2);
+  assert.ok(Math.abs(distance({ x: 0, y: 0 }, extreme.end) - .5) < 1e-9);
+  assert.equal(extreme.reachState, "OUT_OF_REACH");
+});
+
+test("100 deterministic wrist targets never change arm segment lengths", () => {
+  let human = createHuman("Operator", "#f97316");
+  human.placement.lastScalePxPerCm = 3;
+  const upper = human.constraints.upperArm.fixedLengthCm * 3, forearm = human.constraints.forearm.fixedLengthCm * 3;
+  for (let index = 0; index < 100; index += 1) {
+    const angle = index * 2.399963, radius = 40 + index % 11 * 18;
+    const shoulder = human.pose.joints.leftShoulder;
+    const target = { x: shoulder.x + Math.cos(angle) * radius / WIDTH, y: shoulder.y + Math.sin(angle) * radius / HEIGHT };
+    human = moveHumanJointWithConstraints(human, "leftWrist", target, 3, WIDTH, HEIGHT);
+    assert.ok(Math.abs(segmentLengthPixels(human, "leftShoulder", "leftElbow", WIDTH, HEIGHT) - upper) < 1e-6);
+    assert.ok(Math.abs(segmentLengthPixels(human, "leftElbow", "leftWrist", WIDTH, HEIGHT) - forearm) < 1e-6);
+  }
+});
+
+test("100 deterministic ankle targets never change leg segment lengths", () => {
+  let human = createHuman("Operator", "#06b6d4");
+  const thigh = human.constraints.thigh.fixedLengthCm * 2.8, lower = human.constraints.lowerLeg.fixedLengthCm * 2.8;
+  for (let index = 0; index < 100; index += 1) {
+    const angle = index * 1.618, radius = 80 + index % 9 * 22, hip = human.pose.joints.rightHip;
+    human = moveHumanJointWithConstraints(human, "rightAnkle", { x: hip.x + Math.cos(angle) * radius / WIDTH, y: hip.y + Math.sin(angle) * radius / HEIGHT }, 2.8, WIDTH, HEIGHT);
+    assert.ok(Math.abs(segmentLengthPixels(human, "rightHip", "rightKnee", WIDTH, HEIGHT) - thigh) < 1e-6);
+    assert.ok(Math.abs(segmentLengthPixels(human, "rightKnee", "rightAnkle", WIDTH, HEIGHT) - lower) < 1e-6);
+  }
+});
+
+test("bend preference remains stable around near-collinear targets", () => {
+  let human = createHuman("Operator", "#a78bfa");
+  const shoulder = human.pose.joints.rightShoulder;
+  for (const offset of [-.0002, -.0001, 0, .0001, .0002]) human = moveHumanJointWithConstraints(human, "rightWrist", { x: shoulder.x + .15, y: shoulder.y + offset }, 3, WIDTH, HEIGHT);
+  assert.equal(human.pose.bendPreference.rightArm, -1);
+});
+
+test("dimension profiles cover table rack chair monitor and custom object", () => {
+  assert.deepEqual(dimensionsFor("TABLE").map((item) => item.key), ["workSurfaceHeightCm", "widthCm", "depthCm"]);
+  assert.ok(dimensionsFor("RACK").some((item) => item.key === "keyShelfHeightCm"));
+  assert.ok(dimensionsFor("CHAIR").some((item) => item.key === "seatWidthCm"));
+  assert.ok(dimensionsFor("MONITOR").some((item) => item.key === "screenHeightCm"));
+  assert.ok(dimensionsFor("OTHER").length > 0);
+});
+
+test("arm span updates only segments still marked as derived approximation", () => {
+  const profile = profileFromHeight("Operator", 175), wider = profileWithArmSpan(profile, 190);
+  assert.ok(createConstraintGraph(wider).upperArm.fixedLengthCm > createConstraintGraph(profile).upperArm.fixedLengthCm);
+  const userProvided = { ...profile, upperArmLengthCm: 35, segmentProvenance: { ...profile.segmentProvenance, upperArm: "USER_PROVIDED" } };
+  assert.equal(profileWithArmSpan(userProvided, 190).upperArmLengthCm, 35);
+});
+
+test("suggestions and next best action prioritize missing table height", () => {
+  const scene = emptySceneState(); scene.objects.push(sceneObject());
   const suggestions = missingDimensionSuggestions(scene);
   assert.ok(suggestions.some((item) => item.key === "workSurfaceHeightCm" && item.priority === "CRITICAL"));
-  assert.ok(suggestions.some((item) => item.key === "widthCm"));
+  assert.equal(nextBestAction(scene).kind, "CALIBRATION");
 });
 
-test("object completeness increases only after required dimensions are supplied", () => {
-  const measurements = emptyMeasurements();
-  assert.equal(objectCompleteness("TABLE", measurements).ratio, 0);
-  measurements.workSurfaceHeightCm = 75; measurements.widthCm = 140; measurements.depthCm = 70;
-  assert.equal(objectCompleteness("TABLE", measurements).ratio, 1);
+test("object and scene completeness use explicit categories", () => {
+  const scene = emptySceneState(), table = sceneObject(); scene.objects.push(table);
+  assert.equal(objectCompleteness("TABLE", table.measurements).ratio, 0);
+  const completeness = sceneCompleteness(scene);
+  assert.ok(completeness.categories.geometry.total > 0);
+  assert.ok(completeness.categories.calibration.total > 0);
+  assert.ok(completeness.categories.objects.total > 0);
 });
 
-test("scene completeness does not count optional fields as required", () => {
-  const scene = emptySceneState();
-  scene.objects.push({ id: "monitor", sourceClass: null, type: "MONITOR", name: "Monitor", bbox: { x: .2, y: .2, width: .2, height: .2 }, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: { ...emptyMeasurements(), screenCenterHeightCm: 120, userDistanceCm: 60 }, referencePoint: null });
-  assert.equal(sceneCompleteness(scene).ratio, 1);
+test("label declutter produces unique positions and leader lines", () => {
+  const measurements = Array.from({ length: 6 }, (_, index) => ({ id: `m-${index}`, objectId: "table", dimensionKey: "widthCm", name: `Pomiar ${index}`, valueCm: 100 + index, unit: "cm", start: { x: .45, y: .5 + index * .001 }, end: { x: .55, y: .5 + index * .001 }, orientation: "HORIZONTAL", source: "USER_MEASURED", estimateStatus: "MEASURED", evidenceQuality: "HIGH", reason: null, active: true, visible: true, locked: false, affectsScale: true }));
+  const layout = layoutMeasurementLabels(measurements, 1);
+  assert.equal(new Set(layout.map((item) => `${item.position.x.toFixed(4)}:${item.position.y.toFixed(4)}`)).size, layout.length);
+  assert.ok(layout.some((item) => item.leader));
+  assert.ok(layoutMeasurementLabels(measurements, .7).some((item) => item.compact));
 });
 
-test("legacy schema 1.0 is normalized to 1.1 without losing object or human", () => {
+test("legacy schema 1.0 is normalized to 1.2 without losing object human or reference", () => {
   const human = createHuman("Operator", "#f97316");
-  const legacy = { schema_version: "1.0", objects: [{ id: "table", sourceClass: null, type: "TABLE", name: "Stół", bbox: { x: .1, y: .2, width: .3, height: .3 }, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, measurements: { heightCm: 75, widthCm: null, depthCm: null, workSurfaceHeightCm: null, lowerEdgeHeightCm: null, upperEdgeHeightCm: null }, referencePoint: null }], calibration: { status: "PARTIALLY_CALIBRATED", floorBaseline: null, anchors: [{ id: "old", lower: { x: .2, y: .8 }, upper: { x: .2, y: .5 }, pixelDistance: 300, realDistanceCm: 100, objectId: null, source: "USER_PROVIDED" }] }, human: { ...human.profile, upperLimbLengthCm: 60, lowerLimbLengthCm: 90, geometrySource: "APPROXIMATE_DISPLAY_GEOMETRY" }, pose: { preset: "STANDING", mirrored: false, scaleLocked: true, joints: human.pose.joints }, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } };
+  const legacy = { schema_version: "1.0", objects: [{ ...sceneObject(), geometryMeasurements: undefined, interactionPoints: undefined }], calibration: { status: "PARTIALLY_CALIBRATED", floorBaseline: null, anchors: [{ id: "old", lower: { x: .2, y: .8 }, upper: { x: .2, y: .5 }, pixelDistance: 300, realDistanceCm: 100, objectId: null, source: "USER_PROVIDED" }] }, human: human.profile, pose: human.pose, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } };
   const normalized = normalizeSceneState(legacy);
-  assert.equal(normalized.schema_version, "1.1");
+  assert.equal(normalized.schema_version, "1.2");
   assert.equal(normalized.objects.length, 1); assert.equal(normalized.humans.length, 1); assert.equal(normalized.calibration.references[0].valueCm, 100);
   assert.equal(validateSceneState(normalized), true);
 });
 
-test("multiple people retain independent profiles and positions", () => {
-  const scene = emptySceneState(), first = createHuman("A", "#f97316", "SHORT"), second = createHuman("B", "#06b6d4", "TALL");
-  second.pose.joints.leftHip.x += .2; scene.humans.push(first, second);
-  assert.equal(scene.humans.length, 2); assert.notEqual(scene.humans[0].profile.heightCm, scene.humans[1].profile.heightCm); assert.notEqual(scene.humans[0].pose.joints.leftHip.x, scene.humans[1].pose.joints.leftHip.x);
+test("legacy schema 1.1 keeps multiple humans and object measurements", () => {
+  const scene = emptySceneState(); scene.objects.push(sceneObject()); scene.humans.push(createHuman("A", "#f97316"), createHuman("B", "#06b6d4", "TALL"));
+  const legacy = { ...scene, schema_version: "1.1", geometryMeasurements: undefined, workerSuggestions: undefined, view: undefined };
+  const normalized = normalizeSceneState(legacy);
+  assert.equal(normalized.schema_version, "1.2");
+  assert.equal(normalized.humans.length, 2);
+  assert.equal(normalized.objects.length, 1);
 });
 
 test("invalid zero reference and negative human dimensions are rejected", () => {

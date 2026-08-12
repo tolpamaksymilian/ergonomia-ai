@@ -3,6 +3,7 @@ from pathlib import Path
 
 MIGRATION = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812120000_add_photo_scene_builder_beta.sql"
 UPGRADE = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812150000_upgrade_photo_scene_builder_v02.sql"
+V03_UPGRADE = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260812170000_upgrade_photo_scene_builder_v03.sql"
 
 
 def source() -> str:
@@ -43,4 +44,13 @@ def test_scene_v02_migration_preserves_v10_and_allows_versioned_save():
     assert "alter column scene_schema_version set default '1.1'" in sql
     assert "photo-scene-builder-v0.2-beta.1" in sql
     assert "grant update (scene_state, scene_schema_version, scene_builder_version, last_saved_at)" in sql
+    assert "notify pgrst, 'reload schema'" in sql
+
+
+def test_scene_v03_migration_allows_v12_without_rewriting_existing_documents():
+    sql = V03_UPGRADE.read_text(encoding="utf-8").lower()
+    assert "scene_schema_version in ('1.0', '1.1', '1.2')" in sql
+    assert "alter column scene_schema_version set default '1.2'" in sql
+    assert "photo-scene-builder-v0.3-beta.1" in sql
+    assert "update public.photo_scenes" not in sql
     assert "notify pgrst, 'reload schema'" in sql

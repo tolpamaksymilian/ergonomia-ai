@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0-beta.1] - 2026-08-12
+
+### Added
+
+- Perspective-aware Human Model V2 z profilem antropometrycznym, stałymi długościami segmentów, stabilnym two-bone IK i jawnymi punktami kontaktu stóp.
+- Geometria wymiarów z provenance, warstwy widoku, automatyczne rozmieszczanie etykiet i asystent kalibracji.
+- Lekki geometry pass Scene Workera v0.2 wykorzystujący OpenCV do propozycji krawędzi, powierzchni i wymiarów bez zgadywania wartości w centymetrach.
+
+### Changed
+
+- Schemat sceny 1.2 normalizuje dokumenty 1.0 i 1.1 oraz zapisuje pole skali perspektywicznej, relacje człowiek–obiekt i sugestie geometrii.
+- Domyślny widok edytora ogranicza nakładanie pomiarów, uchwytów i zasięgów na zdjęcie.
+
 ## [0.13.0-beta.1] - 2026-08-12
 
 ### Added

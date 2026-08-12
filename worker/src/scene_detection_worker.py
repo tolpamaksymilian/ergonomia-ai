@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from rtmlib import YOLOX
 from supabase import Client, create_client
 
-from scene_detection.processor import DETECTION_VERSION, build_detection_document, normalize_detections
+from scene_detection.processor import DETECTION_VERSION, analyze_scene_geometry, build_detection_document, normalize_detections
 
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +111,8 @@ class SceneWorker:
             result = self.detector_instance()(image)
             boxes, class_ids = result if isinstance(result, tuple) and len(result) == 2 else ([], [])
             candidates = normalize_detections(np.asarray(boxes).reshape(-1, 4) if np.asarray(boxes).size else [], np.asarray(class_ids).reshape(-1), image_width=width, image_height=height)
-            document = build_detection_document(analysis_id, width, height, candidates)
+            geometry_analysis = analyze_scene_geometry(image, candidates)
+            document = build_detection_document(analysis_id, width, height, candidates, geometry_analysis)
             detection_file.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
             preview = image.copy()
             maximum = 1600
@@ -131,7 +132,7 @@ class SceneWorker:
             }).execute()
             if completed.data is not True:
                 raise RuntimeError("WORKER_LOCK_LOST")
-            self.logger.info("analysis_id=%s stage=scene-ready candidates=%d duration=%.3fs path=%s", analysis_id, len(candidates), time.perf_counter() - started, result_path)
+            self.logger.info("analysis_id=%s stage=scene-ready candidates=%d geometry=%d suggestions=%d duration=%.3fs path=%s", analysis_id, len(candidates), len(document.get("geometry_candidates", [])), len(document.get("dimension_suggestions", [])), time.perf_counter() - started, result_path)
         except (OSError, ValueError, RuntimeError, cv2.error) as error:
             self.logger.error("analysis_id=%s stage=scene-detection-failed code=%s", analysis_id, type(error).__name__)
             self.client.rpc("fail_scene_detection", {"p_analysis_id": analysis_id, "p_worker_id": self.settings.worker_id, "p_error_code": type(error).__name__.upper(), "p_error_message": str(error)[:500]}).execute()

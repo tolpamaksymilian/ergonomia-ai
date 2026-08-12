@@ -1,54 +1,78 @@
-import type { HumanJointName, HumanPose, LimbReachState, NormalizedPoint, SceneCalibration } from "../../types/photo-scene";
+import type { HumanJointName, HumanPose, LimbReachState, NormalizedPoint, SceneCalibration, SceneHuman } from "../../types/photo-scene";
 import { estimateLocalScale } from "./calibration.ts";
+import { mapPoints, syncPlacement } from "./anthropometry.ts";
 
 export function distance(a: NormalizedPoint, b: NormalizedPoint) { return Math.hypot(b.x - a.x, b.y - a.y); }
-
-export type IkResult = { joint: NormalizedPoint; end: NormalizedPoint; target: NormalizedPoint; reachState: LimbReachState; targetDistance: number; maximumReach: number };
+export type IkResult = { joint: NormalizedPoint; end: NormalizedPoint; target: NormalizedPoint; reachState: LimbReachState; targetDistance: number; maximumReach: number; bend: 1 | -1 };
 
 export function solveTwoBoneIk(root: NormalizedPoint, target: NormalizedPoint, firstLength: number, secondLength: number, bend: 1 | -1 = 1, comfortRatio = .82): IkResult {
-  const dx = target.x - root.x, dy = target.y - root.y;
-  const targetDistance = Math.hypot(dx, dy);
-  const maximum = Math.max(.000001, firstLength + secondLength);
-  const minimum = Math.abs(firstLength - secondLength) + .000001;
-  const clamped = Math.min(maximum - .000001, Math.max(minimum, targetDistance || minimum));
-  const base = Math.atan2(dy, dx);
-  const cosine = Math.max(-1, Math.min(1, (firstLength ** 2 + clamped ** 2 - secondLength ** 2) / (2 * firstLength * clamped)));
+  const safeFirst = Math.max(1e-8, firstLength), safeSecond = Math.max(1e-8, secondLength);
+  const dx = target.x - root.x, dy = target.y - root.y, targetDistance = Math.hypot(dx, dy);
+  const maximum = safeFirst + safeSecond, minimum = Math.abs(safeFirst - safeSecond) + 1e-8;
+  const clamped = Math.min(maximum - 1e-8, Math.max(minimum, targetDistance || minimum));
+  const base = Math.atan2(dy, dx), cosine = clampCosine((safeFirst ** 2 + clamped ** 2 - safeSecond ** 2) / (2 * safeFirst * clamped));
   const angle = base + bend * Math.acos(cosine);
-  const joint = { x: root.x + Math.cos(angle) * firstLength, y: root.y + Math.sin(angle) * firstLength };
-  const scale = targetDistance > maximum ? maximum / targetDistance : 1;
-  const end = targetDistance === 0 ? { x: root.x + maximum, y: root.y } : { x: root.x + dx * scale, y: root.y + dy * scale };
-  return { joint, end, target, targetDistance, maximumReach: maximum, reachState: targetDistance > maximum ? "OUT_OF_REACH" : targetDistance > maximum * comfortRatio ? "COMFORT_EXCEEDED" : "NATURAL" };
+  const joint = { x: root.x + Math.cos(angle) * safeFirst, y: root.y + Math.sin(angle) * safeFirst };
+  const endDistance = Math.min(maximum, Math.max(minimum, targetDistance || minimum));
+  const direction = targetDistance > 1e-8 ? { x: dx / targetDistance, y: dy / targetDistance } : { x: Math.cos(base), y: Math.sin(base) };
+  const end = { x: root.x + direction.x * endDistance, y: root.y + direction.y * endDistance };
+  const reachState: LimbReachState = targetDistance > maximum + 1e-7 ? "OUT_OF_REACH" : targetDistance < minimum ? "SOFT_LIMIT" : targetDistance > maximum * comfortRatio ? "COMFORT_EXCEEDED" : "NATURAL";
+  return { joint, end, target, targetDistance, maximumReach: maximum, reachState, bend };
 }
 
-export function localPixelsPerCentimeter(calibration: SceneCalibration, position: NormalizedPoint, imageHeight: number, imageWidth = imageHeight): number | null {
-  return estimateLocalScale(calibration, position, imageWidth, imageHeight)?.pixelsPerCm ?? null;
-}
-
-export function moveJointWithIk(pose: HumanPose, joint: HumanJointName, target: NormalizedPoint, aspectRatio = 1): HumanPose {
-  const joints = { ...pose.joints }, reachState = { ...pose.reachState };
-  const metric = (point: NormalizedPoint) => ({ x: point.x * aspectRatio, y: point.y });
-  const screen = (point: NormalizedPoint) => ({ x: point.x / aspectRatio, y: point.y });
+export function moveHumanJointWithConstraints(human: SceneHuman, joint: HumanJointName, target: NormalizedPoint, pixelsPerCm: number, imageWidth: number, imageHeight: number): SceneHuman {
+  const pose = human.pose, joints = { ...pose.joints }, reachState = { ...pose.reachState }, bendPreference = { ...pose.bendPreference };
+  const pixel = (point: NormalizedPoint) => ({ x: point.x * imageWidth, y: point.y * imageHeight });
+  const normalized = (point: NormalizedPoint) => ({ x: point.x / imageWidth, y: point.y / imageHeight });
+  const targetPx = pixel(target), px = Math.max(.05, pixelsPerCm);
   if (["leftWrist", "rightWrist", "leftHand", "rightHand"].includes(joint)) {
-    const side = joint.startsWith("left") ? "left" : "right";
-    const shoulder = joints[`${side}Shoulder` as HumanJointName], elbowName = `${side}Elbow` as HumanJointName, wristName = `${side}Wrist` as HumanJointName, handName = `${side}Hand` as HumanJointName;
-    const upper = distance(metric(shoulder), metric(joints[elbowName])), lower = distance(metric(joints[elbowName]), metric(joints[wristName]));
-    const handVector = { x: joints[handName].x - joints[wristName].x, y: joints[handName].y - joints[wristName].y };
-    const handLength = distance(metric(joints[wristName]), metric(joints[handName]));
-    const shoulderMetric = metric(shoulder), targetMetric = metric(target);
-    const directionLength = Math.max(.000001, distance(shoulderMetric, targetMetric));
-    const direction = { x: (targetMetric.x - shoulderMetric.x) / directionLength, y: (targetMetric.y - shoulderMetric.y) / directionLength };
-    const wristTarget = joint.endsWith("Hand") ? { x: targetMetric.x - direction.x * handLength, y: targetMetric.y - direction.y * handLength } : targetMetric;
-    const result = solveTwoBoneIk(shoulderMetric, wristTarget, upper, lower, side === "left" ? 1 : -1);
-    joints[elbowName] = screen(result.joint); joints[wristName] = screen(result.end);
-    joints[handName] = joint.endsWith("Hand") ? screen({ x: result.end.x + direction.x * handLength, y: result.end.y + direction.y * handLength }) : { x: joints[wristName].x + handVector.x, y: joints[wristName].y + handVector.y };
-    const totalDistance = distance(shoulderMetric, targetMetric), maximum = upper + lower + (joint.endsWith("Hand") ? handLength : 0);
-    reachState[`${side}Arm` as "leftArm" | "rightArm"] = totalDistance > maximum ? "OUT_OF_REACH" : totalDistance > maximum * .82 ? "COMFORT_EXCEEDED" : "NATURAL";
+    const side = joint.startsWith("left") ? "left" : "right", shoulderName = `${side}Shoulder` as HumanJointName;
+    const elbowName = `${side}Elbow` as HumanJointName, wristName = `${side}Wrist` as HumanJointName, handName = `${side}Hand` as HumanJointName;
+    const shoulder = pixel(joints[shoulderName]), upper = human.constraints.upperArm.fixedLengthCm * px, forearm = human.constraints.forearm.fixedLengthCm * px, hand = human.constraints.hand.fixedLengthCm * px;
+    const direction = unitVector(shoulder, targetPx), wristTarget = joint.endsWith("Hand") ? { x: targetPx.x - direction.x * hand, y: targetPx.y - direction.y * hand } : targetPx;
+    const key = `${side}Arm` as "leftArm" | "rightArm", bend = stableBend(shoulder, wristTarget, pixel(joints[elbowName]), bendPreference[key]);
+    const result = solveTwoBoneIk(shoulder, wristTarget, upper, forearm, bend);
+    joints[elbowName] = normalized(result.joint); joints[wristName] = normalized(result.end);
+    const handEnd = { x: result.end.x + direction.x * hand, y: result.end.y + direction.y * hand };
+    joints[handName] = normalized(handEnd); bendPreference[key] = bend;
+    const totalDistance = distance(shoulder, targetPx), maximum = upper + forearm + (joint.endsWith("Hand") ? hand : 0);
+    reachState[key] = totalDistance > maximum + 1e-7 ? "OUT_OF_REACH" : totalDistance > maximum * .82 ? "COMFORT_EXCEEDED" : result.reachState;
   } else if (["leftAnkle", "rightAnkle", "leftFoot", "rightFoot"].includes(joint)) {
-    const side = joint.startsWith("left") ? "left" : "right";
-    const hip = joints[`${side}Hip` as HumanJointName], kneeName = `${side}Knee` as HumanJointName, ankleName = `${side}Ankle` as HumanJointName, footName = `${side}Foot` as HumanJointName;
-    const result = solveTwoBoneIk(metric(hip), metric(target), distance(metric(hip), metric(joints[kneeName])), distance(metric(joints[kneeName]), metric(joints[ankleName])), side === "left" ? -1 : 1, .9);
-    joints[kneeName] = screen(result.joint); joints[ankleName] = screen(result.end); joints[footName] = { ...joints[ankleName], x: joints[ankleName].x + (side === "left" ? .018 : .022) };
-    reachState[`${side}Leg` as "leftLeg" | "rightLeg"] = result.reachState;
-  } else joints[joint] = target;
-  return { ...pose, preset: "CUSTOM", joints, reachState };
+    const side = joint.startsWith("left") ? "left" : "right", hipName = `${side}Hip` as HumanJointName;
+    const kneeName = `${side}Knee` as HumanJointName, ankleName = `${side}Ankle` as HumanJointName, footName = `${side}Foot` as HumanJointName;
+    const hip = pixel(joints[hipName]), thigh = human.constraints.thigh.fixedLengthCm * px, lower = human.constraints.lowerLeg.fixedLengthCm * px, foot = human.constraints.foot.fixedLengthCm * px;
+    const key = `${side}Leg` as "leftLeg" | "rightLeg", ankleTarget = joint.endsWith("Foot") ? { x: targetPx.x - foot, y: targetPx.y } : targetPx;
+    const bend = stableBend(hip, ankleTarget, pixel(joints[kneeName]), bendPreference[key]), result = solveTwoBoneIk(hip, ankleTarget, thigh, lower, bend, .9);
+    joints[kneeName] = normalized(result.joint); joints[ankleName] = normalized(result.end); joints[footName] = normalized({ x: result.end.x + foot, y: result.end.y });
+    bendPreference[key] = bend; reachState[key] = result.reachState;
+  }
+  const nextPose: HumanPose = { ...pose, preset: "CUSTOM", joints, reachState, bendPreference };
+  return { ...human, pose: nextPose, placement: syncPlacement(nextPose, human.placement) };
 }
+
+export function moveHumanRootUniform(human: SceneHuman, standingPoint: NormalizedPoint, nextScale: number | null, imageWidth: number, imageHeight: number): SceneHuman {
+  const oldContact = human.placement.contactPoint, oldScale = human.placement.lastScalePxPerCm;
+  const ratio = nextScale && oldScale ? clamp(nextScale / oldScale, .2, 5) : 1;
+  const oldPx = { x: oldContact.x * imageWidth, y: oldContact.y * imageHeight }, nextPx = { x: standingPoint.x * imageWidth, y: standingPoint.y * imageHeight };
+  const joints = mapPoints(human.pose.joints, (point) => {
+    const pointPx = { x: point.x * imageWidth, y: point.y * imageHeight };
+    return { x: (nextPx.x + (pointPx.x - oldPx.x) * ratio) / imageWidth, y: (nextPx.y + (pointPx.y - oldPx.y) * ratio) / imageHeight };
+  });
+  const pose = { ...human.pose, joints };
+  return { ...human, pose, placement: syncPlacement(pose, { ...human.placement, lastScalePxPerCm: nextScale ?? oldScale }) };
+}
+
+export function localPixelsPerCentimeter(calibration: SceneCalibration, position: NormalizedPoint, imageHeight: number, imageWidth = imageHeight) { return estimateLocalScale(calibration, position, imageWidth, imageHeight)?.pixelsPerCm ?? null; }
+
+/** Compatibility wrapper used by legacy tests; v0.3 UI uses constraint-aware human IK above. */
+export function moveJointWithIk(pose: HumanPose, joint: HumanJointName, target: NormalizedPoint, aspectRatio = 1): HumanPose {
+  const joints = { ...pose.joints }, metric = (point: NormalizedPoint) => ({ x: point.x * aspectRatio, y: point.y }), screen = (point: NormalizedPoint) => ({ x: point.x / aspectRatio, y: point.y });
+  if (joint === "leftWrist" || joint === "rightWrist") { const side = joint.startsWith("left") ? "left" : "right", shoulder = joints[`${side}Shoulder` as HumanJointName], elbow = `${side}Elbow` as HumanJointName; const result = solveTwoBoneIk(metric(shoulder), metric(target), distance(metric(shoulder), metric(joints[elbow])), distance(metric(joints[elbow]), metric(joints[joint])), pose.bendPreference[`${side}Arm` as "leftArm" | "rightArm"]); joints[elbow] = screen(result.joint); joints[joint] = screen(result.end); }
+  return { ...pose, joints };
+}
+
+export function segmentLengthPixels(human: SceneHuman, parent: HumanJointName, child: HumanJointName, width: number, height: number) { return Math.hypot((human.pose.joints[child].x - human.pose.joints[parent].x) * width, (human.pose.joints[child].y - human.pose.joints[parent].y) * height); }
+export function clampCosine(value: number) { return Math.max(-1, Math.min(1, Number.isFinite(value) ? value : 1)); }
+function stableBend(root: NormalizedPoint, target: NormalizedPoint, previousJoint: NormalizedPoint, previous: 1 | -1): 1 | -1 { const cross = (target.x - root.x) * (previousJoint.y - root.y) - (target.y - root.y) * (previousJoint.x - root.x); return Math.abs(cross) < 4 ? previous : cross >= 0 ? 1 : -1; }
+function unitVector(from: NormalizedPoint, to: NormalizedPoint) { const length = Math.max(1e-8, distance(from, to)); return { x: (to.x - from.x) / length, y: (to.y - from.y) / length }; }
+function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }

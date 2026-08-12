@@ -4,10 +4,14 @@ import math
 import uuid
 from typing import Iterable, Sequence
 
-from .schemas import DetectionCandidate, NormalizedBox, SceneObjectType
+import cv2
+import numpy as np
+from numpy.typing import NDArray
+
+from .schemas import DetectionCandidate, NormalizedBox, NormalizedLine, SceneObjectType
 
 
-DETECTION_VERSION = "scene-detection-v0.1-beta.1"
+DETECTION_VERSION = "scene-detection-v0.2-beta.1"
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -82,10 +86,11 @@ def build_detection_document(
     image_width: int,
     image_height: int,
     candidates: Sequence[DetectionCandidate],
+    geometry_analysis: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if not analysis_id.strip():
         raise ValueError("analysis_id is required")
-    return {
+    document: dict[str, object] = {
         "schema_version": "1.0",
         "detection_version": DETECTION_VERSION,
         "analysis_id": analysis_id,
@@ -99,3 +104,143 @@ def build_detection_document(
             "no_ergonomic_assessment",
         ],
     }
+    if geometry_analysis:
+        document.update({
+            "geometry_candidates": geometry_analysis.get("geometry_candidates", []),
+            "dimension_suggestions": geometry_analysis.get("dimension_suggestions", []),
+            "perspective_evidence": geometry_analysis.get("perspective_evidence"),
+            "floor_candidates": geometry_analysis.get("floor_candidates", []),
+            "surface_candidates": geometry_analysis.get("surface_candidates", []),
+        })
+    return document
+
+
+def analyze_scene_geometry(
+    image: NDArray[np.uint8],
+    candidates: Sequence[DetectionCandidate],
+) -> dict[str, object]:
+    """Builds editable geometric suggestions; it never claims real-world dimensions."""
+    if image.ndim not in (2, 3) or image.size == 0:
+        raise ValueError("image must be a non-empty grayscale or color array")
+    height, width = image.shape[:2]
+    if width <= 0 or height <= 0:
+        raise ValueError("image dimensions must be positive")
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(gray, 55, 145, apertureSize=3)
+    raw_lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=max(25, min(width, height) // 18),
+        minLineLength=max(24, min(width, height) // 12),
+        maxLineGap=max(8, min(width, height) // 60),
+    )
+    lines: list[NormalizedLine] = []
+    if raw_lines is not None:
+        normalized_rows = np.asarray(raw_lines).reshape(-1, 4)
+        ranked = sorted((tuple(int(value) for value in row) for row in normalized_rows), key=lambda row: math.hypot(row[2] - row[0], row[3] - row[1]), reverse=True)
+        for index, (x1, y1, x2, y2) in enumerate(ranked[:80]):
+            length = math.hypot(x2 - x1, y2 - y1)
+            if length < max(20, min(width, height) * .04):
+                continue
+            angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1))) % 180
+            orientation = _line_orientation(angle)
+            quality = "HIGH" if length >= min(width, height) * .32 else "MEDIUM" if length >= min(width, height) * .16 else "LOW"
+            lines.append(NormalizedLine(
+                id=f"geometry-{index}", start=(x1 / width, y1 / height), end=(x2 / width, y2 / height),
+                orientation=orientation, evidence_quality=quality,
+            ))
+    geometry_candidates = [line.to_dict() for line in lines]
+    floor_candidates = [line.to_dict() for line in lines if line.orientation == "HORIZONTAL" and (line.start[1] + line.end[1]) / 2 >= .58][:5]
+    surface_candidates = _surface_candidates(lines, candidates)
+    suggestions = [suggestion for candidate in candidates for suggestion in _dimension_suggestions(candidate)]
+    vertical_angles = [_line_angle(line) for line in lines if line.orientation == "VERTICAL"]
+    horizontal_angles = [_line_angle(line) for line in lines if line.orientation == "HORIZONTAL"]
+    evidence_count = len(vertical_angles) + len(horizontal_angles)
+    evidence_quality = "HIGH" if evidence_count >= 12 else "MEDIUM" if evidence_count >= 5 else "LOW"
+    return {
+        "geometry_candidates": geometry_candidates,
+        "dimension_suggestions": suggestions,
+        "perspective_evidence": {
+            "dominant_vertical_angle_deg": _median(vertical_angles),
+            "dominant_horizontal_angle_deg": _median(horizontal_angles),
+            "vanishing_point": None,
+            "evidence_quality": evidence_quality,
+        },
+        "floor_candidates": floor_candidates,
+        "surface_candidates": surface_candidates,
+    }
+
+
+def _dimension_suggestions(candidate: DetectionCandidate) -> list[dict[str, object]]:
+    box = candidate.bounding_box
+    left, right, top, bottom = box.x, box.x + box.width, box.y, box.y + box.height
+    center_x = (left + right) / 2
+    profiles: dict[SceneObjectType, tuple[tuple[str, str], ...]] = {
+        "TABLE": (("workSurfaceHeightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH")),
+        "WORK_SURFACE": (("workSurfaceHeightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH")),
+        "SHELF": (("keyShelfHeightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH")),
+        "RACK": (("heightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH"), ("keyShelfHeightCm", "VERTICAL")),
+        "CHAIR": (("seatHeightCm", "VERTICAL"), ("seatWidthCm", "HORIZONTAL"), ("seatDepthCm", "DEPTH"), ("backrestHeightCm", "VERTICAL")),
+        "STOOL": (("seatHeightCm", "VERTICAL"), ("seatWidthCm", "HORIZONTAL"), ("seatDepthCm", "DEPTH")),
+        "MONITOR": (("screenCenterHeightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("screenHeightCm", "VERTICAL")),
+        "CONTAINER": (("heightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH")),
+        "MACHINE": (("heightCm", "VERTICAL"), ("widthCm", "HORIZONTAL"), ("depthCm", "DEPTH"), ("controlHeightCm", "VERTICAL")),
+        "CONTROL_PANEL": (("controlHeightCm", "VERTICAL"), ("widthCm", "HORIZONTAL")),
+    }
+    suggestions: list[dict[str, object]] = []
+    for index, (dimension_type, orientation) in enumerate(profiles.get(candidate.suggested_scene_type, ())):
+        if orientation == "VERTICAL":
+            start, end = {"x": center_x, "y": bottom}, {"x": center_x, "y": top}
+        elif orientation == "HORIZONTAL":
+            y = top + box.height * .18
+            start, end = {"x": left, "y": y}, {"x": right, "y": y}
+        else:
+            start, end = {"x": left + box.width * .08, "y": top + box.height * .3}, {"x": right - box.width * .08, "y": top + box.height * .08}
+        suggestions.append({
+            "id": f"suggestion-{candidate.id}-{index}", "object_id": candidate.id,
+            "dimension_type": dimension_type, "endpoints": {"start": start, "end": end},
+            "source": "WORKER_GEOMETRY_HEURISTIC", "estimated_value_cm": None,
+            "estimate_status": "UNKNOWN", "evidence_quality": "MEDIUM" if orientation != "DEPTH" else "LOW",
+            "reason": _suggestion_reason(dimension_type, orientation), "status": "PENDING",
+        })
+    return suggestions
+
+
+def _surface_candidates(lines: Sequence[NormalizedLine], candidates: Sequence[DetectionCandidate]) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    for candidate in candidates:
+        box = candidate.bounding_box
+        for line in lines:
+            middle_x, middle_y = (line.start[0] + line.end[0]) / 2, (line.start[1] + line.end[1]) / 2
+            if line.orientation == "HORIZONTAL" and box.x <= middle_x <= box.x + box.width and box.y <= middle_y <= box.y + box.height * .55:
+                selected.append({**line.to_dict(), "object_id": candidate.id})
+                break
+    return selected[:20]
+
+
+def _line_orientation(angle: float) -> str:
+    if angle <= 12 or angle >= 168:
+        return "HORIZONTAL"
+    if 78 <= angle <= 102:
+        return "VERTICAL"
+    return "DEPTH"
+
+
+def _line_angle(line: NormalizedLine) -> float:
+    return math.degrees(math.atan2(line.end[1] - line.start[1], line.end[0] - line.start[0]))
+
+
+def _median(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _suggestion_reason(dimension_type: str, orientation: str) -> str:
+    if orientation == "DEPTH":
+        return f"Candidate edge for {dimension_type}; depth remains unknown without reliable perspective evidence."
+    return f"Candidate {orientation.lower()} edge derived from the confirmed object region for {dimension_type}."

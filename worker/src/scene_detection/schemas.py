@@ -6,7 +6,8 @@ from typing import Literal
 
 SceneObjectType = Literal[
     "WORK_SURFACE", "TABLE", "SHELF", "RACK", "CHAIR", "STOOL", "CONVEYOR",
-    "MACHINE", "CONTROL_PANEL", "MONITOR", "CONTAINER", "PALLET", "OTHER",
+    "MACHINE", "CONTROL_PANEL", "MONITOR", "CONTAINER", "PALLET", "WORK_ZONE",
+    "HANDLE", "OTHER",
 ]
 
 
@@ -30,3 +31,21 @@ class DetectionCandidate:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class NormalizedLine:
+    id: str
+    start: tuple[float, float]
+    end: tuple[float, float]
+    orientation: Literal["VERTICAL", "HORIZONTAL", "DEPTH", "FREE"]
+    evidence_quality: Literal["LOW", "MEDIUM", "HIGH"]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "start": {"x": self.start[0], "y": self.start[1]},
+            "end": {"x": self.end[0], "y": self.end[1]},
+            "orientation": self.orientation,
+            "evidence_quality": self.evidence_quality,
+        }
