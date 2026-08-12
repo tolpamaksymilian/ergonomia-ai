@@ -63,7 +63,7 @@ export function ProjectOverview() {
             </ul>
           </div>
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">Technologie</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-accent-foreground">Technologie</p>
             <div className="mt-5 flex flex-wrap gap-2.5">
               {projectStatus.publicTechnologies.map((technology) => (
                 <span key={technology} className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-sm font-medium text-slate-300">
@@ -88,7 +88,7 @@ export function ProjectOverview() {
           </ul>
         </section>
 
-        <section className="mt-20 rounded-[26px] border border-cyan-300/15 bg-cyan-300/[0.045] p-7 sm:p-9" aria-labelledby="plan-heading">
+        <section className="ui-card mt-20 p-7 sm:p-9" aria-labelledby="plan-heading">
           <SectionHeading eyebrow="Co jest planowane" title="Najbliższe kierunki" id="plan-heading" />
           <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {projectStatus.publicPlans.map((plan) => (
@@ -105,7 +105,7 @@ export function ProjectOverview() {
           <Link href="/panel/analizy/nowa" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-emerald-300">
             Rozpocznij analizę <ArrowRight className="size-4" aria-hidden="true" />
           </Link>
-          <Link href="/o-autorze" className="inline-flex min-h-11 items-center rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 font-semibold text-white transition hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-cyan-300">
+          <Link href="/o-autorze" className="ui-button-secondary">
             O autorze
           </Link>
         </div>
@@ -127,7 +127,7 @@ function Background() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-40 top-0 size-[540px] rounded-full bg-emerald-500/[0.055] blur-[160px]" />
-      <div className="absolute -right-52 top-[700px] size-[600px] rounded-full bg-cyan-500/[0.05] blur-[170px]" />
+      <div className="absolute -right-52 top-[700px] size-[600px] rounded-full bg-orange-200/20 blur-[170px] dark:bg-orange-950/10" />
     </div>
   );
 }

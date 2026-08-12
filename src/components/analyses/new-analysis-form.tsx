@@ -586,7 +586,7 @@ export function NewAnalysisForm({
       <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-foreground">
               Film źródłowy
             </p>
 
@@ -612,12 +612,12 @@ export function NewAnalysisForm({
               ? "cursor-not-allowed border-white/10 opacity-50"
               : file
                 ? "border-emerald-400/30 bg-emerald-400/[0.05]"
-                : "border-white/15 bg-slate-950/30 hover:border-cyan-400/40 hover:bg-cyan-400/[0.035]"
+                : "border-border bg-surface-muted hover:border-orange-200 hover:bg-brand-soft"
           }`}
         >
           {isReadingMetadata ? (
             <>
-              <LoaderCircle className="size-10 animate-spin text-cyan-300" />
+              <LoaderCircle className="size-10 animate-spin text-primary" />
 
               <p className="mt-4 font-semibold">
                 Odczytywanie parametrów filmu...
@@ -643,7 +643,7 @@ export function NewAnalysisForm({
             </>
           ) : (
             <>
-              <UploadCloud className="size-12 text-cyan-300" />
+              <UploadCloud className="size-12 text-primary" />
 
               <p className="mt-5 text-lg font-semibold">
                 Kliknij, aby wybrać film
@@ -704,7 +704,7 @@ export function NewAnalysisForm({
       {phase !== "idle" &&
         phase !== "error" &&
         phase !== "cancelled" && (
-          <section className="rounded-[28px] border border-cyan-400/15 bg-cyan-400/[0.045] p-6">
+          <section className="rounded-xl border border-border bg-card p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.17em] text-slate-500">
@@ -716,14 +716,14 @@ export function NewAnalysisForm({
                 </p>
               </div>
 
-              <p className="text-2xl font-bold text-cyan-300">
+              <p className="text-2xl font-bold text-accent-foreground">
                 {progress}%
               </p>
             </div>
 
             <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-[width] duration-300"
+                className="h-full rounded-full bg-primary transition-[width] duration-300"
                 style={{
                   width: `${progress}%`,
                 }}
@@ -799,7 +799,7 @@ function FileMetric({
 }) {
   return (
     <div className="rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4">
-      <Icon className="size-5 text-cyan-300" />
+      <Icon className="size-5 text-primary" />
 
       <p className="mt-3 text-[10px] uppercase tracking-[0.16em] text-slate-500">
         {label}

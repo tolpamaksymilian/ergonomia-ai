@@ -21,18 +21,18 @@ export function ProjectRoadmap({
   return (
     <div>
       {showProgress && (
-        <div className="mb-6 rounded-[24px] border border-white/10 bg-slate-950/45 p-5 sm:p-6">
+        <div className="ui-card mb-6 p-5 sm:p-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Postęp projektu</p>
-              <p className="mt-2 text-4xl font-bold text-white">{progress}%</p>
+              <p className="mt-2 text-4xl font-bold text-foreground">{progress}%</p>
             </div>
             <p className="text-sm text-slate-400">
               {counts.completed} gotowych · {counts.inProgress} w realizacji · {counts.planned} planowanych
             </p>
           </div>
-          <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-label="Postęp rozwoju systemu" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
-            <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" style={{ width: `${progress}%` }} />
+          <div className="mt-5 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Postęp rozwoju systemu" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
           </div>
         </div>
       )}
@@ -46,11 +46,11 @@ export function ProjectRoadmap({
             <details
               key={group.id}
               open={group.id === "risk"}
-              className="group min-w-0 rounded-[24px] border border-white/10 bg-white/[0.03] p-5 open:bg-white/[0.045]"
+              className="group ui-card min-w-0 p-5 open:bg-surface-muted"
             >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-white">{group.label}</h3>
+                  <h3 className="font-semibold text-foreground">{group.label}</h3>
                   <p className="mt-1 text-xs text-slate-500">{group.description}</p>
                 </div>
                 <span className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
@@ -59,11 +59,11 @@ export function ProjectRoadmap({
                 </span>
               </summary>
 
-              <ul className="mt-5 space-y-2 border-t border-white/[0.07] pt-4">
+              <ul className="mt-5 space-y-2 border-t border-border pt-4">
                 {items.map((item) => (
-                  <li key={item.id} className="rounded-xl border border-white/[0.06] bg-slate-950/35 p-3.5">
+                  <li key={item.id} className="rounded-lg border border-border bg-surface-muted p-3.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-100">{item.title}</p>
+                      <p className="text-sm font-semibold text-foreground">{item.title}</p>
                       <FeatureStatusBadge status={item.status} />
                     </div>
                     <p className="mt-1.5 text-xs leading-5 text-slate-500">{item.description}</p>

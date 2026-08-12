@@ -24,10 +24,10 @@ export function AssessmentSection({ assessment, onSeek }: { assessment: Assessme
 
 function MethodCard({ result, onSeek }: { result: AssessmentMethodResult; onSeek: (time: number) => void }) {
   return (
-    <article className="min-w-0 rounded-2xl border border-sky-300/15 bg-sky-300/[0.035] p-5 sm:p-6">
+    <article className="min-w-0 rounded-xl border border-border bg-card p-5 sm:p-6">
       {result.keyframeUrl && <Image src={result.keyframeUrl} alt={`Pozycja reprezentatywna ${result.method}`} width={960} height={540} unoptimized className="mb-5 aspect-video w-full rounded-xl border border-white/10 object-cover" />}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300">{result.method}</p><h3 className="mt-2 text-lg font-semibold">{statusLabel(result.status)}</h3></div>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-foreground">{result.method}</p><h3 className="mt-2 text-lg font-semibold">{statusLabel(result.status)}</h3></div>
         <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs text-slate-300">{qualityLabel(result.applicability)}</span>
       </div>
       <dl className="mt-5 grid grid-cols-2 gap-4 text-sm">
@@ -40,8 +40,8 @@ function MethodCard({ result, onSeek }: { result: AssessmentMethodResult; onSeek
       {result.status === "INSUFFICIENT_DATA" && <p className="mt-4 text-sm leading-6 text-slate-400">Za mało wiarygodnych danych do obliczenia {result.method}.</p>}
       {result.missingInputs.length > 0 && <div className="mt-5"><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Brakujące informacje</p><ul className="mt-2 space-y-1 text-xs text-slate-400">{result.missingInputs.slice(0, 6).map((item) => <li key={item}>• {missingLabel(item)}</li>)}</ul></div>}
       <div className="mt-5 flex flex-wrap gap-2">
-        {result.timestamp !== null && <button type="button" onClick={() => onSeek(result.timestamp!)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-xs font-semibold text-sky-100 focus-visible:outline-2 focus-visible:outline-sky-200"><Play className="size-4" />Pokaż moment</button>}
-        {result.components.length > 0 && <details className="w-full rounded-xl border border-white/[0.08] bg-slate-950/30 p-3"><summary className="cursor-pointer list-none text-xs font-semibold text-slate-300 focus-visible:outline-2 focus-visible:outline-sky-200"><Calculator className="mr-2 inline size-4" />Szczegóły</summary><div className="mt-3 divide-y divide-white/[0.06]">{result.components.map((component) => <ComponentRow key={component.name} component={component} />)}</div></details>}
+        {result.timestamp !== null && <button type="button" onClick={() => onSeek(result.timestamp!)} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-orange-200 bg-brand-soft px-3 py-2 text-xs font-semibold text-accent-foreground dark:border-orange-800"><Play className="size-4" />Pokaż moment</button>}
+        {result.components.length > 0 && <details className="w-full rounded-xl border border-border bg-card p-3"><summary className="cursor-pointer list-none text-xs font-semibold text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"><Calculator className="mr-2 inline size-4" />Szczegóły</summary><div className="mt-3 divide-y divide-border">{result.components.map((component) => <ComponentRow key={component.name} component={component} />)}</div></details>}
       </div>
     </article>
   );

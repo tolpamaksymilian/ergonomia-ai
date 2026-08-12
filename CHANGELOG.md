@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1-beta.1] - 2026-08-11
+
+- Jasny wariant sceny 3D z neutralnym tłem, grafitowym modelem i pomarańczowymi akcentami analizy.
+- Status projektu, roadmapa, wersje i duże karty korzystają z neutralnych powierzchni zamiast dekoracyjnej mięty i cyan.
+- Dalsza migracja aktywnych komponentów z klas legacy do semantycznych tokenów design systemu.
+- Zachowane kolory success, warning, error i risk oraz istniejący Dark Mode i wydruk.
+
 ## [0.11.0-beta.1] - 2026-08-11
 
 - Centralny system tokenów dla jasnego i ciemnego motywu; jasny pozostaje ustawieniem domyślnym.

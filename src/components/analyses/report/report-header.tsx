@@ -21,7 +21,7 @@ export function ReportHeader({
       <div className="report-screen-only flex flex-wrap items-center justify-between gap-4" data-print-hidden>
         <Link
           href={`/panel/analizy/${report.analysis.analysis_id}`}
-          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-300 transition hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-200"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           Workspace analizy
@@ -32,11 +32,11 @@ export function ReportHeader({
       <div className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between print:mt-0">
         <div>
           <div className="flex items-center gap-3">
-            <span className="flex size-11 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 print:border-slate-300 print:bg-transparent">
-              <Activity className="size-6 text-cyan-200 print:text-black" aria-hidden="true" />
+            <span className="flex size-11 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft print:border-slate-300 print:bg-transparent dark:border-orange-800">
+              <Activity className="size-6 text-primary print:text-black" aria-hidden="true" />
             </span>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300 print:text-slate-600">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-foreground print:text-slate-600">
                 Ergonomia AI
               </p>
               <p className="text-sm text-slate-500 print:text-slate-600">

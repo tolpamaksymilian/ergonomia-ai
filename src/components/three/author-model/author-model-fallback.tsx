@@ -5,7 +5,7 @@ export function AuthorModelFallback({
 }) {
   return (
     <div className="relative flex h-[390px] w-full items-center justify-center overflow-hidden sm:h-[500px] lg:h-[560px]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_34%,rgba(34,211,238,0.13),transparent_48%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_34%,rgba(249,115,22,0.10),transparent_48%)]" />
       <svg viewBox="0 0 480 560" role="img" aria-label={label} className="relative h-[92%] w-auto max-w-full">
         <defs>
           <linearGradient id="authorClay" x1="0" y1="0" x2="1" y2="1">
@@ -28,7 +28,7 @@ export function AuthorModelFallback({
           <circle cx="240" cy="456" r="4" />
         </g>
       </svg>
-      <span className="absolute bottom-5 rounded-full border border-cyan-300/15 bg-slate-950/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">
+      <span className="absolute bottom-5 rounded-full border border-primary/20 bg-card/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
         Widok uproszczony
       </span>
     </div>

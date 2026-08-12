@@ -184,9 +184,9 @@ export function PoseResultsPreview({
                   href={activeThumbnailUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
+                  className="ui-button-secondary text-sm hover:border-orange-200 hover:bg-brand-soft"
                 >
-                  <ImageIcon className="size-4 text-cyan-300" />
+                  <ImageIcon className="size-4 text-primary" />
                   Otwórz miniaturę
                 </a>
               )}
@@ -197,9 +197,9 @@ export function PoseResultsPreview({
                   target="_blank"
                   rel="noreferrer"
                   download
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
+                  className="ui-button-secondary text-sm hover:border-orange-200 hover:bg-brand-soft"
                 >
-                  <FileJson className="size-4 text-cyan-300" />
+                  <FileJson className="size-4 text-primary" />
                   Pobierz punkty JSON
                 </a>
               )}

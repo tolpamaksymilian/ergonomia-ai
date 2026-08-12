@@ -1,6 +1,6 @@
 export const release = {
-  version: "0.11.0-beta.1",
-  name: "Jasny i ciemny motyw oraz odświeżony design system",
+  version: "0.11.1-beta.1",
+  name: "Light Theme Polish i spójny orange branding",
   channel: "beta",
   statusLabel: "Wersja testowa",
   releasedAt: "2026-08-11",

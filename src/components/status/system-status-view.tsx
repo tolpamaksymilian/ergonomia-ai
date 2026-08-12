@@ -69,14 +69,14 @@ export function SystemStatusView({
           className="grid gap-10 lg:grid-cols-[1fr_0.68fr] lg:items-end"
         >
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/[0.08] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-brand-soft px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-accent-foreground dark:border-orange-800">
               <Activity className="size-4" />
               Status infrastruktury
             </div>
 
             <h1 className="mt-7 max-w-4xl text-5xl font-bold tracking-[-0.045em] text-white sm:text-6xl">
               System działa i jest{" "}
-              <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+              <span className="text-primary">
                 dostępny publicznie.
               </span>
             </h1>
@@ -164,7 +164,7 @@ export function SystemStatusView({
                 </h2>
               </div>
 
-              <Cloud className="size-6 text-cyan-300" />
+              <Cloud className="size-6 text-primary" />
             </div>
 
             <div className="grid gap-px bg-white/10 sm:grid-cols-3">
@@ -189,10 +189,10 @@ export function SystemStatusView({
             initial={{ opacity: 0, y: 22 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.46 }}
-            className="rounded-[28px] border border-white/10 bg-gradient-to-br from-cyan-400/[0.08] to-emerald-400/[0.04] p-6"
+            className="ui-card p-6"
           >
-            <div className="flex size-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
-              <RefreshCw className="size-5 text-cyan-300" />
+            <div className="flex size-12 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft dark:border-orange-800">
+              <RefreshCw className="size-5 text-primary" />
             </div>
 
             <p className="mt-6 text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -261,7 +261,7 @@ function StatusCheck({
     <article className="h-full rounded-[26px] border border-white/10 bg-white/[0.035] p-6 transition hover:-translate-y-1 hover:border-emerald-400/20 hover:bg-white/[0.05]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/50">
-          <Icon className="size-6 text-cyan-300" />
+          <Icon className="size-6 text-primary" />
         </div>
 
         <span
@@ -311,7 +311,7 @@ function Background() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-40 top-20 size-[520px] rounded-full bg-emerald-500/[0.08] blur-[140px]" />
-      <div className="absolute -right-40 top-60 size-[520px] rounded-full bg-cyan-500/[0.08] blur-[140px]" />
+      <div className="absolute -right-40 top-60 size-[520px] rounded-full bg-orange-200/20 blur-[140px] dark:bg-orange-950/10" />
 
       <div
         className="absolute inset-0 opacity-[0.03]"

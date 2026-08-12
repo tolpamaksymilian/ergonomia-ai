@@ -137,10 +137,10 @@ function segmentLabel(segment: TimelineSegment) {
 
 function segmentClass(segment: TimelineSegment) {
   if (segment.layer === "holding") return "bg-fuchsia-400";
-  if (segment.layer === "hands") return "bg-cyan-400";
+  if (segment.layer === "hands") return "bg-orange-500";
   if (segment.layer === "quality") return "bg-slate-400";
-  if (segment.layer === "events") return "bg-violet-400";
-  if (segment.layer === "assessment") return "bg-sky-300";
+  if (segment.layer === "events") return "bg-neutral-500";
+  if (segment.layer === "assessment") return "bg-orange-300";
   return {
     neutral: "bg-lime-400",
     mild: "bg-amber-300",

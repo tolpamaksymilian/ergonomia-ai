@@ -52,13 +52,13 @@ export function ProjectVersionCards() {
         return (
           <div
             key={version.label}
-            className="min-w-0 rounded-[22px] border border-white/10 bg-white/[0.035] p-5"
+            className="ui-card min-w-0 p-5"
           >
-            <Icon className="size-5 text-cyan-300" aria-hidden="true" />
+            <Icon className="size-5 text-primary" aria-hidden="true" />
             <dt className="mt-4 text-[10px] uppercase tracking-[0.16em] text-slate-500">
               {version.label}
             </dt>
-            <dd className="mt-2 break-words font-semibold text-white">
+            <dd className="mt-2 break-words font-semibold text-foreground">
               {version.value}
             </dd>
           </div>

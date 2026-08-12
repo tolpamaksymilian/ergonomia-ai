@@ -2,7 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
-import { normalizeTheme, oppositeTheme, persistTheme, type AppTheme } from "@/lib/theme";
+import { applyTheme, normalizeTheme, oppositeTheme, type AppTheme } from "@/lib/theme";
 
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, setTheme] = useState<AppTheme>("light");
@@ -15,10 +15,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   }, []);
   function toggle() {
     const next = oppositeTheme(theme);
-    document.documentElement.classList.toggle("dark", next === "dark");
-    document.documentElement.dataset.theme = next;
-    document.documentElement.style.colorScheme = next;
-    persistTheme(localStorage, next);
+    applyTheme(next);
     setTheme(next);
   }
   const dark = theme === "dark";

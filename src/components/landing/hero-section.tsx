@@ -99,10 +99,10 @@ export function HeroSection({
         <div className="relative">
           <div className="absolute inset-10 rounded-full bg-primary/10 blur-[120px]" />
 
-          <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[#07111f]/90 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:rounded-[34px]">
+          <div className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-[0_10px_35px_rgba(0,0,0,0.08)] backdrop-blur-xl sm:rounded-3xl dark:shadow-[0_24px_70px_rgba(0,0,0,0.35)]">
             <PreviewHeader />
 
-            <div className="border-b border-white/10 px-4 py-4 sm:px-5">
+            <div className="border-b border-border bg-surface-muted px-4 py-4 sm:px-5">
               <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-3">
                 {focusModes.map((mode) => {
                   const Icon = mode.icon;
@@ -114,10 +114,10 @@ export function HeroSection({
                       type="button"
                       onClick={() => setFocusMode(mode.id)}
                       aria-pressed={active}
-                      className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-[11px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:gap-2 sm:px-4 sm:text-sm motion-reduce:transition-none ${
+                      className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-2.5 text-[11px] font-semibold transition sm:gap-2 sm:px-4 sm:text-sm motion-reduce:transition-none ${
                         active
-                          ? "border border-emerald-400/25 bg-emerald-400/10 text-emerald-200 shadow-lg shadow-emerald-500/10"
-                          : "border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                          ? "border-primary/40 bg-brand-soft text-accent-foreground"
+                          : "border-border bg-surface text-muted-foreground hover:border-orange-200 hover:bg-brand-soft hover:text-foreground"
                       }`}
                     >
                       <Icon className="size-4" />
@@ -129,9 +129,9 @@ export function HeroSection({
             </div>
 
             <div className="relative overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(8,145,178,0.12),transparent_62%)]" />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(249,115,22,0.06),transparent_62%)]" />
 
-              <div className="absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
+              <div className="absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
               <CornerMarkers />
 
@@ -152,7 +152,7 @@ export function HeroSection({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3 border-t border-white/10 bg-slate-950/45 p-4 sm:grid-cols-4 sm:p-5">
+            <div className="grid grid-cols-2 gap-3 border-t border-border bg-surface-muted p-4 sm:grid-cols-4 sm:p-5">
               <Metric
                 icon={Crosshair}
                 label="Analiza"
@@ -188,18 +188,18 @@ export function HeroSection({
 
 function PreviewHeader() {
   return (
-    <div className="relative z-20 flex items-center justify-between border-b border-white/10 bg-slate-950/35 px-5 py-4">
+    <div className="relative z-20 flex items-center justify-between border-b border-border bg-card px-5 py-4">
       <div>
         <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-slate-500">
           Podgląd analizy
         </p>
 
-        <p className="mt-1 text-sm font-semibold text-white">
+        <p className="mt-1 text-sm font-semibold text-foreground">
           Techniczny podgląd danych pozy
         </p>
       </div>
 
-      <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-200">
+      <div className="flex items-center gap-2 rounded-full border border-orange-200 bg-brand-soft px-3 py-1.5 text-xs font-semibold text-accent-foreground dark:border-orange-800">
         <span className="relative flex size-2">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50 motion-reduce:animate-none" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
@@ -212,7 +212,7 @@ function PreviewHeader() {
 
 function CornerMarkers() {
   const common =
-    "pointer-events-none absolute z-10 size-8 border-cyan-300/25";
+    "pointer-events-none absolute z-10 size-8 border-primary/30";
 
   return (
     <>
@@ -236,12 +236,12 @@ function Metric({
   variant?: "default" | "warning";
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] px-3 py-3">
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3">
       <div
         className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${
           variant === "warning"
             ? "bg-amber-400/10 text-amber-300"
-            : "bg-cyan-400/[0.08] text-cyan-300"
+            : "bg-brand-soft text-accent-foreground"
         }`}
       >
         <Icon className="size-4" />
@@ -254,7 +254,7 @@ function Metric({
 
         <p
           className={`mt-0.5 truncate text-sm font-bold ${
-            variant === "warning" ? "text-amber-300" : "text-white"
+            variant === "warning" ? "text-amber-700 dark:text-amber-300" : "text-foreground"
           }`}
         >
           {value}
@@ -267,8 +267,8 @@ function Metric({
 function BackgroundEffects() {
   return (
     <div className="pointer-events-none absolute inset-0">
-      <div className="absolute left-[-12%] top-[-22%] size-[640px] rounded-full bg-emerald-500/[0.09] blur-[150px]" />
-      <div className="absolute bottom-[-30%] right-[-12%] size-[680px] rounded-full bg-cyan-500/[0.09] blur-[160px]" />
+      <div className="absolute left-[-12%] top-[-22%] size-[640px] rounded-full bg-orange-200/25 blur-[150px] dark:bg-orange-950/15" />
+      <div className="absolute bottom-[-30%] right-[-12%] size-[680px] rounded-full bg-neutral-200/35 blur-[160px] dark:bg-neutral-900/30" />
 
       <div
         className="absolute inset-0 opacity-[0.035]"
@@ -296,18 +296,18 @@ function AnalysisRegionControls({
   const region = getAnalysisRegion(activeRegion);
 
   return (
-    <div className="relative z-20 grid gap-4 border-t border-white/10 bg-slate-950/55 p-4 sm:grid-cols-[minmax(0,1fr)_290px] sm:p-5">
+    <div className="relative z-20 grid gap-4 border-t border-border bg-card p-4 sm:grid-cols-[minmax(0,1fr)_290px] sm:p-5">
       <div
-        className="min-w-0 rounded-2xl border border-cyan-300/10 bg-cyan-400/[0.035] p-4"
+        className="min-w-0 rounded-xl border border-border bg-surface-muted p-4"
         aria-live="polite"
       >
-        <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.17em] text-cyan-300/75">
+        <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.17em] text-accent-foreground">
           <Crosshair className="size-3.5" aria-hidden="true" />
           Analizowany obszar
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <p className="font-semibold text-white">{region.label}</p>
-          <p className="text-xs font-medium text-emerald-200">
+          <p className="font-semibold text-foreground">{region.label}</p>
+          <p className="text-xs font-medium text-accent-foreground">
             {region.metric}
           </p>
         </div>
@@ -331,10 +331,10 @@ function AnalysisRegionControls({
                 type="button"
                 onClick={() => onRegionSelect(item.id)}
                 aria-pressed={active}
-                className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-[10px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 sm:text-[11px] motion-reduce:transition-none ${
+                className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-[10px] font-semibold transition sm:text-[11px] motion-reduce:transition-none ${
                   active
-                    ? "border-cyan-300/30 bg-cyan-400/15 text-cyan-100"
-                    : "border-white/[0.07] bg-white/[0.035] text-slate-400 hover:bg-white/[0.08] hover:text-slate-200"
+                    ? "border-primary/40 bg-brand-soft text-accent-foreground"
+                    : "border-border bg-surface text-muted-foreground hover:border-orange-200 hover:bg-brand-soft hover:text-foreground"
                 }`}
               >
                 {active && (

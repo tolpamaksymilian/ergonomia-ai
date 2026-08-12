@@ -80,7 +80,7 @@ function Background() {
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-52 -top-40 size-[620px] rounded-full bg-emerald-500/[0.07] blur-[160px]" />
 
-      <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-cyan-500/[0.07] blur-[170px]" />
+      <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-primary/[0.07] blur-[170px]" />
 
       <div
         className="absolute inset-0 opacity-[0.025]"

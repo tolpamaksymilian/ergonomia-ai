@@ -26,7 +26,7 @@ export function AuthorBust({
   const accentMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: "#0e7490",
+        color: "#f97316",
         emissive: "#0891b2",
         emissiveIntensity: 0.18,
         roughness: 0.5,

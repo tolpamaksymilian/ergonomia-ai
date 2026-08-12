@@ -16,7 +16,7 @@ export function AnalysesAutoRefresh({ enabled }: { enabled: boolean }) {
     <button
       type="button"
       onClick={() => router.refresh()}
-      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+      className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <RefreshCw className="size-3.5" />
       Odśwież

@@ -89,7 +89,7 @@ export default async function UserPanelPage() {
                 href="/panel/analizy"
                 className="ui-button-secondary"
               >
-                <FileVideo className="size-5 text-cyan-300" />
+                <FileVideo className="size-5 text-primary" />
                 Historia analiz
               </Link>
             </div>
@@ -97,8 +97,8 @@ export default async function UserPanelPage() {
           </div>
 
           <div className="ui-card p-7">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-400/10">
-              <UserRound className="size-6 text-cyan-300" />
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/10">
+              <UserRound className="size-6 text-primary" />
             </div>
 
             <p className="mt-6 text-xs uppercase tracking-[0.18em] text-slate-500">

@@ -23,7 +23,7 @@ export function AnalysisAvailability() {
           const Icon = stage.icon;
           return (
             <li key={stage.title} className="flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.07] bg-slate-950/30 p-3">
-              <Icon className={`size-4 shrink-0 ${stage.active ? "text-cyan-300" : "text-slate-500"}`} aria-hidden="true" />
+              <Icon className={`size-4 shrink-0 ${stage.active ? "text-primary" : "text-muted-foreground"}`} aria-hidden="true" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-200">{stage.title}</p>
                 <p className="text-xs text-slate-500">{stage.status}</p>

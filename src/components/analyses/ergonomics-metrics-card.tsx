@@ -22,18 +22,18 @@ export function ErgonomicsMetricsCard({
 }: ErgonomicsMetricsCardProps) {
   return (
     <section
-      className="rounded-[28px] border border-cyan-400/20 bg-cyan-400/[0.055] p-6"
+      className="rounded-xl border border-border bg-card p-6"
       aria-labelledby="ergonomics-metrics-title"
     >
       <div className="flex items-start gap-4">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10">
-          <CircleGauge className="size-5 text-cyan-200" aria-hidden="true" />
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft dark:border-orange-800">
+          <CircleGauge className="size-5 text-primary" aria-hidden="true" />
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/75">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-accent-foreground">
             Dane techniczne etapu
           </p>
-          <h2 id="ergonomics-metrics-title" className="mt-1 text-xl font-semibold text-cyan-100">
+          <h2 id="ergonomics-metrics-title" className="mt-1 text-xl font-semibold text-foreground">
             Metryki są gotowe
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-400">
@@ -85,7 +85,7 @@ function TechnicalValue({
   return (
     <div className="min-w-0 rounded-2xl border border-white/[0.07] bg-slate-950/40 p-4">
       <dt className="flex items-center gap-2 text-[9px] uppercase tracking-[0.13em] text-slate-500">
-        <Icon className="size-3.5 shrink-0 text-cyan-300" aria-hidden="true" />
+        <Icon className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
         {label}
       </dt>
       <dd className="mt-2 break-words text-sm font-semibold text-slate-100">

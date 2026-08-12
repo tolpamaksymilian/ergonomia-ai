@@ -13,8 +13,8 @@ const findingLevelLabels = {
 
 export function ReportV2Summary({ report }: { report: AnalysisReport }) {
   if (!["analysis-report-v2.0-beta.1", "analysis-report-v2.1-beta.1", "analysis-report-v2.2-beta.1", "analysis-report-v2.3-beta.1"].includes(report.report_version)) return null;
-  return <section className="report-card rounded-[26px] border border-cyan-300/15 bg-cyan-300/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white">
-        <h2 className="flex items-center gap-2 text-xl font-semibold text-white print:text-black"><ListChecks className="size-5 text-cyan-300 print:text-black" aria-hidden="true" />Podsumowanie</h2>
+  return <section className="report-card rounded-xl border border-border bg-card p-6 sm:p-7 print:border-slate-300 print:bg-white">
+        <h2 className="flex items-center gap-2 text-xl font-semibold text-foreground print:text-black"><ListChecks className="size-5 text-primary print:text-black" aria-hidden="true" />Podsumowanie</h2>
         <ul className="mt-5 space-y-2 text-sm leading-6 text-slate-300 print:text-slate-700">{report.executive_summary?.map((line) => <li key={line}>— {line}</li>)}</ul>
       </section>;
 }
@@ -26,7 +26,7 @@ export function ReportPriorityFindings({ report }: { report: AnalysisReport }) {
 
 export function ReportRecommendations({ report }: { report: AnalysisReport }) {
   if (!report.recommendations?.length) return null;
-  return <section className="report-card rounded-[26px] border border-white/10 bg-white/[0.035] p-6 sm:p-7 print:border-slate-300 print:bg-white"><h2 className="flex items-center gap-2 text-xl font-semibold text-white print:text-black"><Lightbulb className="size-5 text-cyan-300 print:text-black" aria-hidden="true" />Kierunki do weryfikacji</h2><ol className="mt-5 space-y-3">{report.recommendations.map((item, index) => <li key={item.recommendation_id} className="flex gap-3 text-sm leading-6 text-slate-300 print:text-slate-700"><span className="font-semibold text-cyan-300 print:text-black">{index + 1}.</span>{item.text}</li>)}</ol></section>;
+  return <section className="report-card rounded-xl border border-border bg-card p-6 sm:p-7 print:border-slate-300 print:bg-white"><h2 className="flex items-center gap-2 text-xl font-semibold text-foreground print:text-black"><Lightbulb className="size-5 text-primary print:text-black" aria-hidden="true" />Kierunki do weryfikacji</h2><ol className="mt-5 space-y-3">{report.recommendations.map((item, index) => <li key={item.recommendation_id} className="flex gap-3 text-sm leading-6 text-muted-foreground print:text-slate-700"><span className="font-semibold text-accent-foreground print:text-black">{index + 1}.</span>{item.text}</li>)}</ol></section>;
 }
 
 export function ReportManualConfirmation({ report }: { report: AnalysisReport }) {

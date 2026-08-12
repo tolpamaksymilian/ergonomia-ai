@@ -371,7 +371,7 @@ export default async function AnalysisDetailsPage({
         </header>
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.38fr]">
-          <div className="rounded-[32px] border border-white/10 bg-gradient-to-br from-emerald-400/[0.08] via-slate-900/65 to-cyan-400/[0.08] p-8 sm:p-10">
+          <div className="rounded-[32px] border border-border bg-gradient-to-br from-primary/[0.08] via-card to-transparent p-8 sm:p-10">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
               Analiza ergonomiczna
             </p>
@@ -689,7 +689,7 @@ function Metric({
 }) {
   return (
     <article className="min-w-0 rounded-[24px] border border-white/10 bg-white/[0.035] p-5">
-      <FileVideo className="size-5 text-cyan-300" />
+      <FileVideo className="size-5 text-primary" />
 
       <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-slate-500">
         {label}
@@ -716,7 +716,7 @@ function PipelineStep({
       {completed ? (
         <CheckCircle2 className="size-5 shrink-0 text-emerald-300" />
       ) : active ? (
-        <LoaderCircle className="size-5 shrink-0 animate-spin text-cyan-300" />
+        <LoaderCircle className="size-5 shrink-0 animate-spin text-primary" />
       ) : (
         <Clock3 className="size-5 shrink-0 text-slate-600" />
       )}
@@ -726,7 +726,7 @@ function PipelineStep({
           completed
             ? "text-sm font-semibold text-emerald-200"
             : active
-              ? "text-sm font-semibold text-cyan-200"
+              ? "text-sm font-semibold text-primary"
               : "text-sm text-slate-500"
         }
       >
@@ -777,7 +777,7 @@ function Background() {
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-52 -top-40 size-[620px] rounded-full bg-emerald-500/[0.07] blur-[160px]" />
 
-      <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-cyan-500/[0.07] blur-[170px]" />
+      <div className="absolute -right-52 top-[500px] size-[620px] rounded-full bg-primary/[0.07] blur-[170px]" />
     </div>
   );
 }

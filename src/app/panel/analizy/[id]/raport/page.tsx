@@ -134,7 +134,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
         <ReportRecommendations report={report} />
         <ReportLimitations report={report} />
         <details className="report-card rounded-[26px] border border-white/10 bg-white/[0.025] p-6 print:border-slate-300 print:bg-white">
-          <summary className="cursor-pointer font-semibold text-slate-200 focus-visible:outline-2 focus-visible:outline-cyan-200 print:text-black">Załącznik techniczny</summary>
+          <summary className="cursor-pointer font-semibold text-foreground print:text-black">Załącznik techniczny</summary>
           <div className="mt-6 space-y-6">
             <dl className="grid gap-2 text-[10px] text-slate-500 sm:grid-cols-2 lg:grid-cols-4 print:text-slate-700">
               <div><dt>Pose Pipeline</dt><dd className="mt-1 font-medium text-slate-300 print:text-black">{report.processing.pose_pipeline_version ?? "Brak danych"}</dd></div>
@@ -182,7 +182,7 @@ function ReportUnavailable({
         <p className="mt-3 leading-7 text-slate-300">{message}</p>
         <Link
           href={`/panel/analizy/${analysisId}`}
-          className="mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 font-semibold transition hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-cyan-200"
+          className="ui-button-secondary mt-7"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           Wróć do analizy

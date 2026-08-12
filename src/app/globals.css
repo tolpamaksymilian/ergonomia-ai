@@ -17,7 +17,7 @@
   --secondary: #f1f1f1;
   --secondary-foreground: #171717;
   --muted: #f0f0f0;
-  --muted-foreground: #5f5f5f;
+  --muted-foreground: #737373;
   --accent: #fff7ed;
   --accent-foreground: #9a3412;
   --border: #e5e5e5;
@@ -27,7 +27,7 @@
   --brand: #f97316;
   --brand-hover: #ea580c;
   --brand-soft: #fff7ed;
-  --shadow-subtle: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-subtle: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 14px rgb(0 0 0 / 0.035);
 }
 
 html.dark,
@@ -122,16 +122,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 /* Compatibility layer while legacy screens move to semantic utilities. */
-html:not(.dark) :is(main, header, footer)[class*="bg-"] { background-color: var(--background) !important; color: var(--foreground) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-slate-950"] { background-color: var(--surface-muted) !important; }
-html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-slate-9"] { background-color: var(--surface-muted) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="bg-white/["] { background-color: var(--surface) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.bg-white, [class*="bg-slate-100"]) { background-color: var(--surface) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="border-white/"] { border-color: var(--border) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) [class*="border-slate-"] { border-color: var(--border) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.text-white, .text-slate-100, .text-slate-200, .text-slate-300) { color: var(--foreground) !important; }
 html:not(.dark) :is(.review-panel, .report-page, main, header, footer) :is(.text-slate-400, .text-slate-500, .text-slate-600) { color: var(--muted-foreground) !important; }
-html.dark :is(main, header, footer)[class*="bg-slate-100"], html.dark :is(main, header, footer)[class*="bg-white"] { background-color: var(--background) !important; color: var(--foreground) !important; }
 html.dark :is(main, header, footer) :is(.bg-white, [class*="bg-slate-100"]) { background-color: var(--surface) !important; color: var(--foreground) !important; }
 html.dark :is(main, header, footer) :is(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700) { color: var(--foreground) !important; }
 html.dark :is(main, header, footer) :is(.text-slate-600, .text-slate-500, .text-slate-400) { color: var(--muted-foreground) !important; }

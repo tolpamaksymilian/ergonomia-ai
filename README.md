@@ -2,7 +2,7 @@
 
 System do analizy ergonomii pracy na podstawie krótkiego nagrania wideo.
 
-**Aktualna wersja: v0.11.0-beta.1 — jasny i ciemny motyw oraz odświeżony design system.**
+**Aktualna wersja: v0.11.1-beta.1 — dopracowany Light Theme i spójny orange branding.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 

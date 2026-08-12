@@ -91,9 +91,9 @@ export function RiskAssessmentCard({
       aria-labelledby="risk-assessment-heading"
       className="overflow-hidden rounded-[30px] border border-white/10 bg-slate-950/65"
     >
-      <div className="grid gap-6 border-b border-white/[0.08] bg-gradient-to-br from-cyan-400/[0.08] via-transparent to-emerald-400/[0.06] p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-start">
+      <div className="grid gap-6 border-b border-border bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-start">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
             Techniczny screening ergonomiczny
           </p>
           <h2 id="risk-assessment-heading" className="mt-3 text-2xl font-semibold">
@@ -148,7 +148,7 @@ export function RiskAssessmentCard({
       <div className="grid gap-6 border-t border-white/[0.08] p-6 sm:p-8 lg:grid-cols-2">
         <div>
           <h3 className="flex items-center gap-2 font-semibold text-slate-100">
-            <ShieldCheck className="size-5 text-cyan-300" aria-hidden="true" />
+            <ShieldCheck className="size-5 text-primary" aria-hidden="true" />
             Profil oceny
           </h3>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">

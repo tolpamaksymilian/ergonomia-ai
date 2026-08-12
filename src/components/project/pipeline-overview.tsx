@@ -21,18 +21,18 @@ export function PipelineOverview({
     >
       {stages.map((stage, index) => (
         <li key={stage.id} className="relative min-w-0">
-          <article className="h-full rounded-[24px] border border-white/10 bg-white/[0.035] p-5">
+          <article className="ui-card h-full p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.07] font-mono text-sm font-bold text-cyan-200">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft font-mono text-sm font-bold text-accent-foreground dark:border-orange-800">
                 {String(index + 1).padStart(2, "0")}
               </span>
               <FeatureStatusBadge status={stage.status} />
             </div>
 
-            <h3 className="mt-5 break-words text-lg font-semibold text-white">
+            <h3 className="mt-5 break-words text-lg font-semibold text-foreground">
               {stage.title}
             </h3>
-            <p className="mt-3 text-sm leading-6 text-slate-400">
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
               {stage.description}
             </p>
           </article>
@@ -45,7 +45,7 @@ export function PipelineOverview({
               />
               {index % 3 !== 2 && (
                 <ArrowRight
-                  className="absolute -right-3.5 top-1/2 z-10 hidden size-3.5 -translate-y-1/2 text-cyan-400/35 xl:block"
+                  className="absolute -right-3.5 top-1/2 z-10 hidden size-3.5 -translate-y-1/2 text-primary/35 xl:block"
                   aria-hidden="true"
                 />
               )}

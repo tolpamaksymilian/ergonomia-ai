@@ -373,7 +373,7 @@ function HeadAndNeck({
           position={[0, -0.055, p.headDepth * 0.48]}
         >
           <meshStandardMaterial
-            color={active ? "#1c7180" : "#164d5a"}
+            color={active ? "#c2410c" : "#303030"}
             emissive={visualizationPalette.activeEmissive}
             emissiveIntensity={active ? 0.22 : 0.07}
             roughness={0.48}
@@ -382,7 +382,7 @@ function HeadAndNeck({
         </RoundedBox>
         <mesh position={[0, -0.05, p.headDepth * 0.5 + 0.016]}>
           <boxGeometry args={[0.014, p.headHeight * 0.31, 0.008]} />
-          <meshBasicMaterial color="#67e8f9" transparent opacity={0.55} />
+          <meshBasicMaterial color="#f97316" transparent opacity={0.55} />
         </mesh>
         <Line
           points={[
@@ -390,7 +390,7 @@ function HeadAndNeck({
             [0, -p.headHeight * 0.3, p.headDepth * 0.52],
             [p.headWidth * 0.22, -p.headHeight * 0.2, p.headDepth * 0.51],
           ]}
-          color="#67e8f9"
+          color="#f97316"
           lineWidth={0.75}
           transparent
           opacity={0.48}

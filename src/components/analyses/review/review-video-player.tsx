@@ -79,7 +79,7 @@ export function ReviewVideoPlayer({
     <section className="min-w-0 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/20">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-4 py-3 sm:px-5">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Podgląd analizy</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent-foreground">Podgląd analizy</p>
           <p className="mt-1 truncate text-sm text-slate-400">{fileName}</p>
         </div>
         {overlayUrl && originalUrl && (
@@ -90,7 +90,7 @@ export function ReviewVideoPlayer({
                 type="button"
                 aria-pressed={source === value}
                 onClick={() => setSource(value)}
-                className={`rounded-lg px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-cyan-200 ${source === value ? "bg-cyan-300 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${source === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
               >
                 {value === "overlay" ? "Analiza" : "Oryginał"}
               </button>
@@ -142,7 +142,7 @@ export function ReviewVideoPlayer({
           <select
             value={playbackRate}
             onChange={(event) => changeRate(Number(event.target.value))}
-            className="rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-white focus-visible:outline-2 focus-visible:outline-cyan-200"
+            className="rounded-lg border border-border bg-card px-2 py-1.5 text-foreground focus-visible:outline-2 focus-visible:outline-ring"
             aria-label="Prędkość odtwarzania"
           >
             {[0.5, 1, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}

@@ -53,22 +53,22 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
       </section>
 
       <section className="px-5 pb-20 sm:px-6 sm:pb-24">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 rounded-[26px] border border-emerald-300/15 bg-emerald-300/[0.05] p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+        <div className="ui-card mx-auto flex max-w-7xl flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
           <div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-100">
+              <span className="rounded-full border border-orange-200 bg-brand-soft px-3 py-1 text-xs font-semibold text-accent-foreground dark:border-orange-800">
                 {release.statusLabel}
               </span>
-              <span className="font-mono text-sm text-emerald-200">v{release.version}</span>
+              <span className="rounded-full border border-border bg-surface-muted px-3 py-1 font-mono text-xs font-semibold text-muted-foreground">v{release.version}</span>
             </div>
-            <h2 className="mt-4 text-2xl font-bold text-white">Pełny przepływ jest gotowy do testów</h2>
-            <p className="mt-2 text-sm text-slate-400">
+            <h2 className="mt-4 flex items-center gap-2 text-2xl font-bold text-foreground"><span className="size-2.5 rounded-full bg-emerald-500" aria-hidden="true" />Pełny przepływ jest gotowy do testów</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
               Pierwsza wersja testowa prowadzi od filmu do raportu.
             </p>
           </div>
           <Link
             href="/o-projekcie"
-            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.09] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-cyan-300"
+            className="ui-button-secondary shrink-0 text-sm hover:border-orange-200 hover:bg-brand-soft"
           >
             O projekcie
             <ArrowRight className="size-4" aria-hidden="true" />
@@ -83,15 +83,15 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
             {projectStatus.publicPlans.map((plan, index) => {
               const Icon = planIcons[index];
               return (
-                <article key={plan.id} className="rounded-[22px] border border-white/[0.08] bg-white/[0.025] p-5">
+                <article key={plan.id} className="ui-card p-5">
                   <div className="flex items-start justify-between gap-3">
                     <Icon className="size-5 text-slate-400" aria-hidden="true" />
-                    <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <span className="rounded-full border border-border bg-surface-muted px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Planowane
                     </span>
                   </div>
-                  <h3 className="mt-4 font-semibold text-white">{plan.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{plan.description}</p>
+                  <h3 className="mt-4 font-semibold text-foreground">{plan.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{plan.description}</p>
                 </article>
               );
             })}
@@ -102,7 +102,7 @@ export function HomeProjectSections({ isAuthenticated }: { isAuthenticated: bool
       <section className="px-5 pb-24 sm:px-6 sm:pb-28">
         <div className="ui-card mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 p-7 sm:flex-row sm:items-center sm:p-9">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-300">Sprawdź nagranie</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-accent-foreground">Sprawdź nagranie</p>
             <h2 className="mt-3 text-2xl font-bold sm:text-3xl">Rozpocznij nową analizę</h2>
           </div>
           <Link

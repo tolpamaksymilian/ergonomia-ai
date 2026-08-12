@@ -84,19 +84,19 @@ export function AnalysisReviewWorkspace({ model, companyMethods, metadata, works
 
   return (
     <main className="ui-page relative px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(16,185,129,.08),transparent_30%),radial-gradient(circle_at_88%_35%,rgba(34,211,238,.07),transparent_30%)]" />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(249,115,22,.06),transparent_30%)]" />
       <div className="relative mx-auto max-w-[1540px] space-y-5 sm:space-y-6">
         <header className="ui-surface p-5 backdrop-blur-xl sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div className="min-w-0">
-              <Link href="/panel/analizy" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 transition hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-200"><ArrowLeft className="size-4" />Historia analiz</Link>
+              <Link href="/panel/analizy" className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground"><ArrowLeft className="size-4" />Historia analiz</Link>
               <div className="mt-5 flex items-center gap-3"><span className="flex size-11 items-center justify-center rounded-2xl border border-emerald-300/20 bg-emerald-300/10"><Activity className="size-6 text-emerald-300" /></span><div><p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.17em] text-emerald-300"><CheckCircle2 className="size-4" />Analiza gotowa</p><p className="mt-1 text-xs text-slate-500">{formatDate(analysis.createdAt)}</p></div></div>
               <h1 className="mt-5 max-w-4xl text-3xl font-bold tracking-[-0.035em] sm:text-4xl lg:text-5xl">{analysis.title}</h1>
               {analysis.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{analysis.description}</p>}
             </div>
             <div className="flex flex-wrap gap-2"><ThemeToggle />
               <Link href={`/panel/analizy/${analysis.id}/raport`} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"><FileText className="size-4" />Raport</Link>
-              {urls.reportJson && <a href={urls.reportJson} download className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08] focus-visible:outline-2 focus-visible:outline-cyan-200"><Download className="size-4" />Pobierz dane</a>}
+              {urls.reportJson && <a href={urls.reportJson} download className="ui-button-secondary text-sm"><Download className="size-4" />Pobierz dane</a>}
             </div>
           </div>
           <dl className="mt-6 flex flex-wrap gap-x-6 gap-y-3 border-t border-white/[0.08] pt-5 text-xs text-slate-500">
@@ -113,8 +113,8 @@ export function AnalysisReviewWorkspace({ model, companyMethods, metadata, works
           <h2 id="top-findings-title" className="mt-2 text-xl font-semibold">Najważniejsze wnioski</h2>
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             {model.keyMoments.slice(0, 3).map((moment) => (
-              <button key={moment.id} type="button" onClick={() => seekTo(moment.time)} className="rounded-2xl border border-white/[0.08] bg-slate-950/35 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/[0.05] focus-visible:outline-2 focus-visible:outline-cyan-200">
-                <span className="text-xs font-semibold text-cyan-300">{formatDuration(moment.time)}</span>
+              <button key={moment.id} type="button" onClick={() => seekTo(moment.time)} className="rounded-xl border border-border bg-surface-muted p-4 text-left transition hover:border-orange-200 hover:bg-brand-soft">
+                <span className="text-xs font-semibold text-accent-foreground">{formatDuration(moment.time)}</span>
                 <span className="mt-2 block font-semibold text-slate-100">{moment.title}</span>
                 <span className="mt-2 block text-sm leading-6 text-slate-400">{moment.description}</span>
               </button>
@@ -145,7 +145,7 @@ export function AnalysisReviewWorkspace({ model, companyMethods, metadata, works
 
         <section className="review-panel flex flex-wrap items-center justify-between gap-4">
           <div><p className="review-eyebrow"><Video className="size-4" /> Pełny raport</p><h2 className="mt-2 text-xl font-semibold">Uporządkowane podsumowanie do druku</h2></div>
-          <Link href={`/panel/analizy/${analysis.id}/raport`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.08] px-4 py-2.5 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/[0.14] focus-visible:outline-2 focus-visible:outline-cyan-200"><FileText className="size-4" />Otwórz raport</Link>
+          <Link href={`/panel/analizy/${analysis.id}/raport`} className="ui-button-secondary text-sm hover:border-orange-200 hover:bg-brand-soft"><FileText className="size-4" />Otwórz raport</Link>
         </section>
       </div>
     </main>

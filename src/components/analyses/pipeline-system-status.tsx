@@ -56,7 +56,7 @@ export function PipelineSystemStatus({ initialAnalysis }: { initialAnalysis: Ana
   const canRestart = response.control_allowed && ["WORKER_OFFLINE", "CRASH_LOOP", "DEGRADED", "STALLED"].includes(watchdog);
   const tone = {
     neutral: "border-white/10 bg-white/[0.025]",
-    info: "border-cyan-300/15 bg-cyan-300/[0.035]",
+    info: "border-border bg-card",
     warning: "border-amber-300/20 bg-amber-300/[0.045]",
     error: "border-red-300/20 bg-red-300/[0.045]",
     success: "border-emerald-300/15 bg-emerald-300/[0.035]",
@@ -89,13 +89,13 @@ export function PipelineSystemStatus({ initialAnalysis }: { initialAnalysis: Ana
             <p className="mt-1 text-sm leading-5 text-slate-400">{alert.description}</p>
           </div>
         </div>
-        {canRestart && <button type="button" disabled={pending} onClick={() => void control(watchdog === "WORKER_OFFLINE" && health.supervisor_pid === null ? "start" : "restart")} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.1] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-cyan-300">
+        {canRestart && <button type="button" disabled={pending} onClick={() => void control(watchdog === "WORKER_OFFLINE" && health.supervisor_pid === null ? "start" : "restart")} className="ui-button-secondary min-h-10 text-sm">
           {watchdog === "WORKER_OFFLINE" && health.supervisor_pid === null ? <Play className="size-4" /> : <RotateCcw className="size-4" />}
           {pending ? "Uruchamianie…" : watchdog === "WORKER_OFFLINE" && health.supervisor_pid === null ? "Uruchom Worker" : "Uruchom ponownie Worker"}
         </button>}
       </div>
       {!isQuiet && <details className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-slate-500">
-        <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-slate-400 focus-visible:outline-2 focus-visible:outline-cyan-300">Szczegóły techniczne <ChevronDown className="size-3" /></summary>
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-muted-foreground">Szczegóły techniczne <ChevronDown className="size-3" /></summary>
         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <SystemDatum label="Worker" value={health.status === "online" ? "Online" : health.status} />
           <SystemDatum label="Pipeline" value={health.state} />

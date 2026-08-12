@@ -11,19 +11,19 @@ const statusDetails = {
     label: "Gotowe",
     icon: CheckCircle2,
     className:
-      "border-emerald-400/20 bg-emerald-400/10 text-emerald-200",
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-300",
   },
   in_progress: {
     label: "W realizacji",
     icon: LoaderCircle,
     className:
-      "border-cyan-400/20 bg-cyan-400/10 text-cyan-200",
+      "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950/35 dark:text-orange-300",
   },
   planned: {
     label: "Planowane",
     icon: Clock3,
     className:
-      "border-white/10 bg-white/[0.05] text-slate-400",
+      "border-border bg-surface-muted text-muted-foreground",
   },
 } satisfies Record<
   ProjectStageStatus,

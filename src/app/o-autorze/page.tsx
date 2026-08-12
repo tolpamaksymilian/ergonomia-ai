@@ -25,7 +25,7 @@ const focusIcons = [Braces, Cog, ChartNoAxesCombined, Bot] as const;
 
 export default function AuthorPage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#050b14] text-white">
+    <main className="ui-page">
       <SiteHeader />
       <section className="relative px-5 pb-24 pt-32 sm:px-6 sm:pt-40">
         <Background />
@@ -34,7 +34,7 @@ export default function AuthorPage() {
             <header className="lg:col-start-1 lg:row-start-1">
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">O autorze</p>
               <h1 className="mt-5 text-4xl font-bold tracking-[-0.045em] sm:text-6xl">{authorProfile.name}</h1>
-              <p className="mt-3 text-lg font-medium text-cyan-200">{authorProfile.role}</p>
+              <p className="mt-3 text-lg font-medium text-accent-foreground">{authorProfile.role}</p>
             </header>
 
             <div className="relative overflow-hidden rounded-[30px] border border-white/[0.09] bg-[#07131e] shadow-[0_32px_100px_rgba(0,0,0,0.38)] lg:col-start-2 lg:row-span-2 lg:row-start-1">
@@ -63,7 +63,7 @@ export default function AuthorPage() {
                 const Icon = focusIcons[index];
                 return (
                   <article key={area.title} className="rounded-[22px] border border-white/[0.08] bg-white/[0.03] p-5">
-                    <Icon className="size-5 text-cyan-300" aria-hidden="true" />
+                    <Icon className="size-5 text-primary" aria-hidden="true" />
                     <h3 className="mt-4 font-semibold">{area.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-slate-400">{area.description}</p>
                   </article>
@@ -94,7 +94,7 @@ export default function AuthorPage() {
               {authorProfile.projectMotivation.map((paragraph) => (
                 <p key={paragraph} className="mb-4 leading-7 text-slate-300 last:mb-0">{paragraph}</p>
               ))}
-              <Link href="/o-projekcie" className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-semibold transition hover:bg-white/[0.09] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-cyan-300">
+              <Link href="/o-projekcie" className="ui-button-secondary mt-6 text-sm">
                 Poznaj projekt
                 <ArrowRight className="size-4" aria-hidden="true" />
               </Link>
@@ -131,7 +131,7 @@ function Background() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-40 top-0 size-[540px] rounded-full bg-emerald-500/[0.055] blur-[160px]" />
-      <div className="absolute -right-48 top-48 size-[580px] rounded-full bg-cyan-500/[0.05] blur-[170px]" />
+      <div className="absolute -right-48 top-48 size-[580px] rounded-full bg-orange-200/20 blur-[170px] dark:bg-orange-950/10" />
     </div>
   );
 }

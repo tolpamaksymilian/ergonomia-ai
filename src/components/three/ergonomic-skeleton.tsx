@@ -14,6 +14,7 @@ import {
   type AnalysisFocusMode,
   type AnalysisRegionId,
 } from "@/config/analysis-visualization";
+import type { AppTheme } from "@/lib/theme";
 
 type ErgonomicSkeletonProps = {
   activeRegion: AnalysisRegionId;
@@ -21,6 +22,7 @@ type ErgonomicSkeletonProps = {
   onRegionHover?: (region: AnalysisRegionId | null) => void;
   onRegionSelect?: (region: AnalysisRegionId) => void;
   reducedMotion?: boolean;
+  theme?: AppTheme;
 };
 
 function CameraRig({
@@ -76,14 +78,14 @@ function CameraRig({
   return null;
 }
 
-function IndustrialEnvironment({ compact }: { compact: boolean }) {
+function IndustrialEnvironment({ compact, dark }: { compact: boolean; dark: boolean }) {
   return (
     <group position={[0, 0, -1.25]}>
       {[-2.05, 2.05].map((x) => (
         <mesh key={x} position={[x, 0.02, 0]}>
           <boxGeometry args={[0.06, 5.2, 0.09]} />
           <meshStandardMaterial
-            color="#0c2633"
+            color={dark ? "#262626" : "#d4d4d4"}
             metalness={0.28}
             roughness={0.7}
           />
@@ -93,7 +95,7 @@ function IndustrialEnvironment({ compact }: { compact: boolean }) {
         <mesh key={y} position={[0, y, 0]}>
           <boxGeometry args={[4.15, 0.045, 0.08]} />
           <meshStandardMaterial
-            color="#103341"
+            color={dark ? "#303030" : "#e5e5e5"}
             metalness={0.22}
             roughness={0.68}
           />
@@ -104,8 +106,8 @@ function IndustrialEnvironment({ compact }: { compact: boolean }) {
           <mesh>
             <boxGeometry args={[0.46, 0.66, 0.035]} />
             <meshStandardMaterial
-              color="#081d28"
-              emissive="#0e7490"
+              color={dark ? "#171717" : "#f5f5f5"}
+              emissive="#f97316"
               emissiveIntensity={0.06}
               roughness={0.72}
             />
@@ -113,7 +115,7 @@ function IndustrialEnvironment({ compact }: { compact: boolean }) {
           {[-0.16, 0, 0.16].map((y) => (
             <mesh key={y} position={[0, y, 0.026]}>
               <boxGeometry args={[0.28, 0.012, 0.008]} />
-              <meshBasicMaterial color="#22d3ee" transparent opacity={0.24} />
+              <meshBasicMaterial color={dark ? "#737373" : "#a3a3a3"} transparent opacity={0.24} />
             </mesh>
           ))}
         </group>
@@ -122,16 +124,16 @@ function IndustrialEnvironment({ compact }: { compact: boolean }) {
   );
 }
 
-function Floor({ compact }: { compact: boolean }) {
+function Floor({ compact, dark }: { compact: boolean; dark: boolean }) {
   return (
     <group position={[0, visualizationDetail.floorY, 0]}>
       <gridHelper
-        args={[7, compact ? 12 : 20, "#155e75", "#0c2531"]}
+        args={[7, compact ? 12 : 20, dark ? "#525252" : "#d4d4d4", dark ? "#262626" : "#e5e5e5"]}
       />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.006, 0]}>
         <circleGeometry args={[1.35, compact ? 36 : 64]} />
         <meshBasicMaterial
-          color="#0e7490"
+          color="#f97316"
           transparent
           opacity={0.045}
           depthWrite={false}
@@ -139,7 +141,7 @@ function Floor({ compact }: { compact: boolean }) {
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
         <ringGeometry args={[0.72, 0.735, compact ? 36 : 64]} />
-        <meshBasicMaterial color="#22d3ee" transparent opacity={0.32} />
+        <meshBasicMaterial color="#f97316" transparent opacity={dark ? 0.32 : 0.22} />
       </mesh>
     </group>
   );
@@ -151,36 +153,40 @@ function Scene({
   onRegionHover,
   onRegionSelect,
   reducedMotion,
+  theme,
 }: {
   activeRegion: AnalysisRegionId;
   focusMode: AnalysisFocusMode;
   onRegionHover: (region: AnalysisRegionId | null) => void;
   onRegionSelect: (region: AnalysisRegionId) => void;
   reducedMotion: boolean;
+  theme: AppTheme;
 }) {
   const { size } = useThree();
   const compact = size.width < 520;
+  const dark = theme === "dark";
 
   return (
     <>
-      <fog attach="fog" args={["#06101b", 10.5, 16]} />
+      <color attach="background" args={[dark ? "#111111" : "#f7f7f7"]} />
+      <fog attach="fog" args={[dark ? "#111111" : "#f7f7f7", 10.5, 16]} />
       <CameraRig focusMode={focusMode} reducedMotion={reducedMotion} />
 
-      <hemisphereLight args={["#b9f7f0", "#041019", 0.72]} />
+      <hemisphereLight args={[dark ? "#fafafa" : "#ffffff", dark ? "#090909" : "#d4d4d4", dark ? 0.72 : 1.05]} />
       <directionalLight
         position={[3.5, 5.5, 5.5]}
         intensity={2.05}
-        color="#d8fff7"
+        color={dark ? "#fff7ed" : "#ffffff"}
       />
       <directionalLight
         position={[-3.8, 2.2, -2.4]}
         intensity={1.15}
-        color="#22d3ee"
+        color={dark ? "#fb923c" : "#fed7aa"}
       />
       <pointLight
         position={[2.7, 0.4, 3.5]}
         intensity={8}
-        color="#10b981"
+        color="#f97316"
         distance={9}
       />
 
@@ -191,12 +197,12 @@ function Scene({
           size={0.72}
           speed={0.08}
           opacity={0.13}
-          color="#67e8f9"
+          color="#fb923c"
         />
       )}
 
-      <IndustrialEnvironment compact={compact} />
-      <Floor compact={compact} />
+      <IndustrialEnvironment compact={compact} dark={dark} />
+      <Floor compact={compact} dark={dark} />
       <TechnicalHumanModel
         activeRegion={activeRegion}
         compact={compact}
@@ -216,7 +222,7 @@ function Scene({
           scale={3.4}
           blur={2.8}
           far={3.2}
-          color="#020617"
+          color={dark ? "#000000" : "#525252"}
         />
       )}
     </>
@@ -229,6 +235,7 @@ export function ErgonomicSkeleton({
   onRegionHover = () => undefined,
   onRegionSelect = () => undefined,
   reducedMotion = false,
+  theme = "light",
 }: ErgonomicSkeletonProps) {
   return (
     <div className="h-[420px] w-full sm:h-[540px]">
@@ -256,6 +263,7 @@ export function ErgonomicSkeleton({
           onRegionHover={onRegionHover}
           onRegionSelect={onRegionSelect}
           reducedMotion={reducedMotion}
+          theme={theme}
         />
       </Canvas>
     </div>

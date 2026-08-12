@@ -59,7 +59,7 @@ export function AnalysisLiveStatus({ analysisId, initialState }: AnalysisLiveSta
   const visual = {
     neutral: { icon: Clock3, box: "border-white/10 bg-white/[0.035]", iconClass: "bg-white/[0.06] text-slate-400", text: "text-slate-300" },
     queued: { icon: Clock3, box: "border-amber-300/20 bg-amber-400/[0.06]", iconClass: "bg-amber-400/10 text-amber-300", text: "text-amber-300" },
-    active: { icon: LoaderCircle, box: "border-cyan-400/20 bg-cyan-400/[0.06]", iconClass: "bg-cyan-400/10 text-cyan-300", text: "text-cyan-300" },
+    active: { icon: LoaderCircle, box: "border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/25", iconClass: "bg-brand-soft text-primary", text: "text-accent-foreground" },
     success: { icon: CheckCircle2, box: "border-emerald-400/20 bg-emerald-400/[0.06]", iconClass: "bg-emerald-400/10 text-emerald-300", text: "text-emerald-300" },
     error: { icon: XCircle, box: "border-red-400/20 bg-red-400/[0.06]", iconClass: "bg-red-400/10 text-red-300", text: "text-red-300" },
   }[definition.visualType];
@@ -79,7 +79,7 @@ export function AnalysisLiveStatus({ analysisId, initialState }: AnalysisLiveSta
         <span className={`font-semibold ${visual.text}`}>{progress}%</span>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-[width]" style={{ width: `${progress}%` }} />
+        <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${progress}%` }} />
       </div>
       {definition.active && <p className="mt-4 text-xs text-slate-600">Status odświeża się automatycznie.</p>}
     </aside>

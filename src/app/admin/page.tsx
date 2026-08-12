@@ -38,7 +38,7 @@ export default async function AdminPage() {
     Boolean(usersCountError) || Boolean(latestProfilesError);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#050b14] p-5 text-white sm:p-8">
+    <main className="ui-page relative p-5 sm:p-8">
       <Background />
 
       <div className="relative mx-auto max-w-7xl">
@@ -58,7 +58,7 @@ export default async function AdminPage() {
           <nav className="flex flex-wrap items-center gap-3" aria-label="Nawigacja panelu administratora">
             <Link
               href="#rozwoj-systemu"
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.08] px-4 py-2.5 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-400/[0.13]"
+              className="ui-button-secondary text-sm hover:border-orange-200 hover:bg-brand-soft"
             >
               <ListChecks className="size-4" />
               Rozwój systemu
@@ -83,7 +83,7 @@ export default async function AdminPage() {
         </header>
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.38fr]">
-          <div className="overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-emerald-400/[0.1] via-slate-900/65 to-cyan-400/[0.08] p-8 sm:p-10">
+          <div className="ui-card overflow-hidden bg-gradient-to-br from-brand-soft via-card to-card p-8 sm:p-10">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">
               <ShieldCheck className="size-4" />
               Dostęp administratora
@@ -98,8 +98,8 @@ export default async function AdminPage() {
 
           <aside className="rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
             <div className="flex items-start justify-between gap-4">
-              <div className="flex size-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
-                <Users className="size-6 text-cyan-300" />
+              <div className="flex size-12 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft dark:border-orange-800">
+                <Users className="size-6 text-primary" />
               </div>
               <p className="text-3xl font-bold">
                 {hasDatabaseError ? "—" : usersCount ?? 0}
@@ -129,7 +129,7 @@ export default async function AdminPage() {
           className="mt-10 scroll-mt-6 rounded-[32px] border border-white/10 bg-white/[0.025] p-5 sm:p-8"
         >
           <div className="max-w-4xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-cyan-300">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-accent-foreground">
               Rozwój systemu
             </p>
             <h2 className="mt-4 text-3xl font-bold tracking-[-0.03em] sm:text-4xl">
@@ -178,7 +178,7 @@ export default async function AdminPage() {
                     className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                       item.role === "admin"
                         ? "bg-emerald-400/10 text-emerald-300"
-                        : "bg-cyan-400/10 text-cyan-300"
+                        : "bg-brand-soft text-accent-foreground"
                     }`}
                   >
                     {item.role === "admin" ? "Administrator" : "Użytkownik"}
@@ -208,7 +208,7 @@ function Background() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <div className="absolute -left-48 -top-40 size-[620px] rounded-full bg-emerald-500/[0.07] blur-[160px]" />
-      <div className="absolute -right-48 top-[420px] size-[620px] rounded-full bg-cyan-500/[0.07] blur-[170px]" />
+      <div className="absolute -right-48 top-[420px] size-[620px] rounded-full bg-orange-200/20 blur-[170px] dark:bg-orange-950/10" />
       <div
         className="absolute inset-0 opacity-[0.025]"
         style={{

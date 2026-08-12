@@ -80,7 +80,7 @@ const stages = [
   { id: "pipeline-supervisor", title: "Pipeline Supervisor", description: "Automatyczny start, heartbeat, preflight i kontrolowany restart lokalnego pipeline’u.", status: "completed", group: "infrastructure" },
   { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
   { id: "history-v2", title: "Historia analiz 2.0", description: "Wyszukiwanie, filtry URL, kategorie AND/OR i paginacja serwerowa.", status: "completed", group: "infrastructure" },
-  { id: "beta-release", title: "Wersja testowa", description: "Jasny i ciemny motyw oraz odświeżony design system w v0.11.0-beta.1.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa", description: "Dopracowany Light Theme i spójny orange branding w v0.11.1-beta.1.", status: "completed", group: "infrastructure" },
   { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
   { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
@@ -105,7 +105,7 @@ export const projectStageGroups: ReadonlyArray<{
 export const projectStatus = {
   projectName: "Ergonomia AI",
   versions: {
-    application: "v0.11.0-beta.1",
+    application: "v0.11.1-beta.1",
     worker: "v0.7.0-beta.1",
     supervisor: "pipeline-supervisor-v1.0-beta.1",
     posePipeline: POSE_PIPELINE_VERSION,

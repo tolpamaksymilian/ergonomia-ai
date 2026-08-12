@@ -38,7 +38,7 @@ export function MetricExplorer({ metrics, selected, currentTime, duration, onSel
         </div>
         <label className="relative">
           <span className="sr-only">Wybierz metrykę</span>
-          <select value={selected} onChange={(event) => onSelect(event.target.value as ReviewMetricName)} className="appearance-none rounded-xl border border-white/10 bg-slate-900 py-2.5 pl-3 pr-9 text-sm text-white focus-visible:outline-2 focus-visible:outline-cyan-200">
+          <select value={selected} onChange={(event) => onSelect(event.target.value as ReviewMetricName)} className="appearance-none rounded-xl border border-border bg-card py-2.5 pl-3 pr-9 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring">
             {groups.map((group) => (
               <optgroup key={group} label={group}>
                 {METRIC_NAMES.filter((name) => METRIC_DEFINITIONS[name].group === group).map((name) => <option key={name} value={name}>{METRIC_DEFINITIONS[name].label}</option>)}
@@ -54,7 +54,7 @@ export function MetricExplorer({ metrics, selected, currentTime, duration, onSel
           <svg
             viewBox="0 0 900 300"
             preserveAspectRatio="none"
-            className="h-64 w-full touch-manipulation focus-visible:outline-2 focus-visible:outline-cyan-200"
+            className="h-64 w-full touch-manipulation focus-visible:outline-2 focus-visible:outline-ring"
             role="slider"
             tabIndex={0}
             aria-label={`Wykres metryki ${metric.label}; strzałki przesuwają film o sekundę`}
