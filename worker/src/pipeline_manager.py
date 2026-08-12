@@ -37,6 +37,7 @@ WORKERS: tuple[WorkerSpec, ...] = (
     WorkerSpec("ergonomics", "Ergonomics", WORKER_ROOT / "src" / "ergonomics_worker.py", ("brak analiz gotowych",)),
     WorkerSpec("risk", "Risk", WORKER_ROOT / "src" / "risk_worker.py", ("brak analiz oczekuj",)),
     WorkerSpec("report", "Report", WORKER_ROOT / "src" / "report_worker.py", ("brak analiz oczekuj",)),
+    WorkerSpec("scene", "Scene Detection", WORKER_ROOT / "src" / "scene_detection_worker.py", ("brak analiz photo_scene",)),
 )
 
 
@@ -94,6 +95,7 @@ def validate_local_configuration(selected: Sequence[WorkerSpec]) -> list[str]:
         "20260806120000_integrate_risk_worker_v1.sql",
         "20260806203000_integrate_report_worker_v1.sql",
         "20260806210500_finalize_pipeline_v021.sql",
+        "20260812120000_add_photo_scene_builder_beta.sql",
     )
     for filename in required_migrations:
         if not (REPOSITORY_ROOT / "supabase" / "migrations" / filename).is_file():
@@ -270,7 +272,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     mode.add_argument("--once", action="store_true", help="Uruchom po jednym cyklu każdego etapu")
     mode.add_argument("--check", action="store_true", help="Sprawdź konfigurację i gotowość bazy")
     parser.add_argument("--no-restart", action="store_true", help="Nie restartuj zakończonych workerów")
-    parser.add_argument("--workers", help="Lista: preprocessing,pose,ergonomics,risk,report")
+    parser.add_argument("--workers", help="Lista: preprocessing,pose,ergonomics,risk,report,scene")
     return parser
 
 

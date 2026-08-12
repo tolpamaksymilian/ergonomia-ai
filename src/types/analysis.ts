@@ -27,6 +27,11 @@ export type AnalysisProcessingStage =
   | "report-processing"
   | "report-failed"
   | "processing-failed"
+  | "photo-uploading"
+  | "ready-for-scene-detection"
+  | "scene-detection-processing"
+  | "scene-detection-failed"
+  | "scene-ready"
   | "completed";
 
 export type ErgonomicsMetricStatistics = {

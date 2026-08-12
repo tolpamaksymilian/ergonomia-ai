@@ -1,9 +1,9 @@
 export const release = {
-  version: "0.11.1-beta.1",
-  name: "Light Theme Polish i spójny orange branding",
+  version: "0.12.0-beta.1",
+  name: "Photo Scenario Builder Beta",
   channel: "beta",
   statusLabel: "Wersja testowa",
-  releasedAt: "2026-08-11",
+  releasedAt: "2026-08-12",
   productionReady: false,
   pipelineComplete: true,
 } as const;

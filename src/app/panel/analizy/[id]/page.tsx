@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   Activity,
   ArrowLeft,
@@ -47,6 +47,7 @@ export default async function AnalysisDetailsPage({
     .from("analyses")
     .select(`
       id,
+      analysis_type,
       user_id,
       title,
       description,
@@ -130,6 +131,10 @@ export default async function AnalysisDetailsPage({
 
   if (error || !analysis) {
     notFound();
+  }
+
+  if ((analysis.analysis_type ?? "VIDEO") === "PHOTO_SCENE") {
+    redirect(`/panel/analizy/${analysis.id}/scena`);
   }
 
   const [{ data: workstationsData }, { data: categoriesData }, { data: categoryLinks }] = await Promise.all([

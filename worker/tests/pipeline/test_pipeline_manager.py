@@ -18,7 +18,7 @@ SPEC.loader.exec_module(pipeline_manager)
 
 def test_default_worker_order() -> None:
     assert [worker.name for worker in pipeline_manager.select_workers(None)] == [
-        "preprocessing", "pose", "ergonomics", "risk", "report"
+        "preprocessing", "pose", "ergonomics", "risk", "report", "scene"
     ]
 
 

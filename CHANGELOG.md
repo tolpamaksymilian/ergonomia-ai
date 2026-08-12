@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0-beta.1] - 2026-08-12
+
+### Added
+
+- Niezależny Photo Scenario Builder z prywatnym zdjęciem, detekcją YOLOX-X, ręczną kalibracją i edytorem manekina 2D.
+- Jawny `analysis_type`, historia dwóch typów analiz oraz osobny Scene Detection Worker w Pipeline Supervisorze.
+- Wersjonowany stan sceny, autosave, undo/redo i ręczny fallback po błędzie detekcji.
+
+### Safety
+
+- Analizy `PHOTO_SCENE` nie mogą zostać przejęte przez preprocessing filmu i nie uruchamiają Risk, RULA, REBA ani OWAS.
+
 ## [0.11.1-beta.1] - 2026-08-11
 
 - Jasny wariant sceny 3D z neutralnym tłem, grafitowym modelem i pomarańczowymi akcentami analizy.

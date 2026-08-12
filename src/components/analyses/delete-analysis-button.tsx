@@ -105,7 +105,7 @@ export function DeleteAnalysisButton({
                 „{title}”
               </strong>{" "}
               zostanie trwale usunięta razem
-              z prywatnym filmem źródłowym.
+              z prywatnym plikiem źródłowym.
             </p>
 
             <div className="mt-5 rounded-2xl border border-red-400/15 bg-red-400/[0.06] px-4 py-3 text-sm leading-6 text-red-200/80">

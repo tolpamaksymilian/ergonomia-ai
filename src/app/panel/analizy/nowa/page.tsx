@@ -5,14 +5,18 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { NewAnalysisForm } from "@/components/analyses/new-analysis-form";
+import { AnalysisTypeSelector } from "@/components/analyses/analysis-type-selector";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewAnalysisPage() {
-  const { user } = await requireUser();
+  const { user, supabase } = await requireUser();
+  const [{ data: workstations }, { data: categories }] = await Promise.all([
+    supabase.from("workstations").select("id,name,code").eq("is_active", true).order("name"),
+    supabase.from("analysis_categories").select("id,name,group_name").eq("is_active", true).order("group_name").order("name"),
+  ]);
 
   return (
     <main className="ui-page relative px-5 py-8 sm:px-8">
@@ -55,20 +59,16 @@ export default async function NewAnalysisPage() {
           </div>
 
           <h1 className="mt-7 text-4xl font-bold tracking-[-0.04em] sm:text-5xl">
-            Utwórz nową analizę ergonomii
+            Utwórz nową analizę
           </h1>
 
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-400">
-            Dodaj nagranie stanowiska pracy. Film zostanie
-            zapisany w prywatnym magazynie i skierowany
-            do kolejki lokalnego workera AI.
+            Wybierz analizę ruchu z filmu albo zbuduj interaktywny projekt stanowiska na podstawie prywatnego zdjęcia.
           </p>
         </section>
 
         <div className="mt-6">
-          <NewAnalysisForm
-            userId={user.id}
-          />
+          <AnalysisTypeSelector userId={user.id} workstations={workstations ?? []} categories={categories ?? []} />
         </div>
       </div>
     </main>

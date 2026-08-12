@@ -55,7 +55,9 @@ export async function deleteAnalysisAction(
         id,
         user_id,
         status,
-        source_video_path
+        analysis_type,
+        source_video_path,
+        source_image_path
       `)
       .eq("id", analysisId)
       .maybeSingle();
@@ -107,18 +109,21 @@ export async function deleteAnalysisAction(
   /*
    * Najpierw usuwamy fizyczny plik przez Storage API.
    */
-  const { error: storageError } =
-    await supabase.storage
-      .from("analysis-videos")
-      .remove([
-        analysis.source_video_path,
-      ]);
+  const isPhotoScene = (analysis.analysis_type ?? "VIDEO") === "PHOTO_SCENE";
+  const sourcePath = isPhotoScene ? analysis.source_image_path : analysis.source_video_path;
+  const { data: scene } = isPhotoScene
+    ? await supabase.from("photo_scenes").select("preview_image_path,detection_result_path").eq("analysis_id", analysisId).maybeSingle()
+    : { data: null };
+  const storagePaths = [sourcePath, scene?.preview_image_path, scene?.detection_result_path].filter((path): path is string => Boolean(path));
+  const { error: storageError } = sourcePath
+    ? await supabase.storage.from(isPhotoScene ? "analysis-scenes" : "analysis-videos").remove(storagePaths)
+    : { error: null };
 
   if (storageError) {
     return {
       status: "error",
       message:
-        `Nie udało się usunąć filmu: ${storageError.message}`,
+        `Nie udało się usunąć pliku źródłowego: ${storageError.message}`,
     };
   }
 
