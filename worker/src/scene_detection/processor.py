@@ -93,6 +93,7 @@ def build_detection_document(
     document: dict[str, object] = {
         "schema_version": "1.0",
         "detection_version": DETECTION_VERSION,
+        "result_status": "SUCCESS" if candidates else "SUCCESS_NO_OBJECTS",
         "analysis_id": analysis_id,
         "source_image": {"width": image_width, "height": image_height},
         "candidates": [candidate.to_dict() for candidate in candidates],

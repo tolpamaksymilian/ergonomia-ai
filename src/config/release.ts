@@ -1,5 +1,5 @@
 export const release = {
-  version: "0.15.0-beta.1",
+  version: "0.16.0-beta.1",
   name: "Coordinate Engine V2 and Photo Analysis Control Beta",
   channel: "beta",
   statusLabel: "Wersja testowa",

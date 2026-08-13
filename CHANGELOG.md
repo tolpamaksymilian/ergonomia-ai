@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0-beta.1] - 2026-08-13
+
+### Added
+
+- Digital Human v1 z kanonicznym modelem fizycznym w centymetrach, osobną pozą, projekcją sceny i profesjonalnym rendererem SVG.
+- Profile 160/175/190 cm, stałe segmenty, ciągły yaw 0–360°, jawne pochodzenie wymiarów i tryb `?debugHuman=1`.
+- Bezpieczny self-test Scene Workera na rzeczywistym YOLOX-X/ONNX Runtime bez modyfikowania kolejki.
+
+### Fixed
+
+- Bucket `analysis-scenes` dopuszcza prywatne wyniki `application/json`; wcześniej poprawna detekcja kończyła się błędem 415 przy uploadzie.
+- Scene Worker zapisuje stabilne kody etapów, wykonuje najwyżej jedno ponowienie błędu przejściowego i rozróżnia `SUCCESS_NO_OBJECTS`.
+
 ## [0.15.0-beta.1] - 2026-08-12
 
 ### Added

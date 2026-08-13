@@ -75,7 +75,13 @@ export type SceneCalibration = {
 };
 
 export type HumanProfilePreset = "SHORT" | "MEDIUM" | "TALL" | "CUSTOM";
-export type SegmentProvenance = "USER_PROVIDED" | "DERIVED_APPROXIMATION";
+export type SegmentProvenance = "USER_PROVIDED" | "DERIVED_DISPLAY_APPROXIMATION";
+export type HumanPhysicalDimensions = {
+  statureCm: number; headHeightCm: number; neckLengthCm: number; shoulderWidthCm: number;
+  chestWidthCm: number; waistWidthCm: number; pelvisWidthCm: number; torsoLengthCm: number;
+  upperArmLengthCm: number; forearmLengthCm: number; handLengthCm: number;
+  thighLengthCm: number; lowerLegLengthCm: number; footLengthCm: number;
+};
 export type HumanSegmentKey = "headNeck" | "torso" | "shoulderGirdle" | "pelvis" | "upperArm" | "forearm" | "hand" | "thigh" | "lowerLeg" | "foot";
 export type HumanProfile = {
   name: string; preset: HumanProfilePreset; heightCm: number; armSpanCm: number;
@@ -85,6 +91,7 @@ export type HumanProfile = {
   thighLengthCm: number | null; lowerLegLengthCm: number | null;
   geometrySource: "USER_MEASUREMENTS" | "ANTHROPOMETRIC_ESTIMATE";
   segmentProvenance: Record<HumanSegmentKey, SegmentProvenance>;
+  physicalDimensions: HumanPhysicalDimensions;
 };
 export type HumanJointName =
   | "head" | "neck" | "leftShoulder" | "rightShoulder" | "leftElbow" | "rightElbow"
@@ -106,7 +113,7 @@ export type HumanPose = {
   reachState: { leftArm: LimbReachState; rightArm: LimbReachState; leftLeg: LimbReachState; rightLeg: LimbReachState };
   bendPreference: { leftArm: 1 | -1; rightArm: 1 | -1; leftLeg: 1 | -1; rightLeg: 1 | -1 };
 };
-export type HumanFacingPreset = "FRONT" | "LEFT" | "RIGHT" | "TOWARD_OBJECT" | "CUSTOM";
+export type HumanFacingPreset = "FRONT" | "BACK" | "LEFT" | "RIGHT" | "TOWARD_OBJECT" | "CUSTOM";
 export type HumanPositionMode = "FREE" | "WORKING_AT_OBJECT" | "SEATED_AT_OBJECT";
 export type HumanHandTarget = { interactionPointId: string; objectId: string; status: "REACHABLE" | "OUT_OF_REACH" } | null;
 export type SceneHuman = {
@@ -118,6 +125,7 @@ export type SceneHuman = {
     lastScalePxPerCm: number | null; scaleStatus: PerspectiveScaleStatus;
   };
   handTargets: { left: HumanHandTarget; right: HumanHandTarget };
+  modelVersion: "digital-human-v1";
   visible: boolean; locked: boolean;
 };
 
@@ -151,6 +159,7 @@ export type SceneDetectionCandidate = { id: string; source_class: string; sugges
 export type GeometryCandidate = { id: string; start: NormalizedPoint; end: NormalizedPoint; orientation: GeometryOrientation; evidence_quality: EvidenceQuality };
 export type SceneDetection = {
   schema_version: "1.0"; detection_version: "scene-detection-v0.1-beta.1" | "scene-detection-v0.2-beta.1";
+  result_status?: "SUCCESS" | "SUCCESS_NO_OBJECTS";
   analysis_id: string; source_image: { width: number; height: number }; candidates: SceneDetectionCandidate[];
   geometry_candidates?: GeometryCandidate[]; dimension_suggestions?: WorkerDimensionSuggestion[];
   perspective_evidence?: PerspectiveEvidence; floor_candidates?: GeometryCandidate[]; surface_candidates?: GeometryCandidate[];

@@ -47,7 +47,28 @@ export function moveHumanJointWithConstraints(human: SceneHuman, joint: HumanJoi
     bendPreference[key] = bend; reachState[key] = result.reachState;
   }
   const nextPose: HumanPose = { ...pose, preset: "CUSTOM", joints, reachState, bendPreference };
-  return { ...human, pose: nextPose, placement: syncPlacement(nextPose, human.placement) };
+  const next = { ...human, pose: nextPose, placement: syncPlacement(nextPose, human.placement) };
+  return Object.values(nextPose.joints).every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)) ? next : human;
+}
+
+export function validateProjectedHuman(human: SceneHuman, pixelsPerCm: number, imageWidth: number, imageHeight: number) {
+  const violations: string[] = [];
+  if (Object.values(human.pose.joints).some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) violations.push("non_finite_joint");
+  const expected: [string, HumanJointName, HumanJointName, number][] = [
+    ["left_upper_arm", "leftShoulder", "leftElbow", human.constraints.upperArm.fixedLengthCm],
+    ["right_upper_arm", "rightShoulder", "rightElbow", human.constraints.upperArm.fixedLengthCm],
+    ["left_forearm", "leftElbow", "leftWrist", human.constraints.forearm.fixedLengthCm],
+    ["right_forearm", "rightElbow", "rightWrist", human.constraints.forearm.fixedLengthCm],
+    ["left_thigh", "leftHip", "leftKnee", human.constraints.thigh.fixedLengthCm],
+    ["right_thigh", "rightHip", "rightKnee", human.constraints.thigh.fixedLengthCm],
+    ["left_lower_leg", "leftKnee", "leftAnkle", human.constraints.lowerLeg.fixedLengthCm],
+    ["right_lower_leg", "rightKnee", "rightAnkle", human.constraints.lowerLeg.fixedLengthCm],
+  ];
+  for (const [name, parent, child, centimeters] of expected) {
+    const actual = segmentLengthPixels(human, parent, child, imageWidth, imageHeight);
+    if (Math.abs(actual - centimeters * pixelsPerCm) > Math.max(.05, centimeters * pixelsPerCm * .002)) violations.push(`${name}_length`);
+  }
+  return { valid: violations.length === 0, violations };
 }
 
 export function moveHumanRootUniform(human: SceneHuman, standingPoint: NormalizedPoint, nextScale: number | null, imageWidth: number, imageHeight: number): SceneHuman {
@@ -73,6 +94,6 @@ export function moveJointWithIk(pose: HumanPose, joint: HumanJointName, target: 
 
 export function segmentLengthPixels(human: SceneHuman, parent: HumanJointName, child: HumanJointName, width: number, height: number) { return Math.hypot((human.pose.joints[child].x - human.pose.joints[parent].x) * width, (human.pose.joints[child].y - human.pose.joints[parent].y) * height); }
 export function clampCosine(value: number) { return Math.max(-1, Math.min(1, Number.isFinite(value) ? value : 1)); }
-function stableBend(root: NormalizedPoint, target: NormalizedPoint, previousJoint: NormalizedPoint, previous: 1 | -1): 1 | -1 { const cross = (target.x - root.x) * (previousJoint.y - root.y) - (target.y - root.y) * (previousJoint.x - root.x); return Math.abs(cross) < 4 ? previous : cross >= 0 ? 1 : -1; }
+function stableBend(_root: NormalizedPoint, _target: NormalizedPoint, _previousJoint: NormalizedPoint, previous: 1 | -1): 1 | -1 { return previous; }
 function unitVector(from: NormalizedPoint, to: NormalizedPoint) { const length = Math.max(1e-8, distance(from, to)); return { x: (to.x - from.x) / length, y: (to.y - from.y) / length }; }
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }

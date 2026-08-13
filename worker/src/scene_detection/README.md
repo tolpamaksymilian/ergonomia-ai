@@ -11,3 +11,20 @@ Worker startuje automatycznie przez Pipeline Manager. Lokalnie można wykonać j
 ```powershell
 worker\.venv\Scripts\python.exe worker\src\scene_detection_worker.py --once
 ```
+
+Self-test nie pobiera zadania z kolejki i nie zapisuje danych produkcyjnych. Sprawdza konfigurację,
+inicjalizację rzeczywistego YOLOX-X/ONNX Runtime na CPU, kodowanie i dekodowanie obrazu, inference
+oraz przebieg geometrii:
+
+```powershell
+worker\.venv\Scripts\python.exe worker\src\scene_detection_worker.py --self-test
+```
+
+`SUCCESS_NO_OBJECTS` jest poprawnym wynikiem: geometria nadal jest analizowana, a użytkownik może
+dodać obiekty ręcznie. Stabilne kody błędów rozróżniają claim, ścieżkę, download, decode,
+inicjalizację detektora, inference, geometrię, upload i finalizację RPC. Worker wykonuje najwyżej
+jedno automatyczne ponowienie błędu przejściowego.
+
+Obrazy do 2000 px mają jeden przebieg detektora. Większe obrazy zachowują pełny przebieg oraz do
+dziewięciu nakładających się kafli 1600 px; duplikaty są usuwane przez istniejący IoU. Ogranicza to
+utratę małych obiektów bez nieograniczonego wzrostu czasu CPU.

@@ -31,6 +31,12 @@ def test_document_keeps_source_class_and_limitations():
     assert document["detection_version"] == "scene-detection-v0.2-beta.1"
     assert document["candidates"][0]["source_class"] == "chair"
     assert "no_ergonomic_assessment" in document["limitations"]
+    assert document["result_status"] == "SUCCESS"
+
+
+def test_zero_detections_is_explicit_success_no_objects():
+    document = build_detection_document("analysis", 100, 100, [])
+    assert document["result_status"] == "SUCCESS_NO_OBJECTS"
 
 
 def test_lightweight_geometry_pass_finds_lines_without_ml():

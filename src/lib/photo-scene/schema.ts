@@ -3,6 +3,7 @@ import type {
   SceneObject, SceneObjectMeasurement, SceneState, WorkerDimensionSuggestion,
 } from "../../types/photo-scene";
 import { createConstraintGraph, createHuman, profileFromHeight, syncPlacement } from "./anthropometry.ts";
+import { normalizePhysicalProfile } from "./human-physical-model.ts";
 import { emptyScaleField, rebuildPerspectiveField } from "./calibration.ts";
 import { buildTechnicalInsights } from "./suggestions.ts";
 
@@ -26,7 +27,7 @@ export function validateSceneState(value: unknown): value is SceneState {
   const calibration = state.calibration as Record<string, unknown> | null;
   if (!calibration || !Array.isArray(calibration.references) || calibration.references.length > 100 || !calibration.references.every(validReference)) return false;
   if (!state.geometryMeasurements.every(validGeometryMeasurement)) return false;
-  for (const raw of state.humans) { if (!raw || typeof raw !== "object") return false; const human = raw as Record<string, unknown>, profile = human.profile as Record<string, unknown> | null; if (typeof human.id !== "string" || !profile || !validPose(human.pose) || !human.constraints || typeof human.constraints !== "object") return false; for (const field of ["heightCm", "armSpanCm", "functionalReachCm", "maximumReachCm"]) if (!finite(profile[field]) || (profile[field] as number) <= 0) return false; }
+  for (const raw of state.humans) { if (!raw || typeof raw !== "object") return false; const human = raw as Record<string, unknown>, profile = human.profile as Record<string, unknown> | null, dimensions = profile?.physicalDimensions as Record<string, unknown> | null; if (typeof human.id !== "string" || human.modelVersion !== "digital-human-v1" || !profile || !dimensions || !validPose(human.pose) || !human.constraints || typeof human.constraints !== "object") return false; for (const field of ["heightCm", "armSpanCm", "functionalReachCm", "maximumReachCm"]) if (!finite(profile[field]) || (profile[field] as number) <= 0) return false; for (const field of ["statureCm", "headHeightCm", "shoulderWidthCm", "pelvisWidthCm", "upperArmLengthCm", "forearmLengthCm", "thighLengthCm", "lowerLegLengthCm"]) if (!finite(dimensions[field]) || (dimensions[field] as number) <= 0) return false; }
   return true;
 }
 
@@ -34,7 +35,7 @@ export function normalizeSceneState(value: unknown): SceneState {
   if (validateSceneState(value)) return refreshDerivedState(value);
   if (!value || typeof value !== "object") return emptySceneState();
   const raw = value as Record<string, unknown>, version = String(raw.schema_version ?? "");
-  if (version !== "1.0" && version !== "1.1") return emptySceneState();
+  if (version !== "1.0" && version !== "1.1" && version !== "1.2") return emptySceneState();
   const objects = Array.isArray(raw.objects) ? raw.objects.map(normalizeObject).filter((object): object is SceneObject => object !== null) : [];
   const calibrationRaw = raw.calibration && typeof raw.calibration === "object" ? raw.calibration as Record<string, unknown> : {};
   const references = version === "1.0" ? normalizeAnchors(calibrationRaw.anchors) : normalizeReferences(calibrationRaw.references);
@@ -87,7 +88,7 @@ function normalizeHuman(value: unknown): SceneHuman | null {
   if (!value || typeof value !== "object") return null; const raw = value as Record<string, unknown>, profileRaw = raw.profile && typeof raw.profile === "object" ? raw.profile as Record<string, unknown> : null; if (!profileRaw || !finite(profileRaw.heightCm)) return null;
   const base = createHuman(typeof raw.name === "string" ? raw.name : "Operator", typeof raw.color === "string" ? raw.color : "#f97316", "CUSTOM");
   const derived = profileFromHeight(base.name, profileRaw.heightCm, "CUSTOM");
-  const profile = { ...derived, ...profileRaw, segmentProvenance: { ...derived.segmentProvenance, ...(profileRaw.segmentProvenance && typeof profileRaw.segmentProvenance === "object" ? profileRaw.segmentProvenance : {}) } } as SceneHuman["profile"];
+  const profile = normalizePhysicalProfile({ ...derived, ...profileRaw, segmentProvenance: { ...derived.segmentProvenance, ...(profileRaw.segmentProvenance && typeof profileRaw.segmentProvenance === "object" ? profileRaw.segmentProvenance : {}) } } as SceneHuman["profile"]);
   const pose = normalizePose(raw.pose, base.pose), placementRaw = raw.placement && typeof raw.placement === "object" ? raw.placement as Record<string, unknown> : {};
   const placement = syncPlacement(pose, { ...base.placement, attachedObjectId: typeof placementRaw.attachedObjectId === "string" ? placementRaw.attachedObjectId : null, floorPinned: placementRaw.floorPinned === true, positionMode: placementRaw.attachmentMode === "SEATED_AT_OBJECT" ? "SEATED_AT_OBJECT" : placementRaw.attachmentMode === "WORK_SURFACE" ? "WORKING_AT_OBJECT" : "FREE", orientationDeg: finite(placementRaw.orientationDeg) ? placementRaw.orientationDeg : 0, facingPreset: "FRONT", lastScalePxPerCm: finite(placementRaw.lastScalePxPerCm) ? placementRaw.lastScalePxPerCm : null, scaleStatus: "NO_SCALE" });
   return { ...base, id: typeof raw.id === "string" ? raw.id : base.id, profile, constraints: createConstraintGraph(profile), pose, placement, handTargets: { left: null, right: null }, visible: raw.visible !== false, locked: raw.locked === true };
