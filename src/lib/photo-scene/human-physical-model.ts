@@ -30,6 +30,15 @@ export function derivePhysicalDimensions(heightCm: number, overrides: Partial<Hu
     thighLengthCm: h * 0.245,
     lowerLegLengthCm: h * 0.246,
     footLengthCm: h * 0.152,
+    chestDepthCm: h * 0.135,
+    pelvisDepthCm: h * 0.115,
+    upperArmThicknessCm: h * 0.058,
+    forearmThicknessCm: h * 0.047,
+    thighThicknessCm: h * 0.092,
+    calfThicknessCm: h * 0.068,
+    handWidthCm: h * 0.048,
+    maxGripDiameterCm: h * 0.057,
+    pinchSpanCm: h * 0.052,
   };
   return Object.fromEntries(Object.entries(derived).map(([key, value]) => {
     const override = overrides[key as keyof HumanPhysicalDimensions];

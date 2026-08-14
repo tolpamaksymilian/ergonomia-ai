@@ -1,6 +1,51 @@
 export type AnalysisType = "VIDEO" | "PHOTO_SCENE";
 export type NormalizedPoint = { x: number; y: number };
 export type NormalizedBox = { x: number; y: number; width: number; height: number };
+export type Vector3Cm = { x: number; y: number; z: number };
+export type EulerDegrees = { x: number; y: number; z: number };
+export type SceneWorkspaceMode = "PHOTO" | "THREE_D" | "SPLIT";
+export type CameraMappingStatus = "CAMERA_APPROXIMATE" | "CAMERA_PARTIAL" | "CAMERA_CALIBRATED";
+export type Human3DJointName =
+  | "root" | "pelvis" | "spineLower" | "spineMid" | "chest" | "neck" | "head" | "headTop"
+  | "leftClavicle" | "leftShoulder" | "leftElbow" | "leftWrist" | "leftHand"
+  | "rightClavicle" | "rightShoulder" | "rightElbow" | "rightWrist" | "rightHand"
+  | "leftHip" | "leftKnee" | "leftAnkle" | "leftFoot" | "rightHip" | "rightKnee" | "rightAnkle" | "rightFoot";
+export type FingerName = "thumb" | "index" | "middle" | "ring" | "little";
+export type FingerPose = { curl: number; opposition: number };
+export type HandPosePreset = "OPEN" | "RELAXED" | "POWER_GRIP" | "CYLINDER_GRIP" | "SPHERE_GRIP" | "PINCH" | "LATERAL_PINCH" | "CLOSED_FIST";
+export type HandRigState = { preset: HandPosePreset; fingers: Record<FingerName, FingerPose>; palmRotationDeg: EulerDegrees };
+export type Human3DState = {
+  modelVersion: "digital-human-3d-v1";
+  migrationStatus: "NATIVE_3D" | "MIGRATED_TO_3D";
+  rootPositionCm: Vector3Cm; rootRotationDeg: EulerDegrees;
+  jointRotationsDeg: Record<Human3DJointName, EulerDegrees>;
+  jointPositionsCm: Record<Human3DJointName, Vector3Cm>;
+  poleTargetsCm: { leftElbow: Vector3Cm; rightElbow: Vector3Cm; leftKnee: Vector3Cm; rightKnee: Vector3Cm };
+  hands: { left: HandRigState; right: HandRigState };
+  attachments: { leftObjectId: string | null; rightObjectId: string | null };
+  legacy2dBackup: { posePreset: HumanPosture; normalizedRoot: NormalizedPoint } | null;
+};
+export type Primitive3DType = "BOX" | "CYLINDER" | "SPHERE" | "HANDLE" | "TOOL_GENERIC" | "BOTTLE" | "CONTAINER" | "PANEL" | "CUSTOM" | "PLANE_PROXY";
+export type GeometryQuality = "COMPLETE" | "PARTIAL" | "UNKNOWN";
+export type ObjectGeometry3D = {
+  type: Primitive3DType; positionCm: Vector3Cm; rotationDeg: EulerDegrees;
+  dimensionsCm: { width: number | null; height: number | null; depth: number | null; diameter: number | null; length: number | null };
+  source: "USER_PROVIDED" | "DERIVED_FROM_CONFIRMED_DIMENSIONS" | "SHAPE_HINT";
+  geometryQuality: GeometryQuality; collisionEnabled: boolean; collisionGroup: "STATIC_SCENE" | "HELD_OBJECT" | "NON_COLLIDING_REFERENCE";
+  massKg: number | null; massSource: "USER_PROVIDED" | null;
+};
+export type InteractionPoint3D = { id: string; name: string; type: "GRIP" | "BUTTON" | "WORKING" | "PLACEMENT" | "SUPPORT"; positionCm: Vector3Cm; rotationDeg: EulerDegrees; hand: "LEFT" | "RIGHT" | "BOTH" | null };
+export type ReachabilityLevel = "REACHABLE" | "REACHABLE_WITH_BODY_MOVEMENT" | "AT_LIMIT" | "UNREACHABLE" | "UNKNOWN";
+export type ReachabilityResult3D = { level: ReachabilityLevel; mode: "ARM_ONLY" | "WHOLE_BODY"; hand: "LEFT" | "RIGHT"; targetId: string | null; reachMarginCm: number | null; reasons: string[] };
+export type CollisionLevel3D = "CLEAR" | "CONTACT" | "PENETRATION" | "UNKNOWN_GEOMETRY";
+export type CollisionResult3D = { level: CollisionLevel3D; humanPart: string | null; objectId: string | null; contactPointCm: Vector3Cm | null; penetrationDepthCm: number | null; geometryQuality: GeometryQuality };
+export type MotionResult3D = { status: "CLEAR" | "COLLISION" | "UNREACHABLE" | "INVALID_GEOMETRY"; hand: "LEFT" | "RIGHT"; startCm: Vector3Cm; targetCm: Vector3Cm; sampleCount: number; firstCollisionProgress: number | null; firstCollision: CollisionResult3D | null };
+export type Scene3DState = {
+  unit: "cm"; cameraMappingStatus: CameraMappingStatus; workspaceMode: SceneWorkspaceMode;
+  snapCm: 1 | 5 | 10; selectedInteractionPointId: string | null;
+  collisionBlocking: boolean; lastReachability: ReachabilityResult3D | null;
+  lastCollisions: CollisionResult3D[]; motion: MotionResult3D | null;
+};
 
 export type SceneObjectType =
   | "WORK_SURFACE" | "TABLE" | "SHELF" | "RACK" | "CHAIR" | "STOOL"
@@ -63,6 +108,7 @@ export type SceneObject = {
   visible: boolean; locked: boolean; measurements: SceneObjectMeasurement;
   geometryMeasurements: GeometryMeasurement[]; interactionPoints: ObjectInteractionPoint[];
   referencePoint: (NormalizedPoint & { heightCm: number }) | null;
+  geometry3d: ObjectGeometry3D | null; interactionPoints3d: InteractionPoint3D[];
 };
 
 export type ReferenceDimensionType = "HEIGHT" | "WIDTH" | "DEPTH" | "DISTANCE" | "WORK_SURFACE_HEIGHT" | "SHELF_HEIGHT" | "REACH_HEIGHT" | "CUSTOM";
@@ -109,6 +155,8 @@ export type HumanPhysicalDimensions = {
   chestWidthCm: number; waistWidthCm: number; pelvisWidthCm: number; torsoLengthCm: number;
   upperArmLengthCm: number; forearmLengthCm: number; handLengthCm: number;
   thighLengthCm: number; lowerLegLengthCm: number; footLengthCm: number;
+  chestDepthCm: number; pelvisDepthCm: number; upperArmThicknessCm: number; forearmThicknessCm: number;
+  thighThicknessCm: number; calfThicknessCm: number; handWidthCm: number; maxGripDiameterCm: number; pinchSpanCm: number;
 };
 export type HumanSegmentKey = "headNeck" | "torso" | "shoulderGirdle" | "pelvis" | "upperArm" | "forearm" | "hand" | "thigh" | "lowerLeg" | "foot";
 export type HumanProfile = {
@@ -158,6 +206,7 @@ export type SceneHuman = {
   };
   handTargets: { left: HumanHandTarget; right: HumanHandTarget };
   modelVersion: "digital-human-v1";
+  human3d: Human3DState;
   visible: boolean; locked: boolean;
 };
 
@@ -179,12 +228,13 @@ export type WorkerDimensionSuggestion = {
 export type PerspectiveEvidence = { dominant_vertical_angle_deg: number | null; dominant_horizontal_angle_deg: number | null; vanishing_point: NormalizedPoint | null; evidence_quality: EvidenceQuality };
 
 export type SceneState = {
-  schema_version: "1.3"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
+  schema_version: "1.4"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
   geometryMeasurements: GeometryMeasurement[]; workerSuggestions: WorkerDimensionSuggestion[];
   viewport: { zoom: number; pan_x: number; pan_y: number };
   selectedObjectId: string | null; selectedHumanId: string | null; selectedReferenceId: string | null;
   reachVisible: boolean; measurementFilter: "ALL" | "ACTIVE" | "SELECTED_OBJECT" | "CALIBRATION";
   view: SceneViewState; autoSuggestDimensions: boolean; technicalInsights: TechnicalInsight[];
+  scene3d: Scene3DState;
 };
 
 export type SceneDetectionCandidate = { id: string; source_class: string; suggested_scene_type: SceneObjectType; bounding_box: NormalizedBox; confidence: number | null; source: "YOLOX_X_COCO"; status: "DETECTED" };

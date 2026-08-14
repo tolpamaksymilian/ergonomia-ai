@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0-beta.1] - 2026-08-14
+
+- Dodano serializowalny świat 3D w centymetrach oraz proceduralny Digital Human 3D.
+- Dodano rig dłoni i palców, presety chwytu, IK 3D i pole targets.
+- Dodano geometryczne zasięgi, kolizje, relacje chwytu i kinematyczny test ruchu A→B.
+- Dodano widoki Zdjęcie / 3D / Podzielony bez zmiany pipeline’u VIDEO.
+- Scene Schema 1.4 zachowuje i migruje starszy stan człowieka 2D.
+
 ## [0.17.0-beta.1] - 2026-08-14
 
 ### Scene World Model / Calibration V3

@@ -131,7 +131,7 @@ test("old schema 1.2 measurements require semantic review and do not affect Cali
   const current = emptySceneState(), legacyReference = verticalReference("old", .5, .9, 380, 190);
   delete legacyReference.measurementKind; delete legacyReference.axis; delete legacyReference.plane; delete legacyReference.purpose; delete legacyReference.useForCalibration; delete legacyReference.semanticStatus; delete legacyReference.worldAnchors;
   const normalized = normalizeSceneState({ ...current, schema_version: "1.2", calibration: { ...current.calibration, references: [legacyReference] } });
-  assert.equal(normalized.schema_version, "1.3");
+  assert.equal(normalized.schema_version, "1.4");
   assert.equal(normalized.calibration.references[0].semanticStatus, "SEMANTICS_REVIEW_REQUIRED");
   assert.equal(normalized.calibration.references[0].useForCalibration, false);
   assert.equal(getVerticalScaleAt(createSceneWorldModel(normalized.calibration, WIDTH, HEIGHT), { x: .5, y: .9 }).pixelsPerCm, null);

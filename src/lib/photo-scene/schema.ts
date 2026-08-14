@@ -8,6 +8,8 @@ import { normalizePhysicalProfile } from "./human-physical-model.ts";
 import { emptyScaleField, rebuildPerspectiveField } from "./calibration.ts";
 import { buildTechnicalInsights } from "./suggestions.ts";
 import { semanticsForDimensionKey, semanticsForReferenceType } from "./measurement-semantics.ts";
+import { createHuman3DState } from "./human-3d-model.ts";
+import { geometry3dFromSceneObject } from "./object-3d-model.ts";
 
 const objectTypes = new Set(["WORK_SURFACE", "TABLE", "SHELF", "RACK", "CHAIR", "STOOL", "CONVEYOR", "MACHINE", "CONTROL_PANEL", "MONITOR", "CONTAINER", "PALLET", "WORK_ZONE", "HANDLE", "OTHER"]);
 const dimensionKeys: ObjectDimensionKey[] = ["heightCm", "widthCm", "depthCm", "workSurfaceHeightCm", "lowerEdgeHeightCm", "upperEdgeHeightCm", "seatHeightCm", "seatWidthCm", "backrestHeightCm", "seatDepthCm", "screenCenterHeightCm", "screenHeightCm", "userDistanceCm", "keyShelfHeightCm", "workingWidthCm", "controlHeightCm"];
@@ -27,13 +29,13 @@ function validPose(value: unknown): value is HumanPose { if (!value || typeof va
 export function validateSceneState(value: unknown): value is SceneState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
-  if (state.schema_version !== "1.3" || !Array.isArray(state.objects) || !Array.isArray(state.humans) || !Array.isArray(state.geometryMeasurements) || !Array.isArray(state.workerSuggestions)) return false;
+  if (state.schema_version !== "1.4" || !Array.isArray(state.objects) || !Array.isArray(state.humans) || !Array.isArray(state.geometryMeasurements) || !Array.isArray(state.workerSuggestions) || !state.scene3d || typeof state.scene3d !== "object") return false;
   if (state.objects.length > 250 || state.humans.length > 12 || state.geometryMeasurements.length > 300 || state.workerSuggestions.length > 300) return false;
-  for (const raw of state.objects) { if (!raw || typeof raw !== "object") return false; const object = raw as Record<string, unknown>; if (typeof object.id !== "string" || typeof object.name !== "string" || !object.name.trim() || !objectTypes.has(String(object.type)) || !box(object.bbox) || !Array.isArray(object.geometryMeasurements) || !Array.isArray(object.interactionPoints)) return false; }
+  for (const raw of state.objects) { if (!raw || typeof raw !== "object") return false; const object = raw as Record<string, unknown>; if (typeof object.id !== "string" || typeof object.name !== "string" || !object.name.trim() || !objectTypes.has(String(object.type)) || !box(object.bbox) || !Array.isArray(object.geometryMeasurements) || !Array.isArray(object.interactionPoints) || !Array.isArray(object.interactionPoints3d)) return false; }
   const calibration = state.calibration as Record<string, unknown> | null;
   if (!calibration || !Array.isArray(calibration.references) || calibration.references.length > 100 || !calibration.references.every(validReference)) return false;
   if (!state.geometryMeasurements.every(validGeometryMeasurement)) return false;
-  for (const raw of state.humans) { if (!raw || typeof raw !== "object") return false; const human = raw as Record<string, unknown>, profile = human.profile as Record<string, unknown> | null, dimensions = profile?.physicalDimensions as Record<string, unknown> | null; if (typeof human.id !== "string" || human.modelVersion !== "digital-human-v1" || !profile || !dimensions || !validPose(human.pose) || !human.constraints || typeof human.constraints !== "object") return false; for (const field of ["heightCm", "armSpanCm", "functionalReachCm", "maximumReachCm"]) if (!finite(profile[field]) || (profile[field] as number) <= 0) return false; for (const field of ["statureCm", "headHeightCm", "shoulderWidthCm", "pelvisWidthCm", "upperArmLengthCm", "forearmLengthCm", "thighLengthCm", "lowerLegLengthCm"]) if (!finite(dimensions[field]) || (dimensions[field] as number) <= 0) return false; }
+  for (const raw of state.humans) { if (!raw || typeof raw !== "object") return false; const human = raw as Record<string, unknown>, profile = human.profile as Record<string, unknown> | null, dimensions = profile?.physicalDimensions as Record<string, unknown> | null, human3d = human.human3d as Record<string, unknown> | null; if (typeof human.id !== "string" || human.modelVersion !== "digital-human-v1" || !profile || !dimensions || !validPose(human.pose) || !human.constraints || typeof human.constraints !== "object" || !human3d || human3d.modelVersion !== "digital-human-3d-v1") return false; for (const field of ["heightCm", "armSpanCm", "functionalReachCm", "maximumReachCm"]) if (!finite(profile[field]) || (profile[field] as number) <= 0) return false; for (const field of ["statureCm", "headHeightCm", "shoulderWidthCm", "pelvisWidthCm", "upperArmLengthCm", "forearmLengthCm", "thighLengthCm", "lowerLegLengthCm"]) if (!finite(dimensions[field]) || (dimensions[field] as number) <= 0) return false; }
   return true;
 }
 
@@ -41,10 +43,10 @@ export function normalizeSceneState(value: unknown): SceneState {
   if (validateSceneState(value)) return refreshDerivedState(value);
   if (!value || typeof value !== "object") return emptySceneState();
   const raw = value as Record<string, unknown>, version = String(raw.schema_version ?? "");
-  if (version !== "1.0" && version !== "1.1" && version !== "1.2" && version !== "1.3") return emptySceneState();
+  if (!["1.0", "1.1", "1.2", "1.3", "1.4"].includes(version)) return emptySceneState();
   const objects = Array.isArray(raw.objects) ? raw.objects.map(normalizeObject).filter((object): object is SceneObject => object !== null) : [];
   const calibrationRaw = raw.calibration && typeof raw.calibration === "object" ? raw.calibration as Record<string, unknown> : {};
-  const references = version === "1.0" ? normalizeAnchors(calibrationRaw.anchors) : normalizeReferences(calibrationRaw.references, version !== "1.3");
+  const references = version === "1.0" ? normalizeAnchors(calibrationRaw.anchors) : normalizeReferences(calibrationRaw.references, version !== "1.3" && version !== "1.4");
   const humans = version === "1.0" ? normalizeLegacyHuman(raw.human, raw.pose) : Array.isArray(raw.humans) ? raw.humans.map(normalizeHuman).filter((human): human is SceneHuman => human !== null) : [];
   const oldViewport = raw.viewport && typeof raw.viewport === "object" ? raw.viewport as Record<string, unknown> : {};
   return refreshDerivedState({
@@ -63,6 +65,7 @@ export function normalizeSceneState(value: unknown): SceneState {
     selectedHumanId: typeof raw.selectedHumanId === "string" ? raw.selectedHumanId : humans[0]?.id ?? null,
     selectedReferenceId: typeof raw.selectedReferenceId === "string" ? raw.selectedReferenceId : null,
     reachVisible: raw.reachVisible !== false,
+    scene3d: normalizeScene3d(raw.scene3d),
   });
 }
 
@@ -75,12 +78,13 @@ export const refreshInsights = refreshDerivedState;
 
 export function emptySceneState(): SceneState {
   return {
-    schema_version: "1.3", objects: [], calibration: { status: "UNCALIBRATED", floorBaseline: null, horizonY: null, verticalDirection: { x: 0, y: -1 }, verticalDirectionSource: "DEFAULT_IMAGE_AXIS", verticalDirectionConfirmed: false, floorPlane: { mode: "NONE", points: [], actualGroundDimensionCm: null, mappingStatus: "NONE" }, references: [], scaleField: emptyScaleField() },
+    schema_version: "1.4", objects: [], calibration: { status: "UNCALIBRATED", floorBaseline: null, horizonY: null, verticalDirection: { x: 0, y: -1 }, verticalDirectionSource: "DEFAULT_IMAGE_AXIS", verticalDirectionConfirmed: false, floorPlane: { mode: "NONE", points: [], actualGroundDimensionCm: null, mappingStatus: "NONE" }, references: [], scaleField: emptyScaleField() },
     humans: [], geometryMeasurements: [], workerSuggestions: [], viewport: { zoom: 1, pan_x: 0, pan_y: 0 },
     selectedObjectId: null, selectedHumanId: null, selectedReferenceId: null, reachVisible: true,
     measurementFilter: "SELECTED_OBJECT",
     view: { layers: { CALIBRATION: false, OBJECT_DIMENSIONS: false, USER_MEASUREMENTS: false, HUMAN_REACH: false, SUGGESTIONS: false, DEBUG: false }, preset: "CLEAN", focusMode: true, reachMode: "FUNCTIONAL" },
     autoSuggestDimensions: true, technicalInsights: [],
+    scene3d: { unit: "cm", cameraMappingStatus: "CAMERA_APPROXIMATE", workspaceMode: "PHOTO", snapCm: 5, selectedInteractionPointId: null, collisionBlocking: false, lastReachability: null, lastCollisions: [], motion: null },
   };
 }
 
@@ -91,7 +95,8 @@ export function workerSuggestionToMeasurement(suggestion: WorkerDimensionSuggest
 
 function normalizeObject(value: unknown): SceneObject | null {
   if (!value || typeof value !== "object") return null; const raw = value as Record<string, unknown>; if (typeof raw.id !== "string" || typeof raw.name !== "string" || !box(raw.bbox) || !objectTypes.has(String(raw.type))) return null;
-  return { id: raw.id, sourceClass: typeof raw.sourceClass === "string" ? raw.sourceClass : null, type: raw.type as SceneObject["type"], name: raw.name, bbox: raw.bbox as SceneObject["bbox"], detectorConfidence: finite(raw.detectorConfidence) ? raw.detectorConfidence : null, source: raw.source === "YOLOX_X_COCO" ? "YOLOX_X_COCO" : "USER", status: (["DETECTED", "USER_CONFIRMED", "USER_MODIFIED", "USER_ADDED", "USER_REJECTED"].includes(String(raw.status)) ? raw.status : "USER_ADDED") as SceneObject["status"], visible: raw.visible !== false, locked: raw.locked === true, measurements: { ...emptyMeasurements(), ...(raw.measurements && typeof raw.measurements === "object" ? raw.measurements : {}) }, geometryMeasurements: Array.isArray(raw.geometryMeasurements) ? raw.geometryMeasurements.map(normalizeGeometryMeasurement).filter((item): item is GeometryMeasurement => item !== null) : [], interactionPoints: Array.isArray(raw.interactionPoints) ? raw.interactionPoints.filter((item) => item && typeof item === "object" && point((item as Record<string, unknown>).position)) as SceneObject["interactionPoints"] : [], referencePoint: raw.referencePoint && typeof raw.referencePoint === "object" ? raw.referencePoint as SceneObject["referencePoint"] : null };
+  const object: SceneObject = { id: raw.id, sourceClass: typeof raw.sourceClass === "string" ? raw.sourceClass : null, type: raw.type as SceneObject["type"], name: raw.name, bbox: raw.bbox as SceneObject["bbox"], detectorConfidence: finite(raw.detectorConfidence) ? raw.detectorConfidence : null, source: raw.source === "YOLOX_X_COCO" ? "YOLOX_X_COCO" as const : "USER" as const, status: (["DETECTED", "USER_CONFIRMED", "USER_MODIFIED", "USER_ADDED", "USER_REJECTED"].includes(String(raw.status)) ? raw.status : "USER_ADDED") as SceneObject["status"], visible: raw.visible !== false, locked: raw.locked === true, measurements: { ...emptyMeasurements(), ...(raw.measurements && typeof raw.measurements === "object" ? raw.measurements : {}) }, geometryMeasurements: Array.isArray(raw.geometryMeasurements) ? raw.geometryMeasurements.map(normalizeGeometryMeasurement).filter((item): item is GeometryMeasurement => item !== null) : [], interactionPoints: Array.isArray(raw.interactionPoints) ? raw.interactionPoints.filter((item) => item && typeof item === "object" && point((item as Record<string, unknown>).position)) as SceneObject["interactionPoints"] : [], referencePoint: raw.referencePoint && typeof raw.referencePoint === "object" ? raw.referencePoint as SceneObject["referencePoint"] : null, geometry3d: null, interactionPoints3d: Array.isArray(raw.interactionPoints3d) ? raw.interactionPoints3d as SceneObject["interactionPoints3d"] : [] };
+  object.geometry3d = normalizeGeometry3d(raw.geometry3d) ?? geometry3dFromSceneObject(object); return object;
 }
 
 function normalizeHuman(value: unknown): SceneHuman | null {
@@ -101,13 +106,14 @@ function normalizeHuman(value: unknown): SceneHuman | null {
   const profile = normalizePhysicalProfile({ ...derived, ...profileRaw, segmentProvenance: { ...derived.segmentProvenance, ...(profileRaw.segmentProvenance && typeof profileRaw.segmentProvenance === "object" ? profileRaw.segmentProvenance : {}) } } as SceneHuman["profile"]);
   const pose = normalizePose(raw.pose, base.pose), placementRaw = raw.placement && typeof raw.placement === "object" ? raw.placement as Record<string, unknown> : {};
   const placement = syncPlacement(pose, { ...base.placement, attachedObjectId: typeof placementRaw.attachedObjectId === "string" ? placementRaw.attachedObjectId : null, floorPinned: placementRaw.floorPinned === true, positionMode: placementRaw.attachmentMode === "SEATED_AT_OBJECT" ? "SEATED_AT_OBJECT" : placementRaw.attachmentMode === "WORK_SURFACE" ? "WORKING_AT_OBJECT" : "FREE", orientationDeg: finite(placementRaw.orientationDeg) ? placementRaw.orientationDeg : 0, facingPreset: "FRONT", lastScalePxPerCm: finite(placementRaw.lastScalePxPerCm) ? placementRaw.lastScalePxPerCm : null, scaleStatus: "NO_SCALE" });
-  return { ...base, id: typeof raw.id === "string" ? raw.id : base.id, profile, constraints: createConstraintGraph(profile), pose, placement, handTargets: { left: null, right: null }, visible: raw.visible !== false, locked: raw.locked === true };
+  const human3d = normalizeHuman3d(raw.human3d, profile) ?? createHuman3DState(profile, "MIGRATED_TO_3D"); if (!raw.human3d) human3d.legacy2dBackup = { posePreset: pose.preset, normalizedRoot: placement.root };
+  return { ...base, id: typeof raw.id === "string" ? raw.id : base.id, profile, constraints: createConstraintGraph(profile), pose, placement, human3d, handTargets: { left: null, right: null }, visible: raw.visible !== false, locked: raw.locked === true };
 }
 
 function normalizeLegacyHuman(humanValue: unknown, poseValue: unknown): SceneHuman[] {
   if (!humanValue || typeof humanValue !== "object") return []; const raw = humanValue as Record<string, unknown>; if (!finite(raw.heightCm)) return [];
   const human = createHuman("Operator", "#f97316", "CUSTOM"), derived = profileFromHeight("Operator", raw.heightCm, "CUSTOM");
-  human.id = "legacy-human-1"; human.profile = { ...derived, ...raw, segmentProvenance: derived.segmentProvenance } as SceneHuman["profile"]; human.constraints = createConstraintGraph(human.profile); human.pose = normalizePose(poseValue, human.pose); human.placement = syncPlacement(human.pose, human.placement); return [human];
+  human.id = "legacy-human-1"; human.profile = { ...derived, ...raw, segmentProvenance: derived.segmentProvenance } as SceneHuman["profile"]; human.constraints = createConstraintGraph(human.profile); human.pose = normalizePose(poseValue, human.pose); human.placement = syncPlacement(human.pose, human.placement); human.human3d = createHuman3DState(human.profile, "MIGRATED_TO_3D"); human.human3d.legacy2dBackup = { posePreset: human.pose.preset, normalizedRoot: human.placement.root }; return [human];
 }
 
 function normalizePose(value: unknown, fallback: HumanPose): HumanPose {
@@ -127,3 +133,6 @@ function normalizeWorldAnchors(value: unknown): CalibrationReference["worldAncho
 function legacyWorldAnchors(bottom: NormalizedPoint, top: NormalizedPoint, height: number): CalibrationReference["worldAnchors"] { return { bottom: { id: crypto.randomUUID(), imagePoint: bottom, worldHeightCm: 0, role: "BOTTOM" }, top: { id: crypto.randomUUID(), imagePoint: top, worldHeightCm: height, role: "TOP" } }; }
 function normalizeGeometryMeasurement(value: unknown): GeometryMeasurement | null { if (!value || typeof value !== "object") return null; const raw = value as Record<string, unknown>; if (typeof raw.id !== "string" || typeof raw.name !== "string" || !point(raw.start) || !point(raw.end) || !(raw.valueCm === null || finite(raw.valueCm))) return null; const key = typeof raw.dimensionKey === "string" && dimensionKeys.includes(raw.dimensionKey as ObjectDimensionKey) ? raw.dimensionKey as ObjectDimensionKey : null; const semantics = key ? semanticsForDimensionKey(key) : semanticsForReferenceType("CUSTOM"); return { ...(raw as unknown as GeometryMeasurement), ...semantics, useForCalibration: false, semanticStatus: "CONFIRMED" }; }
 function normalizeFloorPlane(value: unknown, baseline: SceneState["calibration"]["floorBaseline"]): SceneState["calibration"]["floorPlane"] { if (!value || typeof value !== "object") return baseline ? { mode: "BASIC", points: [baseline.start, baseline.end], actualGroundDimensionCm: null, mappingStatus: "ORIENTATION_ONLY" } : { mode: "NONE", points: [], actualGroundDimensionCm: null, mappingStatus: "NONE" }; const raw = value as Record<string, unknown>, points = Array.isArray(raw.points) ? raw.points.filter(point) as NormalizedPoint[] : []; const mode = raw.mode === "QUADRILATERAL" && points.length === 4 ? "QUADRILATERAL" : raw.mode === "BASIC" && points.length >= 2 ? "BASIC" : "NONE"; return { mode, points: mode === "NONE" ? [] : points.slice(0, mode === "QUADRILATERAL" ? 4 : 2), actualGroundDimensionCm: finite(raw.actualGroundDimensionCm) && raw.actualGroundDimensionCm > 0 ? raw.actualGroundDimensionCm : null, mappingStatus: mode === "NONE" ? "NONE" : "ORIENTATION_ONLY" }; }
+function normalizeScene3d(value: unknown): SceneState["scene3d"] { const defaults = emptySceneState().scene3d; if (!value || typeof value !== "object") return defaults; const raw = value as Record<string, unknown>; return { ...defaults, workspaceMode: ["PHOTO","THREE_D","SPLIT"].includes(String(raw.workspaceMode)) ? raw.workspaceMode as SceneState["scene3d"]["workspaceMode"] : "PHOTO", cameraMappingStatus: ["CAMERA_APPROXIMATE","CAMERA_PARTIAL","CAMERA_CALIBRATED"].includes(String(raw.cameraMappingStatus)) ? raw.cameraMappingStatus as SceneState["scene3d"]["cameraMappingStatus"] : "CAMERA_APPROXIMATE", snapCm: [1,5,10].includes(Number(raw.snapCm)) ? Number(raw.snapCm) as 1|5|10 : 5, collisionBlocking: raw.collisionBlocking === true, selectedInteractionPointId: typeof raw.selectedInteractionPointId === "string" ? raw.selectedInteractionPointId : null, lastReachability: raw.lastReachability && typeof raw.lastReachability === "object" ? raw.lastReachability as SceneState["scene3d"]["lastReachability"] : null, lastCollisions: Array.isArray(raw.lastCollisions) ? raw.lastCollisions as SceneState["scene3d"]["lastCollisions"] : [], motion: raw.motion && typeof raw.motion === "object" ? raw.motion as SceneState["scene3d"]["motion"] : null }; }
+function normalizeHuman3d(value: unknown, profile: SceneHuman["profile"]): SceneHuman["human3d"] | null { if (!value || typeof value !== "object") return null; const raw = value as Record<string, unknown>; if (raw.modelVersion !== "digital-human-3d-v1" || !raw.jointPositionsCm || !raw.rootPositionCm) return null; return { ...createHuman3DState(profile), ...(raw as unknown as SceneHuman["human3d"]) }; }
+function normalizeGeometry3d(value: unknown): SceneObject["geometry3d"] { if (!value || typeof value !== "object") return null; const raw = value as Record<string, unknown>; if (typeof raw.type !== "string" || !raw.positionCm || !raw.dimensionsCm) return null; return raw as unknown as NonNullable<SceneObject["geometry3d"]>; }

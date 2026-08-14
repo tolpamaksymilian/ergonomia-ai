@@ -4,6 +4,7 @@ import type {
 } from "../../types/photo-scene";
 import { createAnthropometricProfile, derivePhysicalDimensions, normalizePhysicalProfile } from "./human-physical-model.ts";
 import { getProjectedHuman } from "./human-projection.ts";
+import { createHuman3DState } from "./human-3d-model.ts";
 
 export const HUMAN_PRESETS: Record<Exclude<HumanProfilePreset, "CUSTOM">, { label: string; heightCm: number }> = {
   SHORT: { label: "Niski", heightCm: 160 }, MEDIUM: { label: "Średni", heightCm: 175 }, TALL: { label: "Wysoki", heightCm: 190 },
@@ -69,7 +70,7 @@ export function createHuman(name: string, color: string, preset: HumanProfilePre
       lastScalePxPerCm: null, scaleStatus: "NO_SCALE", projectionStatus: "UNVERIFIED", projectionError: null,
       scaleReferences: [], calibrationCoverage: "UNKNOWN", backConvertedHeightCm: null,
     },
-    handTargets: { left: null, right: null }, modelVersion: "digital-human-v1", visible: true, locked: false,
+    handTargets: { left: null, right: null }, modelVersion: "digital-human-v1", human3d: createHuman3DState(profile), visible: true, locked: false,
   };
 }
 

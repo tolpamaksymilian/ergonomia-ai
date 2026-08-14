@@ -114,6 +114,8 @@ function detectedObject(candidate: SceneDetectionCandidate): SceneObject {
     geometryMeasurements: [],
     interactionPoints: [],
     referencePoint: null,
+    geometry3d: null,
+    interactionPoints3d: [],
   };
 }
 
