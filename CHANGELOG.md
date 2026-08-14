@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0-beta.1] - 2026-08-14
+
+- Dodano odseparowany Scene Ergonomics Engine oparty wyłącznie na fizycznym rig 3D.
+- Dodano kąty lokalne, analizę wysokości pracy, work zones, clearance, line-of-sight i grip assessment.
+- Dodano evidence-aware adaptery RULA/REBA korzystające z generowanego kontraktu istniejących tabel Python.
+- Dodano sekwencje zadań, próbkowanie ruchu, findings, rekomendacje oraz porównanie wariantu projektu.
+- Dodano zakładkę Ergonomia oraz prywatne artefakty assessment/report bez zmiany Scene Schema 1.4.
+
 ## [0.18.0-beta.1] - 2026-08-14
 
 - Dodano serializowalny świat 3D w centymetrach oraz proceduralny Digital Human 3D.

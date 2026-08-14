@@ -65,7 +65,7 @@ const stages = [
   { id: "analysis-context", title: "Kontekst analizy i stanowiska", description: "Wersjonowany kontekst, słownik stanowisk i wielokrotne kategorie.", status: "completed", group: "infrastructure" },
   { id: "photo-scene-builder", title: "Projektowanie stanowiska ze zdjęcia — Beta", description: "Scene World Model, Calibration V3 oraz kinematyczny Digital Human 3D z dłońmi, zasięgiem i kolizjami.", status: "in_progress", group: "scene_builder" },
   { id: "photo-scene-worker", title: "Scene Detection Worker", description: "Automatyczny, odseparowany etap YOLOX-X z ręcznym fallbackiem.", status: "in_progress", group: "scene_builder" },
-  { id: "photo-scene-assessment", title: "Ocena ergonomii projektowanej sceny", description: "Przyszły silnik korzystający z zatwierdzonej geometrii sceny.", status: "planned", group: "scene_builder" },
+  { id: "photo-scene-assessment", title: "Scene Ergonomics Engine V1", description: "Deterministyczna ocena geometrii, postawy 3D, dosiężności, clearance, RULA/REBA i wariantów projektu.", status: "completed", group: "scene_builder" },
   { id: "company-method-inputs", title: "Dane kontekstowe metod", description: "Prywatny zapis i przeliczanie bez ponownego uruchamiania GPU.", status: "completed", group: "risk" },
   { id: "production-profile", title: "Produkcyjny profil progów", description: "Profil zatwierdzony przez specjalistę.", status: "planned", group: "risk" },
   { id: "threshold-panel", title: "Panel progów", description: "Konfiguracja wersjonowanych profili.", status: "planned", group: "risk" },
@@ -84,7 +84,7 @@ const stages = [
   { id: "pipeline-supervisor", title: "Pipeline Supervisor", description: "Automatyczny start, heartbeat, preflight i kontrolowany restart lokalnego pipeline’u.", status: "completed", group: "infrastructure" },
   { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
   { id: "history-v2", title: "Historia analiz 2.0", description: "Wyszukiwanie, filtry URL, kategorie AND/OR i paginacja serwerowa.", status: "completed", group: "infrastructure" },
-  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu oraz Photo Scene Builder w v0.18.0-beta.1.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu oraz Photo Scene Builder w v0.19.0-beta.1.", status: "completed", group: "infrastructure" },
   { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
   { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
@@ -104,14 +104,16 @@ export const projectStageGroups: ReadonlyArray<{
   { id: "risk", label: "Ocena ryzyka", description: "Transparentna interpretacja metryk." },
   { id: "reporting", label: "Raportowanie", description: "Prezentacja i eksport wyników." },
   { id: "infrastructure", label: "Infrastruktura produkcyjna", description: "Hosting, retencja i walidacja." },
-  { id: "scene_builder", label: "Projekt ze zdjęcia", description: "Interaktywny model sceny 2D bez automatycznej oceny ergonomicznej." },
+  { id: "scene_builder", label: "Projekt ze zdjęcia", description: "Interaktywny model 3D z deterministyczną oceną projektową." },
 ];
 
 export const projectStatus = {
   projectName: "Ergonomia AI",
   versions: {
-    application: "v0.18.0-beta.1",
-    sceneBuilder: "photo-scene-builder-v0.7-beta.1",
+    application: "v0.19.0-beta.1",
+    sceneBuilder: "photo-scene-builder-v0.8-beta.1",
+    sceneErgonomics: "scene-ergonomics-v1.0-beta.1",
+    sceneDesignReport: "scene-design-report-v1.0-beta.1",
     sceneDetection: "scene-detection-v0.2-beta.1",
     worker: "v0.7.0-beta.1",
     supervisor: "pipeline-supervisor-v1.0-beta.1",

@@ -14,7 +14,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { error } = await supabase.from("photo_scenes").update({
     scene_state: state,
     scene_schema_version: "1.4",
-    scene_builder_version: "photo-scene-builder-v0.7-beta.1",
+    scene_builder_version: "photo-scene-builder-v0.8-beta.1",
     last_saved_at: new Date().toISOString(),
   }).eq("analysis_id", id);
   if (error) return NextResponse.json({ error: "Nie udało się zapisać sceny." }, { status: 500 });

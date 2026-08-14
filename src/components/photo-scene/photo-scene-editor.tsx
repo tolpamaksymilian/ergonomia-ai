@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { HumanMannequin, type HumanDragKind } from "@/components/photo-scene/human-mannequin";
+import { SceneErgonomicsPanel } from "@/components/photo-scene/scene-ergonomics-panel";
 import { CalibrationHelp, GuidedCalibrationForm, GuidedCanvasInstruction, type GuidedReferenceInput } from "@/components/photo-scene/guided-calibration";
 import { HUMAN_PRESETS, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, repairHumanModel, resetHumanPose, withUserSegment } from "@/lib/photo-scene/anthropometry";
 import { derivePhotoAnalysisUi, mergeSceneDetection } from "@/lib/photo-scene/analysis-control";
@@ -35,11 +36,12 @@ import type {
   SceneDetection, SceneHuman, SceneLayerKey, SceneObject, SceneObjectType, SceneState,
   SceneViewPreset,
 } from "@/types/photo-scene";
+import type { BodyRegion } from "@/lib/scene-ergonomics/types";
 
 const Scene3DViewport = dynamic(() => import("@/components/photo-scene/scene-3d-viewport").then((module) => module.Scene3DViewport), { ssr: false, loading: () => <div className="grid min-h-[520px] place-items-center rounded-xl bg-slate-950 text-sm text-cyan-100">Ładowanie przestrzeni 3D…</div> });
 
 type Tool = "SELECT" | "PAN" | "ADD_OBJECT" | "FLOOR" | "REFERENCE" | "HUMAN";
-type Tab = "SCENE" | "OBJECTS" | "HUMANS" | "INTERACTIONS" | "DIMENSIONS" | "SUGGESTIONS";
+type Tab = "SCENE" | "OBJECTS" | "HUMANS" | "INTERACTIONS" | "ERGONOMICS" | "DIMENSIONS" | "SUGGESTIONS";
 type DraftMeasurement = { start: NormalizedPoint; end: NormalizedPoint; objectId: string | null };
 type Drag = { kind: HumanDragKind | "OBJECT" | "RESIZE" | "PAN"; id?: string; joint?: HumanJointName; start: NormalizedPoint; startScreen: { x: number; y: number }; snapshot: SceneState };
 
@@ -78,6 +80,7 @@ export function PhotoSceneEditor(props: {
   const [pointerOutside, setPointerOutside] = useState(false), [showDetectedObjects, setShowDetectedObjects] = useState(false);
   const [analysisStarting, setAnalysisStarting] = useState(false), [analysisActionError, setAnalysisActionError] = useState<string | null>(null);
   const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
+  const [ergonomicFocus, setErgonomicFocus] = useState<BodyRegion | null>(null);
   const [guidedCalibration, setGuidedCalibration] = useState(false);
   const [floorMode, setFloorMode] = useState<"BASIC" | "QUADRILATERAL">("BASIC");
   const [floorPoints, setFloorPoints] = useState<NormalizedPoint[]>([]);
@@ -344,18 +347,19 @@ export function PhotoSceneEditor(props: {
         {selectedHuman && selectedHuman.placement.projectionStatus !== "VALID" && <div className="absolute bottom-4 left-1/2 z-20 w-[min(92%,520px)] -translate-x-1/2 rounded-xl border border-amber-400/40 bg-slate-950/92 p-3 text-sm text-white shadow-xl"><strong>{selectedHuman.placement.projectionStatus === "PROJECTION_INVALID" ? "Nie można wiarygodnie ustawić postaci w tym miejscu." : "Brakuje potwierdzonej skali pionowej dla tej części sceny."}</strong><p className="mt-1 text-xs text-slate-300">{selectedHuman.placement.projectionStatus === "PROJECTION_INVALID" ? "Lokalna skala pionowa jest niedostępna albo daje nielogiczny wynik." : "Postać jest tylko podglądem roboczym i nie powinna być używana do wniosków wymiarowych."}</p><button onClick={() => { setGuidedCalibration(true); setTool("REFERENCE"); setTab("DIMENSIONS"); }} className="mt-2 text-xs font-bold text-cyan-300">Dodaj pionową referencję tutaj →</button></div>}
         {debugCoordinates && coordinateDebug && <CoordinateDebugPanel coordinates={coordinateDebug} rect={editorRect} />}
         </div>
-        {state.scene3d.workspaceMode !== "PHOTO" && <Scene3DViewport humans={state.humans} objects={state.objects} selectedHumanId={state.selectedHumanId} debug={debugInteraction3d} />}
+        {state.scene3d.workspaceMode !== "PHOTO" && <Scene3DViewport humans={state.humans} objects={state.objects} selectedHumanId={state.selectedHumanId} ergonomicFocus={ergonomicFocus} debug={debugInteraction3d} />}
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-3 text-xs text-muted-foreground"><span>{pointerOutside ? <strong className="text-amber-600">Poza obszarem zdjęcia</strong> : "Oryginał pozostaje niezmieniony · geometria zapisywana w układzie 0–1"}</span><span className={saveStatus === "ERROR" ? "text-red-500" : ""}>{saveStatus === "SAVED" ? "Zapisano" : saveStatus === "SAVING" ? "Zapisywanie…" : saveStatus === "DIRTY" ? "Niezapisane zmiany" : "Błąd zapisu"}</span></footer>
     </section>
     <aside className="ui-card min-w-0 overflow-hidden">
       <div className={`border-b px-4 py-3 text-xs font-semibold ${quality === "GOOD" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : quality === "ATTENTION_REQUIRED" ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300" : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{qualityLabel(quality)} · kompletność danych {Math.round(completion.ratio * 100)}%</div>
-      <nav className="grid grid-cols-6 border-b border-border">{(["SCENE", "OBJECTS", "HUMANS", "INTERACTIONS", "DIMENSIONS", "SUGGESTIONS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[9px] font-bold sm:text-[11px] ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
+      <nav className="grid grid-cols-4 border-b border-border sm:grid-cols-7">{(["SCENE", "OBJECTS", "HUMANS", "INTERACTIONS", "ERGONOMICS", "DIMENSIONS", "SUGGESTIONS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[9px] font-bold sm:text-[11px] ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
       <div className="max-h-[76vh] space-y-5 overflow-y-auto p-4">
         {tab === "SCENE" && <ScenePanel {...props} state={state} quality={quality} completion={completion} save={save} setTab={setTab} analysisUi={analysisUi} analysisStarting={analysisStarting} analysisActionError={analysisActionError} startPhotoAnalysis={startPhotoAnalysis} worker={worker} restartWorker={restartWorker} showDetectedObjects={showDetectedObjects} setShowDetectedObjects={setShowDetectedObjects} oldCoordinateScene={oldCoordinateScene} />}
         {tab === "OBJECTS" && <ObjectsPanel state={state} selected={selectedObject} update={update} setTool={setTool} setTab={setTab} />}
         {tab === "HUMANS" && <HumansPanel state={state} selected={selectedHuman} update={update} setTool={setTool} imageWidth={imageWidth} imageHeight={imageHeight} />}
         {tab === "INTERACTIONS" && <InteractionsPanel state={state} selectedHuman={selectedHuman} selectedObject={selectedObject} update={update} />}
+        {tab === "ERGONOMICS" && <SceneErgonomicsPanel analysisId={props.analysisId} state={state} selectedHumanId={state.selectedHumanId} focus={(humanId,objectId,region)=>{setErgonomicFocus(region);update((current)=>({...current,selectedHumanId:humanId,selectedObjectId:objectId,scene3d:{...current.scene3d,workspaceMode:"THREE_D"}}))}}/>}
         {tab === "DIMENSIONS" && <DimensionsPanel state={state} draft={draftMeasurement} addReference={addReference} cancelDraft={() => { setDraftMeasurement(null); setGuidedCalibration(false); }} update={update} setTool={setTool} guidedCalibration={guidedCalibration} setGuidedCalibration={setGuidedCalibration} floorMode={floorMode} setFloorMode={setFloorMode} floorPointCount={floorPoints.length} />}
         {tab === "SUGGESTIONS" && <SuggestionsPanel state={state} update={update} setTab={setTab} setTool={setTool} />}
       </div>
@@ -667,8 +671,8 @@ function qualityLabel(quality: ReturnType<typeof calibrationQuality>) { return q
 function formatDate(value: string | null) { if (!value) return "—"; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString("pl-PL") : "—"; }
 function workerStatusLabel(status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown" | undefined) { return ({ online: "Online", offline: "Offline", degraded: "Ograniczony", restarting: "Restart", crash_loop: "Błąd uruchamiania", unknown: "Nieznany" })[status ?? "unknown"]; }
 function sceneErrorMessage(code: string | null) { return ({ SCENE_JOB_CLAIM_FAILED: "Worker nie mógł pobrać zadania.", SCENE_IMAGE_PATH_MISSING: "Brakuje ścieżki zdjęcia źródłowego.", SCENE_IMAGE_DOWNLOAD_FAILED: "Nie udało się pobrać prywatnego zdjęcia.", SCENE_IMAGE_DECODE_FAILED: "Format zdjęcia nie mógł zostać odczytany.", SCENE_DETECTOR_INIT_FAILED: "Model detekcji nie uruchomił się.", SCENE_DETECTION_FAILED: "Detekcja obiektów nie powiodła się.", SCENE_GEOMETRY_FAILED: "Analiza geometrii nie powiodła się.", SCENE_RESULT_UPLOAD_FAILED: "Wynik analizy nie został zapisany w Storage.", SCENE_COMPLETE_RPC_FAILED: "Worker utracił możliwość zakończenia zadania.", SCENE_WORKER_OFFLINE: "Worker analizy sceny jest offline.", SCENE_JOB_STALLED: "Zadanie nie raportuje postępu." } as Record<string, string>)[code ?? ""] ?? "Automatyczna analiza zdjęcia nie powiodła się."; }
-function tabLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Człowiek", INTERACTIONS: "Interakcje", DIMENSIONS: "Kalibracja", SUGGESTIONS: "Sugestie" })[tab]; }
-function tabShortLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Osoby", INTERACTIONS: "Relacje", DIMENSIONS: "Kalibr.", SUGGESTIONS: "Sugestie" })[tab]; }
+function tabLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Człowiek", INTERACTIONS: "Interakcje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Kalibracja", SUGGESTIONS: "Sugestie" })[tab]; }
+function tabShortLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Osoby", INTERACTIONS: "Relacje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Kalibr.", SUGGESTIONS: "Sugestie" })[tab]; }
 function priorityLabel(priority: "CRITICAL" | "RECOMMENDED" | "OPTIONAL") { return priority === "CRITICAL" ? "Krytyczne" : priority === "RECOMMENDED" ? "Zalecane" : "Opcjonalne"; }
 function dimensionKeyLabel(key: ObjectDimensionKey) { return ({ heightCm: "Wysokość", widthCm: "Szerokość", depthCm: "Głębokość", workSurfaceHeightCm: "Wysokość powierzchni", lowerEdgeHeightCm: "Wysokość dolnej krawędzi", upperEdgeHeightCm: "Wysokość górnej krawędzi", seatHeightCm: "Wysokość siedziska", seatWidthCm: "Szerokość siedziska", backrestHeightCm: "Wysokość oparcia", seatDepthCm: "Głębokość siedziska", screenCenterHeightCm: "Wysokość środka ekranu", screenHeightCm: "Wysokość ekranu", userDistanceCm: "Odległość od operatora", keyShelfHeightCm: "Wysokość półki", workingWidthCm: "Szerokość robocza", controlHeightCm: "Wysokość sterowania" })[key]; }
 function provenanceLabel(source: GeometryMeasurement["source"]) { return ({ USER_MEASURED: "Pomiar użytkownika", WORKER_SUGGESTED: "Sugestia Workera", SCENE_ESTIMATED: "Estymacja ze sceny", USER_CONFIRMED_ESTIMATE: "Estymacja potwierdzona przez użytkownika", UNKNOWN: "Nieznane źródło" })[source]; }
