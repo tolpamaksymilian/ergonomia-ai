@@ -66,7 +66,8 @@ export function createHuman(name: string, color: string, preset: HumanProfilePre
       root: pose.joints.pelvisRoot, leftFootContact: pose.joints.leftFoot, rightFootContact: pose.joints.rightFoot,
       contactPoint: midpoint(pose.joints.leftFoot, pose.joints.rightFoot), floorPinned: false,
       attachedObjectId: null, positionMode: "FREE", orientationDeg: 0, facingPreset: "FRONT",
-      lastScalePxPerCm: null, scaleStatus: "NO_SCALE",
+      lastScalePxPerCm: null, scaleStatus: "NO_SCALE", projectionStatus: "UNVERIFIED", projectionError: null,
+      scaleReferences: [], calibrationCoverage: "UNKNOWN", backConvertedHeightCm: null,
     },
     handTargets: { left: null, right: null }, modelVersion: "digital-human-v1", visible: true, locked: false,
   };
@@ -81,7 +82,7 @@ export function buildAnthropometricPose(profile: HumanProfile, standingPoint: No
   const base = previous ?? defaultPoseShell();
   const projected = getProjectedHuman({
     human: { profile: normalizePhysicalProfile(profile), pose: { ...base, preset }, placement: { ...emptyPlacement(standingPoint), orientationDeg } },
-    calibration: emptyCalibration(), contactPoint: standingPoint, imageWidth, imageHeight,
+    verticalScale: null, contactPoint: standingPoint, imageWidth, imageHeight,
     posture: preset, yawDeg: orientationDeg, fallbackPixelsPerCm: pixelsPerCm,
   });
   return { ...projected.pose, bendPreference: previous?.bendPreference ?? projected.pose.bendPreference };
@@ -123,5 +124,4 @@ function defaultPoseShell(): HumanPose {
   const zero = { x: 0, y: 0 };
   return { preset: "STANDING", mirrored: false, scaleLocked: true, joints: Object.fromEntries(["head","neck","leftShoulder","rightShoulder","leftElbow","rightElbow","leftWrist","rightWrist","leftHand","rightHand","pelvisRoot","leftHip","rightHip","leftKnee","rightKnee","leftAnkle","rightAnkle","leftFoot","rightFoot"].map((name) => [name, zero])) as HumanPose["joints"], reachState: { leftArm: "NATURAL", rightArm: "NATURAL", leftLeg: "NATURAL", rightLeg: "NATURAL" }, bendPreference: { leftArm: 1, rightArm: -1, leftLeg: -1, rightLeg: 1 } };
 }
-function emptyPlacement(point: NormalizedPoint): SceneHuman["placement"] { return { root: point, leftFootContact: point, rightFootContact: point, contactPoint: point, floorPinned: false, attachedObjectId: null, positionMode: "FREE", orientationDeg: 0, facingPreset: "FRONT", lastScalePxPerCm: null, scaleStatus: "NO_SCALE" }; }
-function emptyCalibration() { return { status: "UNCALIBRATED" as const, floorBaseline: null, horizonY: null, verticalDirection: null, references: [], scaleField: { status: "NO_SCALE" as const, coefficients: null, model: "NONE" as const, anchorCount: 0, inlierCount: 0, residualRms: null, uncertainty: null, generatedAt: null } }; }
+function emptyPlacement(point: NormalizedPoint): SceneHuman["placement"] { return { root: point, leftFootContact: point, rightFootContact: point, contactPoint: point, floorPinned: false, attachedObjectId: null, positionMode: "FREE", orientationDeg: 0, facingPreset: "FRONT", lastScalePxPerCm: null, scaleStatus: "NO_SCALE", projectionStatus: "UNVERIFIED", projectionError: null, scaleReferences: [], calibrationCoverage: "UNKNOWN", backConvertedHeightCm: null }; }

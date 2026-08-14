@@ -22,7 +22,7 @@ export function sceneCompleteness(state: SceneState) {
   const required = suggestions.filter((item) => item.priority !== "OPTIONAL");
   const total = state.objects.filter((object) => object.status !== "USER_REJECTED").reduce((sum, object) => sum + dimensionsFor(object.type).filter((item) => item.priority !== "OPTIONAL").length, 0);
   const completed = Math.max(0, total - required.length);
-  const calibrationCount = state.calibration.references.filter((reference) => reference.active && reference.affectsScale && reference.residualStatus !== "OUTLIER").length;
+  const calibrationCount = state.calibration.references.filter((reference) => reference.active && reference.useForCalibration && reference.semanticStatus === "CONFIRMED" && reference.axis === "VERTICAL" && reference.residualStatus !== "OUTLIER").length;
   const humanComplete = state.humans.length > 0 && state.humans.every((human) => human.profile.heightCm > 0 && human.placement.lastScalePxPerCm !== null);
   const geometryScore = state.calibration.floorBaseline ? 1 : state.objects.length ? .5 : 0;
   return {

@@ -74,7 +74,11 @@ export function mergeSceneDetection(state: SceneState, detection: SceneDetection
     if (workerSuggestions.some((existing) => sameSuggestion(existing, suggestion))) continue;
     workerSuggestions.push(suggestion);
   }
-  return { ...state, objects, workerSuggestions };
+  const verticalAngle = detection.perspective_evidence?.dominant_vertical_angle_deg;
+  const calibration = !state.calibration.verticalDirectionConfirmed && typeof verticalAngle === "number" && Number.isFinite(verticalAngle)
+    ? { ...state.calibration, verticalDirection: suggestedUpVector(verticalAngle), verticalDirectionSource: "WORKER_SUGGESTED" as const }
+    : state.calibration;
+  return { ...state, objects, workerSuggestions, calibration };
 }
 
 export function intersectionOverUnion(first: NormalizedBox, second: NormalizedBox) {
@@ -121,6 +125,12 @@ function sameSuggestion(first: WorkerDimensionSuggestion, second: WorkerDimensio
 
 function pointDistance(first: { x: number; y: number }, second: { x: number; y: number }) {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function suggestedUpVector(screenAngleDeg: number) {
+  const radians = screenAngleDeg * Math.PI / 180;
+  const vector = { x: Math.cos(radians), y: Math.sin(radians) };
+  return vector.y > 0 ? { x: -vector.x, y: -vector.y } : vector;
 }
 
 function validTimestamp(value: string | null | undefined) {

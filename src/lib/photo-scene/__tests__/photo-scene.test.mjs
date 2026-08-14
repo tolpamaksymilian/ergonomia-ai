@@ -14,14 +14,14 @@ const WIDTH = 1200;
 const HEIGHT = 900;
 
 function reference(id, x, y, pixels, cm, type = "HEIGHT") {
-  return { id, name: id, dimensionType: type, valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, affectsScale: true, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
+  return { id, name: id, dimensionType: type, valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, measurementKind: "VERTICAL_HEIGHT", axis: "VERTICAL", plane: "VERTICAL_PLANE", purpose: "CALIBRATION", useForCalibration: true, semanticStatus: "CONFIRMED", worldAnchors: { bottom: { id: `${id}-bottom`, imagePoint: { x, y }, worldHeightCm: 0, role: "BOTTOM" }, top: { id: `${id}-top`, imagePoint: { x, y: y - .2 }, worldHeightCm: cm, role: "TOP" } }, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
 }
 
 function sceneObject(id = "table", type = "TABLE") {
   return { id, sourceClass: type === "TABLE" ? "dining table" : null, type, name: id, bbox: { x: .1, y: .3, width: .5, height: .4 }, detectorConfidence: null, source: "USER", status: "USER_CONFIRMED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null };
 }
 
-test("empty schema 1.2 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
+test("empty schema 1.3 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
 
 test("consistent non-collinear references create a perspective scale field", () => {
   const scene = emptySceneState();
@@ -164,18 +164,18 @@ test("object and scene completeness use explicit categories", () => {
 });
 
 test("label declutter produces unique positions and leader lines", () => {
-  const measurements = Array.from({ length: 6 }, (_, index) => ({ id: `m-${index}`, objectId: "table", dimensionKey: "widthCm", name: `Pomiar ${index}`, valueCm: 100 + index, unit: "cm", start: { x: .45, y: .5 + index * .001 }, end: { x: .55, y: .5 + index * .001 }, orientation: "HORIZONTAL", source: "USER_MEASURED", estimateStatus: "MEASURED", evidenceQuality: "HIGH", reason: null, active: true, visible: true, locked: false, affectsScale: true }));
+  const measurements = Array.from({ length: 6 }, (_, index) => ({ id: `m-${index}`, objectId: "table", dimensionKey: "widthCm", name: `Pomiar ${index}`, valueCm: 100 + index, unit: "cm", start: { x: .45, y: .5 + index * .001 }, end: { x: .55, y: .5 + index * .001 }, orientation: "HORIZONTAL", source: "USER_MEASURED", estimateStatus: "MEASURED", evidenceQuality: "HIGH", reason: null, active: true, visible: true, locked: false, measurementKind: "OBJECT_WIDTH", axis: "HORIZONTAL", plane: "OBJECT_FRONT_PLANE", purpose: "OBJECT_DESCRIPTION", useForCalibration: false, semanticStatus: "CONFIRMED" }));
   const layout = layoutMeasurementLabels(measurements, 1);
   assert.equal(new Set(layout.map((item) => `${item.position.x.toFixed(4)}:${item.position.y.toFixed(4)}`)).size, layout.length);
   assert.ok(layout.some((item) => item.leader));
   assert.ok(layoutMeasurementLabels(measurements, .7).some((item) => item.compact));
 });
 
-test("legacy schema 1.0 is normalized to 1.2 without losing object human or reference", () => {
+test("legacy schema 1.0 is normalized to 1.3 without losing object human or reference", () => {
   const human = createHuman("Operator", "#f97316");
   const legacy = { schema_version: "1.0", objects: [{ ...sceneObject(), geometryMeasurements: undefined, interactionPoints: undefined }], calibration: { status: "PARTIALLY_CALIBRATED", floorBaseline: null, anchors: [{ id: "old", lower: { x: .2, y: .8 }, upper: { x: .2, y: .5 }, pixelDistance: 300, realDistanceCm: 100, objectId: null, source: "USER_PROVIDED" }] }, human: human.profile, pose: human.pose, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } };
   const normalized = normalizeSceneState(legacy);
-  assert.equal(normalized.schema_version, "1.2");
+  assert.equal(normalized.schema_version, "1.3");
   assert.equal(normalized.objects.length, 1); assert.equal(normalized.humans.length, 1); assert.equal(normalized.calibration.references[0].valueCm, 100);
   assert.equal(validateSceneState(normalized), true);
 });
@@ -184,7 +184,7 @@ test("legacy schema 1.1 keeps multiple humans and object measurements", () => {
   const scene = emptySceneState(); scene.objects.push(sceneObject()); scene.humans.push(createHuman("A", "#f97316"), createHuman("B", "#06b6d4", "TALL"));
   const legacy = { ...scene, schema_version: "1.1", geometryMeasurements: undefined, workerSuggestions: undefined, view: undefined };
   const normalized = normalizeSceneState(legacy);
-  assert.equal(normalized.schema_version, "1.2");
+  assert.equal(normalized.schema_version, "1.3");
   assert.equal(normalized.humans.length, 2);
   assert.equal(normalized.objects.length, 1);
 });

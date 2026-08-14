@@ -13,8 +13,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!validateSceneState(state)) return NextResponse.json({ error: "Nieprawidłowy stan sceny." }, { status: 422 });
   const { error } = await supabase.from("photo_scenes").update({
     scene_state: state,
-    scene_schema_version: "1.2",
-    scene_builder_version: "photo-scene-builder-v0.5-beta.1",
+    scene_schema_version: "1.3",
+    scene_builder_version: "photo-scene-builder-v0.6-beta.1",
     last_saved_at: new Date().toISOString(),
   }).eq("analysis_id", id);
   if (error) return NextResponse.json({ error: "Nie udało się zapisać sceny." }, { status: 500 });

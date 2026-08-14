@@ -5,7 +5,7 @@ import { buildAnthropometricPose, createHuman, profileFromHeight, renderedHeight
 import { estimateLocalScale, rebuildPerspectiveField } from "../calibration.ts";
 import { moveHumanJointWithConstraints, segmentLengthPixels, solveTwoBoneIk } from "../geometry.ts";
 import { getCanonicalHuman } from "../human-physical-model.ts";
-import { buildCanonicalPose, validateCanonicalPose } from "../human-pose-model.ts";
+import { assertCanonicalHeight, buildCanonicalPose, validateCanonicalPose } from "../human-pose-model.ts";
 import { getGroundPlaneStatus, getProjectedHuman } from "../human-projection.ts";
 import { emptySceneState, normalizeSceneState, validateSceneState } from "../schema.ts";
 
@@ -13,7 +13,7 @@ const WIDTH = 1200;
 const HEIGHT = 900;
 
 function reference(id, x, y, pixels, cm) {
-  return { id, name: id, dimensionType: "HEIGHT", valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, affectsScale: true, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
+  return { id, name: id, dimensionType: "HEIGHT", valueCm: cm, unit: "cm", start: { x, y }, end: { x, y: y - .2 }, pixelDistance: pixels, objectId: null, active: true, visible: true, locked: false, measurementKind: "VERTICAL_HEIGHT", axis: "VERTICAL", plane: "VERTICAL_PLANE", purpose: "CALIBRATION", useForCalibration: true, semanticStatus: "CONFIRMED", worldAnchors: { bottom: { id: `${id}-bottom`, imagePoint: { x, y }, worldHeightCm: 0, role: "BOTTOM" }, top: { id: `${id}-top`, imagePoint: { x, y: y - .2 }, worldHeightCm: cm, role: "TOP" } }, source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false };
 }
 
 for (const heightCm of [160, 175, 190]) test(`golden neutral human ${heightCm} cm has exact canonical stature and symmetric landmarks`, () => {
@@ -21,6 +21,7 @@ for (const heightCm of [160, 175, 190]) test(`golden neutral human ${heightCm} c
   const pose = buildCanonicalPose(canonical, "STANDING");
   assert.equal(canonical.unit, "cm");
   assert.equal(canonical.dimensions.statureCm, heightCm);
+  assert.equal(assertCanonicalHeight(canonical), heightCm);
   assert.ok(Math.abs(pose.joints.head.y - heightCm) < 1e-9);
   assert.ok(Math.abs(pose.joints.leftShoulder.x + pose.joints.rightShoulder.x) < 1e-9);
   assert.ok(Math.abs(pose.joints.leftHip.x + pose.joints.rightHip.x) < 1e-9);
@@ -72,8 +73,9 @@ test("projected human reports calibration and ground fallback states", () => {
   const scene = emptySceneState(), human = createHuman("Operator", "#f97316");
   assert.equal(getGroundPlaneStatus(scene.calibration), "GROUND_NONE");
   scene.calibration.floorBaseline = { start: { x: 0, y: .9 }, end: { x: 1, y: .9 } };
+  scene.calibration.floorPlane = { mode: "BASIC", points: [{ x: 0, y: .9 }, { x: 1, y: .9 }], actualGroundDimensionCm: null, mappingStatus: "ORIENTATION_ONLY" };
   assert.equal(getGroundPlaneStatus(scene.calibration), "GROUND_BASIC");
-  const projected = getProjectedHuman({ human, calibration: scene.calibration, contactPoint: { x: .5, y: .9 }, imageWidth: WIDTH, imageHeight: HEIGHT });
+  const projected = getProjectedHuman({ human, verticalScale: null, contactPoint: { x: .5, y: .9 }, imageWidth: WIDTH, imageHeight: HEIGHT, fallbackPixelsPerCm: 3 });
   assert.equal(projected.physicalHeightCm, 175);
   assert.equal(projected.placementQuality, "UNVERIFIED");
 });
@@ -90,7 +92,7 @@ test("interactive wrist target cannot stretch arm segments", () => {
 test("old schema 1.2 human is normalized into Digital Human v1 without losing placement", () => {
   const scene = emptySceneState(), original = createHuman("Legacy", "#06b6d4");
   const contact = { ...original.placement.contactPoint };
-  const legacy = structuredClone({ ...scene, humans: [original], selectedHumanId: original.id });
+  const legacy = structuredClone({ ...scene, schema_version: "1.2", humans: [original], selectedHumanId: original.id });
   delete legacy.humans[0].modelVersion;
   delete legacy.humans[0].profile.physicalDimensions;
   for (const key of Object.keys(legacy.humans[0].profile.segmentProvenance)) legacy.humans[0].profile.segmentProvenance[key] = "DERIVED_APPROXIMATION";

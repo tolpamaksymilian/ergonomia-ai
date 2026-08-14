@@ -2,10 +2,12 @@ import type {
   CalibrationQuality, CalibrationReference, NormalizedPoint, PerspectiveScaleField,
   PerspectiveScaleStatus, SceneCalibration,
 } from "../../types/photo-scene";
+import { isVerticalCalibrationReference } from "./measurement-semantics.ts";
 
 export type LocalScaleEstimate = {
   pixelsPerCm: number; confidence: "LOW" | "MEDIUM" | "HIGH"; referencesUsed: string[];
   spreadRatio: number; status: PerspectiveScaleStatus; uncertainty: number;
+  coverage: "GOOD" | "PARTIAL" | "UNKNOWN";
 };
 
 export function referencePixelDistance(start: NormalizedPoint, end: NormalizedPoint, width: number, height: number) {
@@ -17,11 +19,11 @@ export function emptyScaleField(): PerspectiveScaleField {
 }
 
 function usableReferences(calibration: SceneCalibration) {
-  return calibration.references.filter((reference) => reference.active && reference.affectsScale && reference.valueCm > 0 && reference.pixelDistance > 0 && reference.dimensionType !== "DEPTH" && (reference.residualStatus !== "OUTLIER" || reference.manualOverride));
+  return calibration.references.filter((reference) => reference.active && isVerticalCalibrationReference(reference) && (reference.residualStatus !== "OUTLIER" || reference.manualOverride));
 }
 
 export function rebuildPerspectiveField(calibration: SceneCalibration): SceneCalibration {
-  const candidates = calibration.references.filter((reference) => reference.active && reference.affectsScale && reference.valueCm > 0 && reference.pixelDistance > 0 && reference.dimensionType !== "DEPTH");
+  const candidates = calibration.references.filter((reference) => reference.active && isVerticalCalibrationReference(reference));
   if (!candidates.length) return { ...calibration, scaleField: emptyScaleField(), references: calibration.references.map((reference) => ({ ...reference, residual: null, residualStatus: "UNASSESSED" })) };
   if (candidates.length < 3) {
     const field = localOrVerticalField(candidates);
@@ -55,20 +57,35 @@ export function estimateLocalScale(calibrationInput: SceneCalibration, position:
   const calibration = calibrationInput.scaleField?.generatedAt || calibrationInput.scaleField?.status === "LOCAL_ONLY" ? calibrationInput : rebuildPerspectiveField(calibrationInput);
   const references = usableReferences(calibration);
   if (!references.length) return null;
+  const coverage = getCalibrationCoverageAt(calibration, position, width, height);
+  if (coverage.quality === "UNKNOWN") return null;
   const field = calibration.scaleField;
   if (field.coefficients && field.model === "INVERSE_AFFINE_2D") {
     const inverseScale = field.coefficients[0] + field.coefficients[1] * position.x + field.coefficients[2] * position.y;
     if (Number.isFinite(inverseScale) && inverseScale > .00001) {
       const scale = 1 / inverseScale;
       const nearest = nearestReferences(references, position, width, height, 4);
-      return { pixelsPerCm: scale, referencesUsed: nearest.map((entry) => entry.reference.id), spreadRatio: field.residualRms ?? 0, status: field.status, uncertainty: field.uncertainty ?? .5, confidence: field.status === "PERSPECTIVE_GOOD" ? "HIGH" : field.status === "PERSPECTIVE_PARTIAL" ? "MEDIUM" : "LOW" };
+      return { pixelsPerCm: scale, referencesUsed: nearest.map((entry) => entry.reference.id), spreadRatio: field.residualRms ?? 0, status: field.status, uncertainty: Math.max(field.uncertainty ?? .5, coverage.uncertainty), confidence: coverage.quality === "GOOD" && field.status === "PERSPECTIVE_GOOD" ? "HIGH" : coverage.quality === "GOOD" || field.status === "PERSPECTIVE_PARTIAL" ? "MEDIUM" : "LOW", coverage: coverage.quality };
     }
   }
   const nearest = nearestReferences(references, position, width, height, 3);
   const scales = nearest.map((entry) => entry.reference.pixelDistance / entry.reference.valueCm).sort((a, b) => a - b);
   const scale = weightedMedian(nearest.map((entry) => ({ value: entry.reference.pixelDistance / entry.reference.valueCm, weight: 1 / Math.max(.025, entry.distance) ** 1.4 })));
   const spread = scales.length > 1 ? (scales.at(-1)! - scales[0]) / scale : 0;
-  return { pixelsPerCm: scale, referencesUsed: nearest.map((entry) => entry.reference.id), spreadRatio: spread, status: field.status === "NO_SCALE" ? "LOCAL_ONLY" : field.status, uncertainty: Math.min(1, .35 + spread), confidence: nearest.length >= 2 && spread < .35 ? "MEDIUM" : "LOW" };
+  return { pixelsPerCm: scale, referencesUsed: nearest.map((entry) => entry.reference.id), spreadRatio: spread, status: field.status === "NO_SCALE" ? "LOCAL_ONLY" : field.status, uncertainty: Math.max(coverage.uncertainty, Math.min(1, .35 + spread)), confidence: coverage.quality === "GOOD" && nearest.length >= 2 && spread < .35 ? "MEDIUM" : "LOW", coverage: coverage.quality };
+}
+
+export function getCalibrationCoverageAt(calibration: SceneCalibration, position: NormalizedPoint, width: number, height: number) {
+  const references = usableReferences(calibration);
+  if (!references.length || width <= 0 || height <= 0) return { quality: "UNKNOWN" as const, nearestDistance: null, referencesUsed: [] as string[], uncertainty: 1 };
+  const nearest = nearestReferences(references, position, width, height, 4);
+  const distance = nearest[0]?.distance ?? Number.POSITIVE_INFINITY;
+  const bounds = referenceBounds(references);
+  const outsideX = position.x < bounds.minX - .16 || position.x > bounds.maxX + .16;
+  const outsideY = position.y < bounds.minY - .20 || position.y > bounds.maxY + .20;
+  if (references.length > 1 && (outsideX || outsideY) || references.length < 3 && distance > .48) return { quality: "UNKNOWN" as const, nearestDistance: distance, referencesUsed: nearest.map((entry) => entry.reference.id), uncertainty: 1 };
+  const good = references.length >= 2 && distance <= .25 && !outsideX && !outsideY;
+  return { quality: good ? "GOOD" as const : "PARTIAL" as const, nearestDistance: distance, referencesUsed: nearest.map((entry) => entry.reference.id), uncertainty: good ? .18 : Math.min(.85, .35 + distance) };
 }
 
 export function calibrationQuality(calibration: SceneCalibration): CalibrationQuality {
@@ -107,19 +124,21 @@ export function calibrationAssistant(calibration: SceneCalibration) {
 
 export function duplicateReference(reference: CalibrationReference): CalibrationReference {
   const offset = .012;
-  return { ...reference, id: crypto.randomUUID(), name: `${reference.name} — kopia`, start: { x: Math.min(1, reference.start.x + offset), y: Math.min(1, reference.start.y + offset) }, end: { x: Math.min(1, reference.end.x + offset), y: Math.min(1, reference.end.y + offset) }, locked: false, residual: null, residualStatus: "UNASSESSED" };
+  const move = (point: NormalizedPoint) => ({ x: Math.min(1, point.x + offset), y: Math.min(1, point.y + offset) });
+  return { ...reference, id: crypto.randomUUID(), name: `${reference.name} — kopia`, start: move(reference.start), end: move(reference.end), worldAnchors: { bottom: reference.worldAnchors.bottom ? { ...reference.worldAnchors.bottom, id: crypto.randomUUID(), imagePoint: move(reference.worldAnchors.bottom.imagePoint) } : null, top: reference.worldAnchors.top ? { ...reference.worldAnchors.top, id: crypto.randomUUID(), imagePoint: move(reference.worldAnchors.top.imagePoint) } : null }, locked: false, residual: null, residualStatus: "UNASSESSED" };
 }
 
 function localOrVerticalField(references: CalibrationReference[]): PerspectiveScaleField {
   if (references.length < 2) return { ...emptyScaleField(), status: "LOCAL_ONLY", model: "LOCAL", anchorCount: references.length, inlierCount: references.length, uncertainty: .65, generatedAt: new Date().toISOString() };
-  const first = references[0], second = references[1], p1 = midpoint(first), p2 = midpoint(second), z1 = first.valueCm / first.pixelDistance, z2 = second.valueCm / second.pixelDistance;
-  if (Math.abs(p2.y - p1.y) < .08) return { ...emptyScaleField(), status: "LOCAL_ONLY", model: "LOCAL", anchorCount: references.length, inlierCount: references.length, uncertainty: .55, generatedAt: new Date().toISOString() };
-  const c = (z2 - z1) / (p2.y - p1.y), a = z1 - c * p1.y;
-  return { status: "PERSPECTIVE_PARTIAL", coefficients: [a, 0, c], model: "INVERSE_AFFINE_2D", anchorCount: references.length, inlierCount: references.length, residualRms: 0, uncertainty: .42, generatedAt: new Date().toISOString() };
+  const first = references[0], second = references[1], p1 = anchorPoint(first), p2 = anchorPoint(second), z1 = first.valueCm / first.pixelDistance, z2 = second.valueCm / second.pixelDistance;
+  const dx = p2.x - p1.x, dy = p2.y - p1.y, lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared < .0064) return { ...emptyScaleField(), status: "LOCAL_ONLY", model: "LOCAL", anchorCount: references.length, inlierCount: references.length, uncertainty: .55, generatedAt: new Date().toISOString() };
+  const slope = (z2 - z1) / lengthSquared, b = slope * dx, c = slope * dy, a = z1 - b * p1.x - c * p1.y;
+  return { status: "PERSPECTIVE_PARTIAL", coefficients: [a, b, c], model: "INVERSE_AFFINE_2D", anchorCount: references.length, inlierCount: references.length, residualRms: 0, uncertainty: .42, generatedAt: new Date().toISOString() };
 }
 
 function fitInverseAffine(references: CalibrationReference[]): [number, number, number] | null {
-  const rows = references.map((reference) => { const p = midpoint(reference); return { x: [1, p.x, p.y] as [number, number, number], y: reference.valueCm / reference.pixelDistance }; });
+  const rows = references.map((reference) => { const p = anchorPoint(reference); return { x: [1, p.x, p.y] as [number, number, number], y: reference.valueCm / reference.pixelDistance }; });
   const matrix = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], vector = [0, 0, 0];
   for (const row of rows) for (let i = 0; i < 3; i += 1) { vector[i] += row.x[i] * row.y; for (let j = 0; j < 3; j += 1) matrix[i][j] += row.x[i] * row.x[j]; }
   return solve3x3(matrix, vector);
@@ -147,8 +166,10 @@ function applyResiduals(calibration: SceneCalibration, candidates: CalibrationRe
   return { ...calibration, references };
 }
 
-function normalizedResidual(reference: CalibrationReference, coefficients: [number, number, number]) { const p = midpoint(reference), expectedInverse = coefficients[0] + coefficients[1] * p.x + coefficients[2] * p.y, actualInverse = reference.valueCm / reference.pixelDistance; return Math.abs(expectedInverse - actualInverse) / Math.max(1e-8, actualInverse); }
+function normalizedResidual(reference: CalibrationReference, coefficients: [number, number, number]) { const p = anchorPoint(reference), expectedInverse = coefficients[0] + coefficients[1] * p.x + coefficients[2] * p.y, actualInverse = reference.valueCm / reference.pixelDistance; return Math.abs(expectedInverse - actualInverse) / Math.max(1e-8, actualInverse); }
 function midpoint(reference: CalibrationReference) { return { x: (reference.start.x + reference.end.x) / 2, y: (reference.start.y + reference.end.y) / 2 }; }
-function nearestReferences(references: CalibrationReference[], position: NormalizedPoint, width: number, height: number, count: number) { return references.map((reference) => { const middle = midpoint(reference); return { reference, distance: Math.hypot((middle.x - position.x) * width / height, middle.y - position.y) }; }).sort((a, b) => a.distance - b.distance).slice(0, count); }
+function anchorPoint(reference: CalibrationReference) { return reference.worldAnchors.bottom?.imagePoint ?? midpoint(reference); }
+function nearestReferences(references: CalibrationReference[], position: NormalizedPoint, width: number, height: number, count: number) { return references.map((reference) => { const anchor = anchorPoint(reference); return { reference, distance: Math.hypot((anchor.x - position.x) * width / height, anchor.y - position.y) }; }).sort((a, b) => a.distance - b.distance).slice(0, count); }
+function referenceBounds(references: CalibrationReference[]) { const points = references.map(anchorPoint); return { minX: Math.min(...points.map((point) => point.x)), maxX: Math.max(...points.map((point) => point.x)), minY: Math.min(...points.map((point) => point.y)), maxY: Math.max(...points.map((point) => point.y)) }; }
 function sortedMedian(values: number[]) { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0; }
 function weightedMedian(values: { value: number; weight: number }[]) { const sorted = [...values].sort((a, b) => a.value - b.value), total = sorted.reduce((sum, item) => sum + item.weight, 0); let cumulative = 0; for (const item of sorted) { cumulative += item.weight; if (cumulative >= total / 2) return item.value; } return sorted.at(-1)?.value ?? 0; }

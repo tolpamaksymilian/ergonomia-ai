@@ -10,6 +10,16 @@ export type CanonicalPose = {
 
 export type CanonicalValidation = { valid: boolean; violations: string[] };
 
+export function assertCanonicalHeight(human: CanonicalHuman, toleranceCm = 1e-8): number {
+  const pose = buildCanonicalPose(human, "STANDING");
+  const floor = Math.min(pose.joints.leftFoot.y, pose.joints.rightFoot.y);
+  const height = pose.joints.head.y - floor;
+  if (!Number.isFinite(height) || Math.abs(height - human.dimensions.statureCm) > toleranceCm) {
+    throw new Error(`Canonical human height mismatch: expected ${human.dimensions.statureCm} cm, received ${height} cm.`);
+  }
+  return height;
+}
+
 export function buildCanonicalPose(human: CanonicalHuman, posture: HumanPosture = "STANDING"): CanonicalPose {
   const d = human.dimensions;
   const h = d.statureCm;

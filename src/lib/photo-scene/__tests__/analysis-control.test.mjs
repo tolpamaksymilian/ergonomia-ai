@@ -18,6 +18,13 @@ test("photo analysis states cover initial, queue, processing, complete, failed a
   assert.equal(derivePhotoAnalysisUi({ processingStage: "scene-detection-failed", detection: null, now }).status, "ERROR");
 });
 
+test("worker vertical direction remains a suggestion until user confirmation", () => {
+  const result = mergeSceneDetection(emptySceneState(), { ...detection([]), perspective_evidence: { dominant_vertical_angle_deg: 84, dominant_horizontal_angle_deg: 2, vanishing_point: null, evidence_quality: "MEDIUM" } });
+  assert.equal(result.calibration.verticalDirectionSource, "WORKER_SUGGESTED");
+  assert.equal(result.calibration.verticalDirectionConfirmed, false);
+  assert.ok(result.calibration.verticalDirection.y < 0);
+});
+
 test("stale processing and an offline worker enable a controlled retry", () => {
   const status = derivePhotoAnalysisUi({ processingStage: "scene-detection-processing", detection: null, heartbeatAt: "2026-08-12T19:55:00Z", workerStatus: "offline", now });
   assert.equal(status.status, "WORKER_OFFLINE");

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0-beta.1] - 2026-08-14
+
+### Scene World Model / Calibration V3
+
+- Rozdzielono pionową skalę człowieka od szerokości, głębokości i informacyjnych wymiarów obiektów.
+- Dodano Measurement Semantics V2: kind, axis, plane, purpose, jawne `useForCalibration` i status przeglądu.
+- Human Projection V4 korzysta wyłącznie z wyniku Scene World Model, a nie z surowej listy pomiarów.
+- Usunięto ciche zaciskanie absurdalnej skali; niepoprawna projekcja jest teraz jawnie odrzucana.
+- Dodano lokalną mapę pokrycia kalibracji, world anchors, model podłogi basic/quadrilateral i kierunek pionowy obrazu.
+- Dodano Guided Calibration, instrukcje height/width/depth oraz przegląd semantyki starszych pomiarów.
+- Dodano regresję 190 cm / 80 cm / 50 cm potwierdzającą izolację osi i brak skoku skali człowieka.
+
 ## [0.16.0-beta.1] - 2026-08-13
 
 ### Added

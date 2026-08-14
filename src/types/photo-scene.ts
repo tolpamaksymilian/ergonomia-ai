@@ -17,6 +17,18 @@ export type MeasurementProvenance = "USER_MEASURED" | "WORKER_SUGGESTED" | "SCEN
 export type EvidenceQuality = "UNKNOWN" | "LOW" | "MEDIUM" | "HIGH";
 export type MeasurementEstimateStatus = "UNKNOWN" | "SUGGESTED" | "ESTIMATED" | "CONFIRMED" | "MEASURED" | "REJECTED";
 export type GeometryOrientation = "VERTICAL" | "HORIZONTAL" | "DEPTH" | "FREE";
+export type MeasurementKind =
+  | "VERTICAL_HEIGHT" | "HORIZONTAL_WIDTH" | "DEPTH" | "FLOOR_DISTANCE"
+  | "OBJECT_HEIGHT" | "OBJECT_WIDTH" | "OBJECT_DEPTH" | "WORK_SURFACE_HEIGHT"
+  | "SHELF_HEIGHT" | "SEAT_HEIGHT" | "SCREEN_HEIGHT" | "CUSTOM_DISTANCE";
+export type MeasurementAxis = "VERTICAL" | "HORIZONTAL" | "GROUND_X" | "GROUND_Y" | "ARBITRARY";
+export type MeasurementPlane = "VERTICAL_PLANE" | "GROUND_PLANE" | "OBJECT_FRONT_PLANE" | "OBJECT_TOP_PLANE" | "UNKNOWN_PLANE";
+export type MeasurementPurpose = "CALIBRATION" | "OBJECT_DESCRIPTION" | "HUMAN_SCALE_VALIDATION" | "INFORMATION_ONLY";
+export type MeasurementSemanticStatus = "CONFIRMED" | "SEMANTICS_REVIEW_REQUIRED";
+export type WorldAnchor = {
+  id: string; imagePoint: NormalizedPoint; worldHeightCm: number | null;
+  role: "BOTTOM" | "TOP" | "GROUND" | "PLANE_POINT";
+};
 
 export type GeometryMeasurement = {
   id: string;
@@ -35,7 +47,12 @@ export type GeometryMeasurement = {
   active: boolean;
   visible: boolean;
   locked: boolean;
-  affectsScale: boolean;
+  measurementKind: MeasurementKind;
+  axis: MeasurementAxis;
+  plane: MeasurementPlane;
+  purpose: MeasurementPurpose;
+  useForCalibration: boolean;
+  semanticStatus: MeasurementSemanticStatus;
 };
 
 export type ObjectInteractionPointType = "WORKING_POINT" | "GRIP_POINT" | "CONTROL_POINT" | "PLACEMENT_POINT";
@@ -53,7 +70,10 @@ export type ReferenceResidualStatus = "UNASSESSED" | "GOOD" | "WEAK" | "OUTLIER"
 export type CalibrationReference = {
   id: string; name: string; dimensionType: ReferenceDimensionType; valueCm: number; unit: "cm";
   start: NormalizedPoint; end: NormalizedPoint; pixelDistance: number; objectId: string | null;
-  active: boolean; visible: boolean; locked: boolean; affectsScale: boolean;
+  active: boolean; visible: boolean; locked: boolean;
+  measurementKind: MeasurementKind; axis: MeasurementAxis; plane: MeasurementPlane;
+  purpose: MeasurementPurpose; useForCalibration: boolean; semanticStatus: MeasurementSemanticStatus;
+  worldAnchors: { bottom: WorldAnchor | null; top: WorldAnchor | null };
   source: "USER_PROVIDED" | "OBJECT_DIMENSION" | "USER_CONFIRMED_ESTIMATE";
   residual: number | null; residualStatus: ReferenceResidualStatus; manualOverride: boolean;
 };
@@ -71,6 +91,14 @@ export type SceneCalibration = {
   status: "UNCALIBRATED" | "PARTIALLY_CALIBRATED" | "CALIBRATED_2D";
   floorBaseline: { start: NormalizedPoint; end: NormalizedPoint } | null;
   horizonY: number | null; verticalDirection: NormalizedPoint | null;
+  verticalDirectionSource: "DEFAULT_IMAGE_AXIS" | "WORKER_SUGGESTED" | "USER_CONFIRMED";
+  verticalDirectionConfirmed: boolean;
+  floorPlane: {
+    mode: "NONE" | "BASIC" | "QUADRILATERAL";
+    points: NormalizedPoint[];
+    actualGroundDimensionCm: number | null;
+    mappingStatus: "NONE" | "ORIENTATION_ONLY" | "PROJECTIVE";
+  };
   references: CalibrationReference[]; scaleField: PerspectiveScaleField;
 };
 
@@ -123,6 +151,10 @@ export type SceneHuman = {
     contactPoint: NormalizedPoint; floorPinned: boolean; attachedObjectId: string | null;
     positionMode: HumanPositionMode; orientationDeg: number; facingPreset: HumanFacingPreset;
     lastScalePxPerCm: number | null; scaleStatus: PerspectiveScaleStatus;
+    projectionStatus: "VALID" | "UNVERIFIED" | "PROJECTION_INVALID";
+    projectionError: "VERTICAL_SCALE_MISSING" | "CALIBRATION_COVERAGE_UNKNOWN" | "PROJECTED_HEIGHT_OUT_OF_RANGE" | null;
+    scaleReferences: string[]; calibrationCoverage: "GOOD" | "PARTIAL" | "UNKNOWN";
+    backConvertedHeightCm: number | null;
   };
   handTargets: { left: HumanHandTarget; right: HumanHandTarget };
   modelVersion: "digital-human-v1";
@@ -147,7 +179,7 @@ export type WorkerDimensionSuggestion = {
 export type PerspectiveEvidence = { dominant_vertical_angle_deg: number | null; dominant_horizontal_angle_deg: number | null; vanishing_point: NormalizedPoint | null; evidence_quality: EvidenceQuality };
 
 export type SceneState = {
-  schema_version: "1.2"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
+  schema_version: "1.3"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
   geometryMeasurements: GeometryMeasurement[]; workerSuggestions: WorkerDimensionSuggestion[];
   viewport: { zoom: number; pan_x: number; pan_y: number };
   selectedObjectId: string | null; selectedHumanId: string | null; selectedReferenceId: string | null;

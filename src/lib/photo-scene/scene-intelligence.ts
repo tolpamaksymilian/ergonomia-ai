@@ -2,6 +2,11 @@ import type { SceneCalibration, SceneHuman, SceneObject } from "../../types/phot
 import { calibrationQuality } from "./calibration.ts";
 import { getCanonicalHuman } from "./human-physical-model.ts";
 import { getProjectedHuman } from "./human-projection.ts";
+export {
+  createSceneWorldModel, getCalibrationCoverageAt, getGroundProjectionAt,
+  getHumanProjectionAt, getMeasurementPlane, getVerticalScaleAt,
+  validateMeasurementForCalibration,
+} from "./scene-world-model.ts";
 
 export { getCanonicalHuman, getProjectedHuman };
 
