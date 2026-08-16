@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0-beta.1] - 2026-08-16
+
+- Dodano Scene Schema 1.5 z regionami, płaszczyznami, ścianami obiektów i Constraint Graph.
+- Dodano odporny Scene Geometry V2 z residuals, outlierami, konfliktami i jawnym Auto Repair pochodnej geometrii.
+- Dodano osobny CPU Scene Reconstruction Worker oraz prywatny artefakt `scene-reconstruction.json`.
+- Rozdzielono analizę zdjęcia od polecenia „Oblicz geometrię sceny” i dodano gotowość według celu oraz Next Best Measurement.
+- Human Scale korzysta najpierw z rekonstrukcji pionowej, a stare sceny 1.0–1.4 zachowują jawny fallback Calibration V3.
+
 ## [0.19.0-beta.1] - 2026-08-14
 
 - Dodano odseparowany Scene Ergonomics Engine oparty wyłącznie na fizycznym rig 3D.

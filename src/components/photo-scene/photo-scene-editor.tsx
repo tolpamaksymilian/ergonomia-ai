@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   AlertTriangle, Box, ChevronRight, Copy, Eye, EyeOff, Focus, Grid2X2, HelpCircle,
-  ImagePlus, LocateFixed, Lock, Minus, MousePointer2, Move, Plus, Redo2, RotateCcw,
+  ImagePlus, Layers3, LocateFixed, Lock, Minus, MousePointer2, Move, Plus, Redo2, RotateCcw,
   Ruler, Save, ScanSearch, Sparkles, Trash2, Undo2, Unlock, UserRound, UsersRound, WifiOff,
 } from "lucide-react";
 
 import { HumanMannequin, type HumanDragKind } from "@/components/photo-scene/human-mannequin";
 import { SceneErgonomicsPanel } from "@/components/photo-scene/scene-ergonomics-panel";
+import { GeometryPanel, ObjectGeometryV3Panel, ReconstructionProgress } from "@/components/photo-scene/scene-geometry-panel";
 import { CalibrationHelp, GuidedCalibrationForm, GuidedCanvasInstruction, type GuidedReferenceInput } from "@/components/photo-scene/guided-calibration";
 import { HUMAN_PRESETS, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, repairHumanModel, resetHumanPose, withUserSegment } from "@/lib/photo-scene/anthropometry";
 import { derivePhotoAnalysisUi, mergeSceneDetection } from "@/lib/photo-scene/analysis-control";
@@ -29,20 +30,20 @@ import { getReachabilityResult } from "@/lib/photo-scene/reachability-3d";
 import { getSceneCollisions } from "@/lib/photo-scene/collision-3d";
 import { getMotionPathResult } from "@/lib/photo-scene/motion-3d";
 import { createHuman3DState, getHumanJointPositions3d, setHumanJointRotation, setHumanRoot } from "@/lib/photo-scene/human-3d-model";
+import { createSceneRegion, nearestFeasiblePoint, regionPoint } from "@/lib/photo-scene/scene-reconstruction";
 import { attachObjectToHand, attachObjectTwoHanded, releaseObjectFromHand } from "@/lib/photo-scene/object-interaction-3d";
 import type {
   CalibrationReference, FingerName, GeometryMeasurement, HumanJointName, HumanPosture, NormalizedBox,
   NormalizedPoint, ObjectDimensionKey, ObjectInteractionPointType, ReferenceDimensionType,
-  SceneDetection, SceneHuman, SceneLayerKey, SceneObject, SceneObjectType, SceneState,
-  SceneViewPreset,
+  MeasurementKind, SceneDetection, SceneGeometryConstraint, SceneHuman, SceneLayerKey, SceneObject, SceneObjectType, SceneRegionPoint, SceneRegionType, SceneState,
 } from "@/types/photo-scene";
 import type { BodyRegion } from "@/lib/scene-ergonomics/types";
 
 const Scene3DViewport = dynamic(() => import("@/components/photo-scene/scene-3d-viewport").then((module) => module.Scene3DViewport), { ssr: false, loading: () => <div className="grid min-h-[520px] place-items-center rounded-xl bg-slate-950 text-sm text-cyan-100">Ładowanie przestrzeni 3D…</div> });
 
-type Tool = "SELECT" | "PAN" | "ADD_OBJECT" | "FLOOR" | "REFERENCE" | "HUMAN";
+type Tool = "SELECT" | "PAN" | "ADD_OBJECT" | "FLOOR" | "REGION" | "REFERENCE" | "HUMAN";
 type Tab = "SCENE" | "OBJECTS" | "HUMANS" | "INTERACTIONS" | "ERGONOMICS" | "DIMENSIONS" | "SUGGESTIONS";
-type DraftMeasurement = { start: NormalizedPoint; end: NormalizedPoint; objectId: string | null };
+type DraftMeasurement = { start: NormalizedPoint; end: NormalizedPoint; objectId: string | null; regionId: string | null };
 type Drag = { kind: HumanDragKind | "OBJECT" | "RESIZE" | "PAN"; id?: string; joint?: HumanJointName; start: NormalizedPoint; startScreen: { x: number; y: number }; snapshot: SceneState };
 
 const objectLabels: Record<SceneObjectType, string> = {
@@ -65,6 +66,7 @@ export function PhotoSceneEditor(props: {
   detectionError: string | null; detectionErrorCode: string | null; lastSavedAt: string; analysisHeartbeatAt: string | null;
   analysisUpdatedAt: string | null; detectionCompletedAt: string | null; detectionAttempts: number;
   detectionVersion: string | null; sceneBuilderVersion: string | null;
+  reconstructionStatus?: string | null; reconstructionError?: string | null;
 }) {
   const router = useRouter();
   const initial = useMemo(() => refreshInsights(mergeSceneDetection(props.initialState, props.detection)), [props.initialState, props.detection]);
@@ -84,6 +86,11 @@ export function PhotoSceneEditor(props: {
   const [guidedCalibration, setGuidedCalibration] = useState(false);
   const [floorMode, setFloorMode] = useState<"BASIC" | "QUADRILATERAL">("BASIC");
   const [floorPoints, setFloorPoints] = useState<NormalizedPoint[]>([]);
+  const [regionPoints, setRegionPoints] = useState<SceneRegionPoint[]>([]);
+  const [regionType, setRegionType] = useState<SceneRegionType>("WORK_SURFACE");
+  const [advancedGeometry, setAdvancedGeometry] = useState(false);
+  const [reconstructionStarting, setReconstructionStarting] = useState(false);
+  const [reconstructionError, setReconstructionError] = useState<string | null>(props.reconstructionError ?? null);
   const [worker, setWorker] = useState<{ status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown"; controlAllowed: boolean } | null>(null);
   const debugScene = useSyncExternalStore(
     () => () => undefined,
@@ -109,6 +116,20 @@ export function PhotoSceneEditor(props: {
   const latestRef = useRef(state);
   const previewStateRef = useRef<SceneState | null>(null), animationFrameRef = useRef<number | null>(null);
   useEffect(() => { latestRef.current = state; }, [state]);
+  useEffect(() => {
+    const incoming = props.initialState.reconstructionState;
+    const current = latestRef.current.reconstructionState;
+    const completedChanged = Boolean(incoming.completedAt && incoming.completedAt !== current.completedAt);
+    const terminalFailureChanged = props.reconstructionStatus === "FAILED" && current.status !== "FAILED";
+    if (!completedChanged && !terminalFailureChanged) return;
+    setState((value) => ({
+      ...value,
+      planes: completedChanged ? props.initialState.planes : value.planes,
+      reconstructionState: completedChanged ? incoming : { ...value.reconstructionState, status: "FAILED" },
+      objects: completedChanged ? value.objects.map((object) => ({ ...object, reconstructionQuality: incoming.objectQuality[object.id] ?? "UNSOLVED" })) : value.objects,
+    }));
+    if (completedChanged) setReconstructionError(null);
+  }, [props.initialState.planes, props.initialState.reconstructionState, props.reconstructionStatus]);
   useEffect(() => () => { if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current); }, []);
   useEffect(() => {
     let cancelled = false;
@@ -138,10 +159,10 @@ export function PhotoSceneEditor(props: {
     return () => { active = false; window.clearInterval(interval); };
   }, [props.analysisId]);
   useEffect(() => {
-    if (!['ready-for-scene-detection', 'scene-detection-processing'].includes(props.processingStage ?? '')) return;
+    if (!['ready-for-scene-detection', 'scene-detection-processing'].includes(props.processingStage ?? '') && !["QUEUED", "SOLVING"].includes(props.reconstructionStatus ?? state.reconstructionState.status)) return;
     const interval = window.setInterval(() => router.refresh(), 3_000);
     return () => window.clearInterval(interval);
-  }, [props.processingStage, router]);
+  }, [props.processingStage, props.reconstructionStatus, router, state.reconstructionState.status]);
   useEffect(() => {
     const key = `photo-scene-analysis:${props.analysisId}`;
     if (!props.detectionCompletedAt || window.sessionStorage.getItem(key) !== "pending") return;
@@ -167,8 +188,17 @@ export function PhotoSceneEditor(props: {
   }
 
   const commit = useCallback((next: SceneState) => {
-    setHistory((items) => [...items.slice(-49), latestRef.current]); setFuture([]);
-    const refreshed = refreshInsights(next); setState(refreshed); latestRef.current = refreshed; setSaveStatus("DIRTY");
+    const previous = latestRef.current;
+    const geometryChanged = previous.objects !== next.objects || previous.regions !== next.regions || previous.planes !== next.planes || previous.calibration !== next.calibration || previous.constraintGraph !== next.constraintGraph;
+    if (geometryChanged && ["QUEUED", "SOLVING"].includes(previous.reconstructionState.status)) {
+      setReconstructionError("Poczekaj na zakończenie rekonstrukcji przed zmianą geometrii.");
+      return;
+    }
+    const invalidated = geometryChanged && ["SOLVED", "PARTIAL", "UNDERDETERMINED", "INCONSISTENT"].includes(previous.reconstructionState.status)
+      ? { ...next, reconstructionState: { ...next.reconstructionState, status: "UNSOLVED" as const, readiness: Object.fromEntries(Object.entries(next.reconstructionState.readiness).map(([goal, item]) => [goal, { ...item, status: "STALE", reasons: ["Geometria zmieniła się — przelicz model."] }])) as SceneState["reconstructionState"]["readiness"] } }
+      : next;
+    setHistory((items) => [...items.slice(-49), previous]); setFuture([]);
+    const refreshed = refreshInsights(invalidated); setState(refreshed); latestRef.current = refreshed; setSaveStatus("DIRTY");
   }, []);
   const update = useCallback((producer: (current: SceneState) => SceneState) => commit(producer(latestRef.current)), [commit]);
   const save = useCallback(async () => {
@@ -186,7 +216,8 @@ export function PhotoSceneEditor(props: {
       if ((event.target as HTMLElement | null)?.matches("input, textarea, select")) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
-      if (event.key === "Escape") { setDraftMeasurement(null); setDraftStart(null); setFloorPoints([]); setGuidedCalibration(false); setTool("SELECT"); }
+      if (event.key === "Escape") { setDraftMeasurement(null); setDraftStart(null); setFloorPoints([]); setRegionPoints([]); setGuidedCalibration(false); setTool("SELECT"); }
+      if (event.key === "Enter" && tool === "REGION" && regionPoints.length >= 3) { event.preventDefault(); finishRegion(); }
       const shortcut = event.key.toLowerCase();
       if (shortcut === "v") setTool("SELECT"); if (shortcut === "h") setTool("PAN");
       if (shortcut === "m") { setTool("REFERENCE"); setTab("DIMENSIONS"); }
@@ -196,6 +227,19 @@ export function PhotoSceneEditor(props: {
     }
     window.addEventListener("keydown", keyboard); return () => window.removeEventListener("keydown", keyboard);
   });
+
+  function finishRegion() {
+    if (regionPoints.length < 3) return;
+    const region = createSceneRegion({ type: regionType, label: regionLabel(regionType), points: regionPoints.map((item) => item.raw), associatedObjectId: state.selectedObjectId });
+    region.polygonImageNormalized = regionPoints;
+    commit({
+      ...state, regions: [...state.regions, region], selectedRegionId: region.id,
+      objects: state.objects.map((object) => object.id === state.selectedObjectId ? { ...object, regionIds: [...new Set([...object.regionIds, region.id])] } : object),
+      reconstructionState: { ...state.reconstructionState, status: "UNSOLVED" },
+    });
+    setRegionPoints([]); setTool("SELECT");
+    setTab(regionType === "MOVEMENT_ZONE" || regionType === "STANDING_ZONE" ? "HUMANS" : "OBJECTS");
+  }
 
   function transformFor(viewport = state.viewport) {
     const element = svgRef.current;
@@ -218,10 +262,12 @@ export function PhotoSceneEditor(props: {
   }
   function pointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (!geometryReady) return;
-    if (event.target !== event.currentTarget && !["ADD_OBJECT", "FLOOR", "REFERENCE", "HUMAN"].includes(tool)) return;
+    if (["QUEUED", "SOLVING"].includes(state.reconstructionState.status) && ["ADD_OBJECT", "FLOOR", "REGION", "REFERENCE"].includes(tool)) { setReconstructionError("Poczekaj na zakończenie rekonstrukcji przed zmianą geometrii."); return; }
+    if (event.target !== event.currentTarget && !["ADD_OBJECT", "FLOOR", "REGION", "REFERENCE", "HUMAN"].includes(tool)) return;
     const coordinates = coordinatesFor(event, tool === "PAN");
     if (!coordinates) { setPointerOutside(true); return; }
     const p = coordinates.imageNormalized; event.currentTarget.setPointerCapture(event.pointerId);
+    if (tool === "REGION") { setRegionPoints((points) => [...points, snapRegionPoint(p, props.detection, imageWidth, imageHeight)]); return; }
     if (tool === "HUMAN" && state.selectedHumanId) { commit(placeHumanAt(state, state.selectedHumanId, p, imageWidth, imageHeight)); setTool("SELECT"); return; }
     if (tool === "FLOOR" && floorMode === "QUADRILATERAL") {
       const next = [...floorPoints, p];
@@ -247,8 +293,8 @@ export function PhotoSceneEditor(props: {
     }
     if ((drag.kind === "OBJECT" || drag.kind === "RESIZE") && drag.id) preview = { ...drag.snapshot, objects: drag.snapshot.objects.map((object) => object.id !== drag.id || object.locked ? object : { ...object, bbox: drag.kind === "OBJECT" ? moveBox(object.bbox, dx, dy) : resizeBox(object.bbox, dx, dy), status: object.status === "DETECTED" ? "USER_MODIFIED" : object.status }) };
     if ((drag.kind === "HUMAN_ROOT" || drag.kind === "STANDING") && drag.id) preview = moveHumanInPerspective(drag.snapshot, drag.id, dx, dy, imageWidth, imageHeight);
-    if (drag.kind === "JOINT" && drag.id && drag.joint) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => { if (human.id !== drag.id || human.locked) return human; const model = createSceneWorldModel(drag.snapshot.calibration, imageWidth, imageHeight); const scale = getVerticalScaleAt(model, human.placement.contactPoint).pixelsPerCm ?? human.placement.lastScalePxPerCm ?? 3; return moveHumanJointWithConstraints(human, drag.joint!, p, scale, imageWidth, imageHeight); }) };
-    if (drag.kind === "ORIENTATION" && drag.id) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => human.id === drag.id ? rotateHuman(human, p, drag.snapshot.calibration, imageWidth, imageHeight) : human) };
+    if (drag.kind === "JOINT" && drag.id && drag.joint) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => { if (human.id !== drag.id || human.locked) return human; const model = createSceneWorldModel(drag.snapshot.calibration, imageWidth, imageHeight, drag.snapshot.reconstructionState); const scale = getVerticalScaleAt(model, human.placement.contactPoint).pixelsPerCm ?? human.placement.lastScalePxPerCm ?? 3; return moveHumanJointWithConstraints(human, drag.joint!, p, scale, imageWidth, imageHeight); }) };
+    if (drag.kind === "ORIENTATION" && drag.id) preview = { ...drag.snapshot, humans: drag.snapshot.humans.map((human) => human.id === drag.id ? rotateHuman(human, p, drag.snapshot.calibration, imageWidth, imageHeight, drag.snapshot.reconstructionState) : human) };
     if (preview) queuePreview(preview);
   }
   function pointerUp(event: React.PointerEvent<SVGSVGElement>) {
@@ -260,7 +306,7 @@ export function PhotoSceneEditor(props: {
     if (!draftStart) return;
     if (tool === "ADD_OBJECT") { const bbox = boxFromPoints(draftStart, p); if (bbox.width > .01 && bbox.height > .01) commit({ ...state, objects: [...state.objects, newObject(bbox)] }); }
     if (tool === "FLOOR") commit({ ...state, calibration: { ...state.calibration, floorBaseline: { start: draftStart, end: p }, floorPlane: { mode: "BASIC", points: [draftStart, p], actualGroundDimensionCm: null, mappingStatus: "ORIENTATION_ONLY" } } });
-    if (tool === "REFERENCE" && referencePixelDistance(draftStart, p, imageWidth, imageHeight) > 2) { setDraftMeasurement({ start: draftStart, end: p, objectId: state.selectedObjectId }); setTab("DIMENSIONS"); }
+    if (tool === "REFERENCE" && referencePixelDistance(draftStart, p, imageWidth, imageHeight) > 2) { setDraftMeasurement({ start: draftStart, end: p, objectId: state.selectedObjectId, regionId: state.selectedRegionId }); setTab("DIMENSIONS"); }
     setDraftStart(null); setDraftPoint(null); if (tool !== "REFERENCE") setTool("SELECT");
   }
   function pointerCancel(event: React.PointerEvent<SVGSVGElement>) {
@@ -284,11 +330,24 @@ export function PhotoSceneEditor(props: {
       } : { bottom: null, top: null },
       source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false,
     };
-    update((current) => { const calibration = { ...current.calibration, references: [...current.calibration.references, reference] }; calibration.status = calibrationStatus(calibration); return rescaleLockedHumans({ ...current, calibration }, imageWidth, imageHeight); });
+    update((current) => {
+      const calibration = { ...current.calibration, references: [...current.calibration.references, reference] };
+      calibration.status = calibrationStatus(calibration);
+      const constraint: SceneGeometryConstraint = {
+        id: `reference:${reference.id}`, type: reference.axis === "VERTICAL" ? "HEIGHT" : reference.axis === "GROUND_Y" ? "DEPTH" : reference.axis === "HORIZONTAL" || reference.axis === "GROUND_X" ? "WIDTH" : "DISTANCE",
+        nodeIds: [], objectId: reference.objectId, regionId: draftMeasurement.regionId,
+        target: { kind: "EDGE", id: reference.id, point: null }, rawValue: reference.valueCm, effectiveValue: reference.valueCm,
+        unit: "cm", source: "USER_PROVIDED", weight: 1, useForSolver: reference.axis !== "VERTICAL" || reference.useForCalibration,
+        status: reference.axis !== "VERTICAL" || reference.useForCalibration ? "ACTIVE" : "DISABLED", residual: null,
+        imageSegment: { start: reference.start, end: reference.end },
+      };
+      return rescaleLockedHumans({ ...current, calibration, constraintGraph: { ...current.constraintGraph, constraints: [...current.constraintGraph.constraints, constraint] }, reconstructionState: { ...current.reconstructionState, status: "UNSOLVED" } }, imageWidth, imageHeight);
+    });
     setDraftMeasurement(null); setGuidedCalibration(false); setTool("SELECT");
   }
 
   function beginOverlayDrag(kind: HumanDragKind | "OBJECT" | "RESIZE", id: string, event: React.PointerEvent<SVGElement>, joint?: HumanJointName) {
+    if ((kind === "OBJECT" || kind === "RESIZE") && ["QUEUED", "SOLVING"].includes(state.reconstructionState.status)) { setReconstructionError("Poczekaj na zakończenie rekonstrukcji przed zmianą geometrii."); return; }
     event.stopPropagation();
     const coordinates = coordinatesFor(event);
     if (!coordinates) return;
@@ -315,6 +374,26 @@ export function PhotoSceneEditor(props: {
     setWorker((current) => current ? { ...current, status: "restarting" } : current); router.refresh();
   }
 
+  async function calculateGeometry() {
+    if (reconstructionStarting) return;
+    setReconstructionStarting(true); setReconstructionError(null);
+    if (!(await save())) { setReconstructionError("Najpierw zapisz scenę i spróbuj ponownie."); setReconstructionStarting(false); return; }
+    const response = await fetch(`/api/photo-scenes/${props.analysisId}/reconstruction`, { method: "POST" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      setReconstructionError(result?.error ?? "Nie udało się uruchomić rekonstrukcji sceny."); setReconstructionStarting(false); return;
+    }
+    setState((current) => ({ ...current, reconstructionState: { ...current.reconstructionState, status: "QUEUED" } }));
+    router.refresh(); window.setTimeout(() => setReconstructionStarting(false), 1_500);
+  }
+
+  function prepareMeasurement(kind: MeasurementKind, objectId: string | null) {
+    setState((current) => ({ ...current, selectedObjectId: objectId }));
+    setTool("REFERENCE"); setTab("DIMENSIONS");
+    const suggestion = state.reconstructionState.nextBestMeasurements.find((item) => item.measurementKind === kind && item.objectId === objectId);
+    if (suggestion?.suggestedPoints) setDraftMeasurement({ ...suggestion.suggestedPoints, objectId, regionId: objectId ? state.regions.find((region) => region.associatedObjectId === objectId)?.id ?? null : state.regions.find((region) => region.type === "FLOOR_REGION")?.id ?? null });
+  }
+
   const selectedObject = state.objects.find((object) => object.id === state.selectedObjectId) ?? null;
   const selectedHuman = state.humans.find((human) => human.id === state.selectedHumanId) ?? null;
   const quality = calibrationQuality(state.calibration), completion = sceneCompleteness(state);
@@ -322,19 +401,21 @@ export function PhotoSceneEditor(props: {
   const oldCoordinateScene = Boolean(props.sceneBuilderVersion && !props.sceneBuilderVersion.includes("v0.4") && (state.calibration.references.length || state.geometryMeasurements.length || state.objects.some((object) => object.geometryMeasurements.length)));
   const visibleObjects = state.objects.filter((object) => object.visible && object.status !== "USER_REJECTED" && (showDetectedObjects || object.status !== "DETECTED"));
 
-  return <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_390px]">
+  return <div className="space-y-3"><WorkflowBar state={state} tab={tab} setTab={setTab} /><div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_390px]">
     <section className="ui-card min-w-0 overflow-hidden">
-      <Toolbar state={state} tool={tool} setTool={setTool} history={history.length} future={future.length} undo={undo} redo={redo} update={update} setTab={setTab} />
+      <Toolbar state={state} tool={tool} setTool={setTool} history={history.length} future={future.length} undo={undo} redo={redo} update={update} setTab={setTab} startRegion={(type) => { setRegionType(type); setRegionPoints([]); setTool("REGION"); }} />
       <div className={`grid overflow-hidden bg-neutral-950 p-2 sm:p-4 ${state.scene3d.workspaceMode === "SPLIT" ? "gap-3 lg:grid-cols-2" : ""}`}>
         <div className={`relative ${state.scene3d.workspaceMode === "THREE_D" ? "hidden" : ""}`}>
         {guidedCalibration && !draftMeasurement && <GuidedCanvasInstruction step={draftStart ? 2 : 1} targetRegion={calibrationTargetRegion(state.calibration)} />}
-        <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} preserveAspectRatio="xMidYMid meet" role="application" aria-label="Edytor sceny ze zdjęcia" aria-disabled={!geometryReady} className="mx-auto block max-h-[76vh] w-full touch-none select-none" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} style={{ aspectRatio: `${imageWidth}/${imageHeight}` }}>
+        <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} preserveAspectRatio="xMidYMid meet" role="application" aria-label="Edytor sceny ze zdjęcia" aria-disabled={!geometryReady} className="mx-auto block max-h-[76vh] w-full touch-none select-none" onDoubleClick={() => tool === "REGION" && regionPoints.length >= 3 && finishRegion()} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} style={{ aspectRatio: `${imageWidth}/${imageHeight}` }}>
           <defs><marker id="dimension-arrow" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto-start-reverse"><path d="M7 0L0 3.5L7 7" fill="none" stroke="context-stroke" strokeWidth="1.5" /></marker><marker id="facing-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="context-stroke" /></marker></defs>
           <g transform={getSceneSvgTransform(imageWidth, imageHeight, state.viewport)}>
             <image href={props.imageUrl} width={imageWidth} height={imageHeight} pointerEvents="none" />
+            {state.view.layers.SURFACES && state.regions.filter((region) => region.visible).map((region) => <RegionOverlay key={region.id} region={region} selected={region.id === state.selectedRegionId} width={imageWidth} height={imageHeight} onSelect={() => setState((current) => ({ ...current, selectedRegionId: region.id, selectedObjectId: region.associatedObjectId }))} />)}
             {visibleObjects.map((object) => <ObjectOverlay key={object.id} object={object} selected={object.id === state.selectedObjectId} width={imageWidth} height={imageHeight} onStart={(kind, event) => { setState((current) => ({ ...current, selectedObjectId: object.id })); beginOverlayDrag(kind, object.id, event); }} />)}
             {state.view.layers.CALIBRATION && state.calibration.floorBaseline && <line {...lineProps(state.calibration.floorBaseline.start, state.calibration.floorBaseline.end, imageWidth, imageHeight)} stroke="#22d3ee" strokeWidth="3" strokeDasharray="14 9" />}
             {floorPoints.map((point, index) => <g key={`floor-${index}`}><circle cx={point.x * imageWidth} cy={point.y * imageHeight} r="8" fill="#14b8a6" stroke="white" strokeWidth="2" /><text x={point.x * imageWidth + 12} y={point.y * imageHeight + 4} fill="white" fontSize="12">{index + 1}</text></g>)}
+            {regionPoints.length > 0 && <RegionDraftOverlay points={regionPoints} width={imageWidth} height={imageHeight} />}
             {visibleReferences(state).map((reference) => <MeasurementOverlay key={reference.id} reference={reference} width={imageWidth} height={imageHeight} selected={reference.id === state.selectedReferenceId} zoom={state.viewport.zoom} onSelect={() => { setState((current) => ({ ...current, selectedReferenceId: reference.id })); setTab("DIMENSIONS"); }} />)}
             <GeometryMeasurementsOverlay state={state} width={imageWidth} height={imageHeight} />
             {state.objects.flatMap((object) => object.interactionPoints.map((interaction) => ({ ...interaction, objectId: object.id }))).map((interaction) => interaction.visible && <g key={interaction.id}><circle cx={interaction.position.x * imageWidth} cy={interaction.position.y * imageHeight} r="7" fill="#0f172a" stroke="#f59e0b" strokeWidth="2" /><text x={interaction.position.x * imageWidth + 10} y={interaction.position.y * imageHeight + 4} fill="white" fontSize="11">{interaction.name}</text></g>)}
@@ -352,31 +433,42 @@ export function PhotoSceneEditor(props: {
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-3 text-xs text-muted-foreground"><span>{pointerOutside ? <strong className="text-amber-600">Poza obszarem zdjęcia</strong> : "Oryginał pozostaje niezmieniony · geometria zapisywana w układzie 0–1"}</span><span className={saveStatus === "ERROR" ? "text-red-500" : ""}>{saveStatus === "SAVED" ? "Zapisano" : saveStatus === "SAVING" ? "Zapisywanie…" : saveStatus === "DIRTY" ? "Niezapisane zmiany" : "Błąd zapisu"}</span></footer>
     </section>
     <aside className="ui-card min-w-0 overflow-hidden">
-      <div className={`border-b px-4 py-3 text-xs font-semibold ${quality === "GOOD" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : quality === "ATTENTION_REQUIRED" ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300" : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{qualityLabel(quality)} · kompletność danych {Math.round(completion.ratio * 100)}%</div>
-      <nav className="grid grid-cols-4 border-b border-border sm:grid-cols-7">{(["SCENE", "OBJECTS", "HUMANS", "INTERACTIONS", "ERGONOMICS", "DIMENSIONS", "SUGGESTIONS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[9px] font-bold sm:text-[11px] ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
+      <div className="border-b border-border px-4 py-3 text-xs font-semibold">Scene Geometry V2 · {reconstructionStatusLabel(state.reconstructionState.status)}</div>
+      <nav className="grid grid-cols-5 border-b border-border">{(["SCENE", "OBJECTS", "DIMENSIONS", "HUMANS", "ERGONOMICS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[9px] font-bold sm:text-[11px] ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
       <div className="max-h-[76vh] space-y-5 overflow-y-auto p-4">
         {tab === "SCENE" && <ScenePanel {...props} state={state} quality={quality} completion={completion} save={save} setTab={setTab} analysisUi={analysisUi} analysisStarting={analysisStarting} analysisActionError={analysisActionError} startPhotoAnalysis={startPhotoAnalysis} worker={worker} restartWorker={restartWorker} showDetectedObjects={showDetectedObjects} setShowDetectedObjects={setShowDetectedObjects} oldCoordinateScene={oldCoordinateScene} />}
-        {tab === "OBJECTS" && <ObjectsPanel state={state} selected={selectedObject} update={update} setTool={setTool} setTab={setTab} />}
+        {tab === "OBJECTS" && <ObjectsPanel state={state} selected={selectedObject} update={update} setTool={setTool} setTab={setTab} startRegion={(type) => { setRegionType(type); setRegionPoints([]); setTool("REGION"); }} />}
         {tab === "HUMANS" && <HumansPanel state={state} selected={selectedHuman} update={update} setTool={setTool} imageWidth={imageWidth} imageHeight={imageHeight} />}
         {tab === "INTERACTIONS" && <InteractionsPanel state={state} selectedHuman={selectedHuman} selectedObject={selectedObject} update={update} />}
         {tab === "ERGONOMICS" && <SceneErgonomicsPanel analysisId={props.analysisId} state={state} selectedHumanId={state.selectedHumanId} focus={(humanId,objectId,region)=>{setErgonomicFocus(region);update((current)=>({...current,selectedHumanId:humanId,selectedObjectId:objectId,scene3d:{...current.scene3d,workspaceMode:"THREE_D"}}))}}/>}
-        {tab === "DIMENSIONS" && <DimensionsPanel state={state} draft={draftMeasurement} addReference={addReference} cancelDraft={() => { setDraftMeasurement(null); setGuidedCalibration(false); }} update={update} setTool={setTool} guidedCalibration={guidedCalibration} setGuidedCalibration={setGuidedCalibration} floorMode={floorMode} setFloorMode={setFloorMode} floorPointCount={floorPoints.length} />}
+        {tab === "DIMENSIONS" && <><ReconstructionProgress status={state.reconstructionState.status} /><GeometryPanel state={state} starting={reconstructionStarting} error={reconstructionError} onCalculate={calculateGeometry} onPrepareMeasurement={prepareMeasurement} advanced={advancedGeometry} setAdvanced={setAdvancedGeometry} /><details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-bold">Wymiary i kalibracja legacy</summary><div className="mt-4 space-y-4"><DimensionsPanel state={state} draft={draftMeasurement} addReference={addReference} cancelDraft={() => { setDraftMeasurement(null); setGuidedCalibration(false); }} update={update} setTool={setTool} guidedCalibration={guidedCalibration} setGuidedCalibration={setGuidedCalibration} floorMode={floorMode} setFloorMode={setFloorMode} floorPointCount={floorPoints.length} /></div></details></>}
         {tab === "SUGGESTIONS" && <SuggestionsPanel state={state} update={update} setTab={setTab} setTool={setTool} />}
       </div>
     </aside>
     {analysisNotice && <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-emerald-500/40 bg-slate-950 p-4 text-sm text-white shadow-2xl"><p>{analysisNotice}</p>{props.detection?.dimension_suggestions?.length ? <button onClick={() => { setTab("SUGGESTIONS"); setAnalysisNotice(null); }} className="mt-2 text-xs font-bold text-cyan-300">Zobacz sugestie →</button> : null}</div>}
-  </div>;
+  </div></div>;
 }
 
-function Toolbar({ state, tool, setTool, history, future, undo, redo, update, setTab }: { state: SceneState; tool: Tool; setTool: (tool: Tool) => void; history: number; future: number; undo: () => void; redo: () => void; update: (fn: (state: SceneState) => SceneState) => void; setTab: (tab: Tab) => void }) {
+function WorkflowBar({ state, tab, setTab }: { state: SceneState; tab: Tab; setTab: (tab: Tab) => void }) {
+  const steps: Array<{ label: string; tab: Tab; done: boolean }> = [
+    { label: "Zdjęcie", tab: "SCENE", done: true },
+    { label: "Obiekty", tab: "OBJECTS", done: state.objects.length > 0 || state.regions.some((region) => ["OBJECT_REGION", "WORK_SURFACE"].includes(region.type)) },
+    { label: "Wymiary", tab: "DIMENSIONS", done: state.constraintGraph.constraints.length > 0 || state.calibration.references.length > 0 },
+    { label: "Geometria", tab: "DIMENSIONS", done: ["SOLVED", "PARTIAL"].includes(state.reconstructionState.status) },
+    { label: "Operator", tab: "HUMANS", done: state.humans.length > 0 },
+    { label: "Ergonomia", tab: "ERGONOMICS", done: false },
+  ];
+  return <nav aria-label="Etapy budowy sceny" className="ui-surface overflow-x-auto p-2"><ol className="grid min-w-[720px] grid-cols-6 gap-2">{steps.map((step, index) => { const active = tab === step.tab && (!step.done || index === steps.findLastIndex((item) => item.tab === tab)); return <li key={`${index}-${step.label}`}><button onClick={() => setTab(step.tab)} aria-current={active ? "step" : undefined} className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold ${active ? "bg-orange-500 text-white" : step.done ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}><span className="grid size-5 shrink-0 place-items-center rounded-full border border-current text-[10px]">{step.done ? "✓" : index + 1}</span>{step.label}</button></li>; })}</ol></nav>;
+}
+
+function Toolbar({ state, tool, setTool, history, future, undo, redo, update, setTab, startRegion }: { state: SceneState; tool: Tool; setTool: (tool: Tool) => void; history: number; future: number; undo: () => void; redo: () => void; update: (fn: (state: SceneState) => SceneState) => void; setTab: (tab: Tab) => void; startRegion: (type: SceneRegionType) => void }) {
   return <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-    <ToolbarGroup label="Widok">{([['PHOTO','Zdjęcie'],['THREE_D','3D'],['SPLIT','Podzielony']] as const).map(([mode,label])=><button key={mode} aria-pressed={state.scene3d.workspaceMode===mode} onClick={()=>update((current)=>({...current,scene3d:{...current.scene3d,workspaceMode:mode}}))} className={`min-h-10 rounded-lg px-2 text-xs font-semibold ${state.scene3d.workspaceMode===mode?"bg-cyan-500 text-slate-950":"bg-muted"}`}>{label}</button>)}</ToolbarGroup>
-    <ToolbarGroup label="Nawigacja"><ToolButton active={tool === "SELECT"} icon={MousePointer2} label="Wybierz" onClick={() => setTool("SELECT")} /><ToolButton active={tool === "PAN"} icon={Move} label="Przesuń" onClick={() => setTool("PAN")} /></ToolbarGroup>
-    <ToolbarGroup label="Dodawanie"><ToolButton active={tool === "ADD_OBJECT"} icon={ImagePlus} label="Obiekt" onClick={() => setTool("ADD_OBJECT")} /><ToolButton active={tool === "HUMAN"} icon={UserRound} label="Człowiek" onClick={() => { setTool("HUMAN"); setTab("HUMANS"); }} /></ToolbarGroup>
-    <ToolbarGroup label="Kalibracja"><ToolButton active={tool === "REFERENCE"} icon={Ruler} label="Wymiar" onClick={() => { setTool("REFERENCE"); setTab("DIMENSIONS"); }} /><ToolButton active={tool === "FLOOR"} icon={LocateFixed} label="Podłoga" onClick={() => setTool("FLOOR")} /></ToolbarGroup>
-    <ToolbarGroup label="Historia i widok"><ToolButton disabled={!history} icon={Undo2} label="Cofnij" onClick={undo} /><ToolButton disabled={!future} icon={Redo2} label="Ponów" onClick={redo} /><ToolButton icon={Plus} label="Powiększ" onClick={() => update((state) => ({ ...state, viewport: { ...state.viewport, zoom: Math.min(4, state.viewport.zoom + .2) } }))} /><ToolButton icon={Minus} label="Pomniejsz" onClick={() => update((state) => ({ ...state, viewport: { ...state.viewport, zoom: Math.max(.5, state.viewport.zoom - .2) } }))} /><ToolButton icon={Grid2X2} label="Dopasuj" onClick={() => update((state) => ({ ...state, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } }))} /></ToolbarGroup>
-    <details className="relative"><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-muted px-3 text-xs font-semibold"><Eye className="size-4" />Warstwy</summary><div className="absolute right-0 z-30 mt-2 w-64 space-y-2 rounded-xl border border-border bg-card p-3 shadow-xl">{([['OBJECT_DIMENSIONS','Wymiary obiektów'],['USER_MEASUREMENTS','Pomiary użytkownika'],['CALIBRATION','Kalibracja'],['HUMAN_REACH','Zasięgi'],['SUGGESTIONS','Sugestie']] as [SceneLayerKey,string][]).map(([key,label]) => <label key={key} className="flex items-center justify-between text-xs"><span>{label}</span><input type="checkbox" checked={state.view.layers[key]} onChange={(event) => update((current) => ({ ...current, view: { ...current.view, layers: { ...current.view.layers, [key]: event.target.checked } } }))} /></label>)}<label className="flex items-center justify-between border-t border-border pt-2 text-xs"><span>Tryb skupienia</span><input type="checkbox" checked={state.view.focusMode} onChange={(event) => update((current) => ({ ...current, view: { ...current.view, focusMode: event.target.checked } }))} /></label></div></details>
-    <div className="ml-auto hidden gap-1 xl:flex">{([['CLEAN','Czysty'],['DIMENSIONS','Wymiary'],['CALIBRATION','Kalibracja'],['HUMAN','Człowiek']] as const).map(([preset,label]) => <button key={preset} onClick={() => update((current) => applyViewPreset(current, preset))} className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${state.view.preset === preset ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}>{label}</button>)}</div>
+    <ToolButton active={tool === "SELECT"} icon={MousePointer2} label="Wybierz" onClick={() => setTool("SELECT")} />
+    <details className="relative"><summary className={`flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border px-3 text-xs font-semibold ${tool === "REGION" ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted"}`}><Layers3 className="size-4" />Obszar</summary><div className="absolute left-0 z-40 mt-2 grid w-72 gap-1 rounded-xl border border-border bg-card p-2 shadow-xl">{([['WORK_SURFACE','Powierzchnia blatu'],['FLOOR_REGION','Obszar podłogi'],['MOVEMENT_ZONE','Pole ruchu operatora'],['STANDING_ZONE','Preferowane miejsce stania'],['OBSTACLE_ZONE','Przeszkoda'],['OBJECT_REGION','Cały obiekt']] as [SceneRegionType,string][]).map(([type,label])=><button key={type} onClick={()=>startRegion(type)} className="rounded-lg px-3 py-2 text-left text-xs font-semibold hover:bg-muted">{label}</button>)}</div></details>
+    <ToolButton active={tool === "REFERENCE"} icon={Ruler} label="Wymiar" onClick={() => { setTool("REFERENCE"); setTab("DIMENSIONS"); }} />
+    <ToolButton active={tool === "HUMAN"} icon={UserRound} label="Operator" onClick={() => { setTool("HUMAN"); setTab("HUMANS"); }} />
+    <details className="relative"><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-muted px-3 text-xs font-semibold"><Eye className="size-4" />Widok</summary><div className="absolute left-0 z-40 mt-2 w-64 space-y-2 rounded-xl border border-border bg-card p-3 shadow-xl">{([['OBJECTS','Obiekty'],['SURFACES','Powierzchnie'],['OBJECT_DIMENSIONS','Wymiary obiektów'],['USER_MEASUREMENTS','Pomiary użytkownika'],['SOLVER','Model solvera'],['FLOOR','Podłoga'],['HUMAN_REACH','Zasięgi']] as [SceneLayerKey,string][]).map(([key,label]) => <label key={key} className="flex items-center justify-between text-xs"><span>{label}</span><input type="checkbox" checked={state.view.layers[key]} onChange={(event) => update((current) => ({ ...current, view: { ...current.view, layers: { ...current.view.layers, [key]: event.target.checked } } }))} /></label>)}</div></details>
+    <details className="relative"><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-muted px-3 text-xs font-semibold">Więcej</summary><div className="absolute right-0 z-40 mt-2 flex w-72 flex-wrap gap-2 rounded-xl border border-border bg-card p-3 shadow-xl"><ToolButton active={tool === "PAN"} icon={Move} label="Przesuń" onClick={() => setTool("PAN")} /><ToolButton active={tool === "ADD_OBJECT"} icon={ImagePlus} label="Obiekt bbox" onClick={() => setTool("ADD_OBJECT")} /><ToolButton disabled={!history} icon={Undo2} label="Cofnij" onClick={undo} /><ToolButton disabled={!future} icon={Redo2} label="Ponów" onClick={redo} /><ToolButton icon={Plus} label="Powiększ" onClick={() => update((state) => ({ ...state, viewport: { ...state.viewport, zoom: Math.min(4, state.viewport.zoom + .2) } }))} /><ToolButton icon={Minus} label="Pomniejsz" onClick={() => update((state) => ({ ...state, viewport: { ...state.viewport, zoom: Math.max(.5, state.viewport.zoom - .2) } }))} /><ToolButton icon={Grid2X2} label="Dopasuj" onClick={() => update((state) => ({ ...state, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } }))} /></div></details>
   </div>;
 }
 
@@ -389,7 +481,7 @@ function ScenePanel({ title, state, detection, detectionError, detectionErrorCod
 }) {
   const next = nextBestAction(state);
   return <><div><p className="text-xs uppercase tracking-wider text-muted-foreground">Projekt sceny</p><h2 className="mt-1 text-xl font-bold">{title}</h2></div>
-    <details className="rounded-xl border border-border p-3 text-xs"><summary className="cursor-pointer font-semibold">Jak przygotować scenę?</summary><ol className="mt-3 grid gap-2 text-muted-foreground sm:grid-cols-2"><li><strong className="text-foreground">1.</strong> Przeanalizuj zdjęcie.</li><li><strong className="text-foreground">2.</strong> Potwierdź obiekty.</li><li><strong className="text-foreground">3.</strong> Oznacz 2–3 pionowe wysokości.</li><li><strong className="text-foreground">4.</strong> Oznacz podłogę.</li><li><strong className="text-foreground">5.</strong> Dodaj operatora.</li><li><strong className="text-foreground">6.</strong> Ustaw miejsce pracy.</li></ol></details>
+    <details className="rounded-xl border border-border p-3 text-xs"><summary className="cursor-pointer font-semibold">Jak przygotować scenę?</summary><ol className="mt-3 grid gap-2 text-muted-foreground sm:grid-cols-2"><li><strong className="text-foreground">1.</strong> Przeanalizuj zdjęcie.</li><li><strong className="text-foreground">2.</strong> Zaznacz blat i podłogę jako powierzchnie.</li><li><strong className="text-foreground">3.</strong> Wpisz znane wysokości, szerokości lub głębokości.</li><li><strong className="text-foreground">4.</strong> Zaznacz pole ruchu operatora.</li><li><strong className="text-foreground">5.</strong> Oblicz geometrię sceny.</li><li><strong className="text-foreground">6.</strong> Dodaj i ustaw operatora.</li></ol></details>
     <section className="space-y-3 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4" aria-labelledby="photo-analysis-heading">
       <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">Analiza zdjęcia</p><h3 id="photo-analysis-heading" className="mt-1 text-sm font-bold">{analysisUi.label}</h3></div><ScanSearch className="size-5 text-cyan-600" /></div>
       {analysisUi.indeterminateProgress && <div className="h-1.5 overflow-hidden rounded-full bg-cyan-950/15"><div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-500" /></div>}
@@ -412,12 +504,14 @@ function ScenePanel({ title, state, detection, detectionError, detectionErrorCod
     </>;
 }
 
-function ObjectsPanel({ state, selected, update, setTool, setTab }: { state: SceneState; selected: SceneObject | null; update: (fn: (state: SceneState) => SceneState) => void; setTool: (tool: Tool) => void; setTab: (tab: Tab) => void }) {
+function ObjectsPanel({ state, selected, update, setTool, setTab, startRegion }: { state: SceneState; selected: SceneObject | null; update: (fn: (state: SceneState) => SceneState) => void; setTool: (tool: Tool) => void; setTab: (tab: Tab) => void; startRegion: (type: SceneRegionType) => void }) {
   return <><button onClick={() => update((state) => ({ ...state, objects: [...state.objects, newObject({ x: .25, y: .25, width: .25, height: .2 })] }))} className="ui-button-primary w-full justify-center"><Plus className="size-4" />Dodaj obiekt</button>
+    <details open className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-bold">Powierzchnie i obszary ({state.regions.length})</summary><div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => startRegion("WORK_SURFACE")} className="ui-button-secondary justify-center text-xs">Blat</button><button onClick={() => startRegion("FLOOR_REGION")} className="ui-button-secondary justify-center text-xs">Podłoga</button><button onClick={() => startRegion("MOVEMENT_ZONE")} className="ui-button-secondary justify-center text-xs">Pole ruchu</button><button onClick={() => startRegion("OBSTACLE_ZONE")} className="ui-button-secondary justify-center text-xs">Przeszkoda</button></div><div className="mt-3 space-y-2">{state.regions.map((region) => <div key={region.id} className={`rounded-lg border p-2 ${region.id === state.selectedRegionId ? "border-primary bg-primary/5" : "border-border"}`}><button onClick={() => update((current) => ({ ...current, selectedRegionId: region.id, selectedObjectId: region.associatedObjectId }))} className="w-full text-left"><strong className="block text-xs">{region.label}</strong><small className="text-muted-foreground">{regionLabel(region.type)} · {region.polygonImageNormalized.length} punktów · {region.quality}</small></button><div className="mt-2 flex gap-3 text-[10px]"><button onClick={() => update((current) => ({ ...current, regions: current.regions.map((item) => item.id === region.id ? { ...item, visible: !item.visible } : item) }))}>{region.visible ? "Ukryj" : "Pokaż"}</button><button onClick={() => update((current) => ({ ...current, regions: current.regions.map((item) => item.id === region.id ? { ...item, locked: !item.locked } : item) }))}>{region.locked ? "Odblokuj" : "Zablokuj"}</button><button className="text-red-600" onClick={() => update((current) => ({ ...current, regions: current.regions.filter((item) => item.id !== region.id), planes: current.planes.filter((plane) => plane.regionId !== region.id), objectFaces: current.objectFaces.filter((face) => face.regionId !== region.id), objects: current.objects.map((object) => ({ ...object, regionIds: object.regionIds.filter((id) => id !== region.id) })), constraintGraph: { ...current.constraintGraph, constraints: current.constraintGraph.constraints.filter((constraint) => constraint.regionId !== region.id) }, selectedRegionId: current.selectedRegionId === region.id ? null : current.selectedRegionId }))}>Usuń</button></div></div>)}</div></details>
     <div className="space-y-2">{state.objects.map((object) => { const completeness = objectCompleteness(object.type, object.measurements); return <button key={object.id} onClick={() => update((state) => ({ ...state, selectedObjectId: object.id }))} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${object.id === state.selectedObjectId ? "border-primary bg-primary/5" : "border-border"}`}><Box className="size-4 shrink-0" /><span className="min-w-0 flex-1"><strong className="block truncate text-sm">{object.name}</strong><small className="text-muted-foreground">{objectLabels[object.type]} · {Math.round(completeness.ratio * 100)}% danych</small></span><ChevronRight className="size-4" /></button>; })}</div>
     {selected && <div className="space-y-3 border-t border-border pt-4">
       <Field label="Nazwa"><input value={selected.name} onChange={(event) => updateObject(update, selected.id, { name: event.target.value, status: "USER_MODIFIED" })} className={controlClass} /></Field>
       <Field label="Typ"><select value={selected.type} onChange={(event) => updateObject(update, selected.id, { type: event.target.value as SceneObjectType, status: "USER_MODIFIED" })} className={controlClass}>{Object.entries(objectLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
+      <ObjectGeometryV3Panel state={state} object={selected} update={update} onDrawRegion={startRegion} onDrawMeasurement={() => { setTool("REFERENCE"); setTab("DIMENSIONS"); }} />
       <details open className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-bold">Wymiary</summary><div className="mt-3 grid grid-cols-2 gap-2">{dimensionsFor(selected.type).map((definition) => <NumberField key={definition.key} label={`${definition.label} [cm]`} value={selected.measurements[definition.key]} onChange={(value) => updateMeasurement(update, selected.id, definition.key, value)} />)}</div><button onClick={() => { setTool("REFERENCE"); setTab("DIMENSIONS"); }} className="ui-button-secondary mt-3 w-full justify-center"><Ruler className="size-4" />Narysuj geometrię wymiaru</button>{selected.geometryMeasurements.length > 0 && <div className="mt-3 space-y-2">{selected.geometryMeasurements.map((measurement) => <div key={measurement.id} className="rounded-lg bg-muted/50 p-2 text-xs"><div className="flex items-center justify-between gap-2"><span>{measurement.name}</span><strong>{measurement.valueCm === null ? "do pomiaru" : `${measurement.source === "SCENE_ESTIMATED" ? "≈ " : ""}${measurement.valueCm} cm`}</strong></div><small className="text-muted-foreground">{provenanceLabel(measurement.source)}</small>{measurement.source === "SCENE_ESTIMATED" && <button onClick={() => confirmEstimatedMeasurement(update, selected.id, measurement.id)} className="mt-1 block font-semibold text-primary">Potwierdź wartość</button>}</div>)}</div>}</details>
       <details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-bold">Punkty robocze</summary><div className="mt-3 grid grid-cols-2 gap-2">{([['WORKING_POINT','Punkt pracy'],['GRIP_POINT','Uchwyt'],['CONTROL_POINT','Sterowanie'],['PLACEMENT_POINT','Odkładanie']] as const).map(([type,label]) => <button key={type} onClick={() => addInteractionPoint(update, selected, type, label)} className="ui-button-secondary justify-center text-xs"><Plus className="size-3" />{label}</button>)}</div><div className="mt-2 space-y-1">{selected.interactionPoints.map((point) => <div key={point.id} className="flex items-center justify-between rounded-lg bg-muted/50 px-2 py-1.5 text-xs"><span>{point.name}</span><button onClick={() => updateObject(update, selected.id, { interactionPoints: selected.interactionPoints.filter((item) => item.id !== point.id) })}><Trash2 className="size-3" /></button></div>)}</div></details>
       <details open className="rounded-xl border border-cyan-500/30 p-3"><summary className="cursor-pointer text-sm font-bold">Geometria 3D</summary><div className="mt-3 space-y-3"><p className="text-[11px] text-muted-foreground">Bryła istnieje tylko z podanymi wymiarami. Brak głębokości oznacza proxy bez kolizji.</p><button onClick={()=>updateObject(update,selected.id,{geometry3d:geometry3dFromSceneObject(selected)??createPrimitive3d("BOX")})} className="ui-button-primary w-full justify-center">Utwórz / odśwież bryłę</button>{selected.geometry3d&&<><Field label="Typ bryły"><select value={selected.geometry3d.type} onChange={(event)=>updateObject(update,selected.id,{geometry3d:createPrimitive3d(event.target.value as NonNullable<SceneObject["geometry3d"]>["type"],selected.geometry3d!.positionCm)})} className={controlClass}>{["BOX","CYLINDER","SPHERE","HANDLE","TOOL_GENERIC","BOTTLE","CONTAINER","PANEL","CUSTOM"].map((type)=><option key={type}>{type}</option>)}</select></Field><div className="grid grid-cols-3 gap-2"><NumberField label="X [cm]" value={selected.geometry3d.positionCm.x} onChange={(x)=>x!==null&&updateObject3d(update,selected.id,{positionCm:{...selected.geometry3d!.positionCm,x}})}/><NumberField label="Y [cm]" value={selected.geometry3d.positionCm.y} onChange={(y)=>y!==null&&updateObject3d(update,selected.id,{positionCm:{...selected.geometry3d!.positionCm,y}})}/><NumberField label="Z [cm]" value={selected.geometry3d.positionCm.z} onChange={(z)=>z!==null&&updateObject3d(update,selected.id,{positionCm:{...selected.geometry3d!.positionCm,z}})}/></div><label className="flex items-center justify-between text-xs">Uwzględniaj w kolizjach<input type="checkbox" checked={selected.geometry3d.collisionEnabled} disabled={selected.geometry3d.geometryQuality!=="COMPLETE"} onChange={(event)=>updateObject3d(update,selected.id,{collisionEnabled:event.target.checked})}/></label><button onClick={()=>addInteractionPoint3d(update,selected,"GRIP")} className="ui-button-secondary w-full justify-center"><Plus className="size-3"/>Dodaj punkt chwytu 3D</button><small className={selected.geometry3d.geometryQuality==="COMPLETE"?"text-emerald-600":"text-amber-600"}>{selected.geometry3d.geometryQuality==="COMPLETE"?"Pełna geometria kolizji":"Brak geometrii głębokości — kolizje niepewne"}</small></>}</div></details>
@@ -437,18 +531,18 @@ function HumansPanel({ state, selected, update, setTool, imageWidth, imageHeight
 }
 
 function HumanEditor({ human, state, update, imageWidth, imageHeight }: { human: SceneHuman; state: SceneState; update: (fn: (state: SceneState) => SceneState) => void; imageWidth: number; imageHeight: number }) {
-  const worldModel = createSceneWorldModel(state.calibration, imageWidth, imageHeight), scale = getVerticalScaleAt(worldModel, human.placement.contactPoint), allPoints = state.objects.flatMap((object) => object.interactionPoints.map((point) => ({ ...point, objectId: object.id, objectName: object.name })));
+  const worldModel = createSceneWorldModel(state.calibration, imageWidth, imageHeight, state.reconstructionState), scale = getVerticalScaleAt(worldModel, human.placement.contactPoint), allPoints = state.objects.flatMap((object) => object.interactionPoints.map((point) => ({ ...point, objectId: object.id, objectName: object.name })));
   function replace(next: SceneHuman) { update((current) => ({ ...current, humans: current.humans.map((item) => item.id === human.id ? next : item) })); }
   function patchHuman(patch: Partial<SceneHuman>) { replace({ ...human, ...patch }); }
   function setRoot3d(position: SceneHuman["human3d"]["rootPositionCm"], yaw = human.human3d.rootRotationDeg.y) {
     const point = { x: clamp(.5 + position.x / 300), y: clamp(.9 - position.z / 300) };
-    const projected = placeSingleHuman(human, point, state.calibration, imageWidth, imageHeight, yaw, human.placement.positionMode, human.placement.attachedObjectId);
+    const projected = placeSingleHuman(human, point, state.calibration, imageWidth, imageHeight, yaw, human.placement.positionMode, human.placement.attachedObjectId, state.reconstructionState);
     replace({ ...projected, human3d: setHumanRoot(projected.human3d, position, yaw) });
   }
-  function rebuild(profile = human.profile, posture = human.pose.preset, orientation = human.placement.orientationDeg, facingPreset = human.placement.facingPreset) { const physicalChanged = profile.heightCm !== human.profile.heightCm; const candidate = { ...human, visible: true, profile, human3d: physicalChanged ? createHuman3DState(profile) : human.human3d, constraints: createConstraintGraph(profile), pose: { ...human.pose, preset: posture }, placement: { ...human.placement, orientationDeg: orientation, facingPreset } }; const projected = placeSingleHuman(candidate, human.placement.contactPoint, state.calibration, imageWidth, imageHeight, orientation, human.placement.positionMode, human.placement.attachedObjectId); replace({ ...projected, human3d: { ...projected.human3d, rootRotationDeg: { ...projected.human3d.rootRotationDeg, y: orientation } }, placement: { ...projected.placement, facingPreset } }); }
+  function rebuild(profile = human.profile, posture = human.pose.preset, orientation = human.placement.orientationDeg, facingPreset = human.placement.facingPreset) { const physicalChanged = profile.heightCm !== human.profile.heightCm; const candidate = { ...human, visible: true, profile, human3d: physicalChanged ? createHuman3DState(profile) : human.human3d, constraints: createConstraintGraph(profile), pose: { ...human.pose, preset: posture }, placement: { ...human.placement, orientationDeg: orientation, facingPreset } }; const projected = placeSingleHuman(candidate, human.placement.contactPoint, state.calibration, imageWidth, imageHeight, orientation, human.placement.positionMode, human.placement.attachedObjectId, state.reconstructionState); replace({ ...projected, human3d: { ...projected.human3d, rootRotationDeg: { ...projected.human3d.rootRotationDeg, y: orientation } }, placement: { ...projected.placement, facingPreset } }); }
   function setHeight(value: number | null) { if (!value) return; rebuild({ ...profileFromHeight(human.profile.name, value, "CUSTOM"), name: human.profile.name }); }
   function setSegment(field: "upperArmLengthCm" | "forearmLengthCm" | "handLengthCm" | "thighLengthCm" | "lowerLegLengthCm", segment: "upperArm" | "forearm" | "hand" | "thigh" | "lowerLeg", value: number | null) { const profile = withUserSegment({ ...human.profile, [field]: value, preset: "CUSTOM" }, segment, value); rebuild(profile); }
-  function attachToObject(objectId: string) { const object = state.objects.find((item) => item.id === objectId); if (!object) { patchHuman({ placement: { ...human.placement, attachedObjectId: null, positionMode: "FREE", facingPreset: "FRONT" } }); return; } const point = floorPointNearObject(object, state.calibration.floorBaseline), orientation = angleToObject(point, object); const positioned = placeSingleHuman(human, point, state.calibration, imageWidth, imageHeight, orientation, human.pose.preset === "SEATED" ? "SEATED_AT_OBJECT" : "WORKING_AT_OBJECT", object.id); replace(positioned); }
+  function attachToObject(objectId: string) { const object = state.objects.find((item) => item.id === objectId); if (!object) { patchHuman({ placement: { ...human.placement, attachedObjectId: null, positionMode: "FREE", facingPreset: "FRONT" } }); return; } const point = floorPointNearObject(object, state.calibration.floorBaseline), orientation = angleToObject(point, object); const positioned = placeSingleHuman(human, point, state.calibration, imageWidth, imageHeight, orientation, human.pose.preset === "SEATED" ? "SEATED_AT_OBJECT" : "WORKING_AT_OBJECT", object.id, state.reconstructionState); replace(positioned); }
   function setHandTarget(side: "left" | "right", value: string) { const [objectId, pointId] = value.split(":"); const object = state.objects.find((item) => item.id === objectId), target = object?.interactionPoints.find((point) => point.id === pointId); if (!object || !target) { patchHuman({ handTargets: { ...human.handTargets, [side]: null } }); return; } const px = scale.pixelsPerCm ?? human.placement.lastScalePxPerCm ?? 3, next = moveHumanJointWithConstraints(human, side === "left" ? "leftHand" : "rightHand", target.position, px, imageWidth, imageHeight); const status = next.pose.reachState[side === "left" ? "leftArm" : "rightArm"] === "OUT_OF_REACH" ? "OUT_OF_REACH" : "REACHABLE"; replace({ ...next, handTargets: { ...next.handTargets, [side]: { objectId, interactionPointId: pointId, status } } }); }
   return <div className="space-y-3 border-t border-border pt-4">
     <details open className="rounded-xl border border-cyan-500/30 p-3">
@@ -523,7 +617,22 @@ function SuggestionsPanel({ state, update, setTab, setTool }: { state: SceneStat
     {state.technicalInsights.filter((insight) => insight.code !== "MISSING_OBJECT_DIMENSION").map((insight) => <div key={insight.id} className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs"><AlertTriangle className="size-4 shrink-0" />{insight.message}</div>)}</>;
 }
 
-function ObjectOverlay({ object, selected, width, height, onStart }: { object: SceneObject; selected: boolean; width: number; height: number; onStart: (kind: "OBJECT" | "RESIZE", event: React.PointerEvent<SVGElement>) => void }) { return <g><rect {...svgBox(object.bbox, width, height)} fill="rgba(249,115,22,.10)" stroke={selected ? "#f97316" : "#f8fafc"} strokeWidth={selected ? 4 : 2} onPointerDown={(event) => onStart("OBJECT", event)} /><rect x={object.bbox.x * width + 4} y={object.bbox.y * height + 4} width={Math.max(80, object.name.length * 8)} height="25" rx="5" fill="rgba(15,23,42,.88)" /><text x={object.bbox.x * width + 10} y={object.bbox.y * height + 21} fill="white" fontSize="14" fontWeight="700">{object.name}</text>{selected && !object.locked && <rect x={(object.bbox.x + object.bbox.width) * width - 10} y={(object.bbox.y + object.bbox.height) * height - 10} width="20" height="20" rx="4" fill="#f97316" onPointerDown={(event) => onStart("RESIZE", event)} />}</g>; }
+function RegionOverlay({ region, selected, width, height, onSelect }: { region: SceneState["regions"][number]; selected: boolean; width: number; height: number; onSelect: () => void }) {
+  const points = region.polygonImageNormalized.map((point) => `${point.effective.x * width},${point.effective.y * height}`).join(" ");
+  const color = regionColor(region.type), anchor = region.polygonImageNormalized[0]?.effective;
+  return <g onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} opacity={selected ? .95 : .3}>
+    <polygon points={points} fill={color} fillOpacity={selected ? .23 : .12} stroke={color} strokeWidth={selected ? 4 : 2} strokeDasharray={region.source === "WORKER_SUGGESTED" ? "10 7" : undefined} />
+    {selected && region.polygonImageNormalized.map((point, index) => <circle key={index} cx={point.effective.x * width} cy={point.effective.y * height} r="6" fill={point.snapped ? "#22d3ee" : color} stroke="white" strokeWidth="2" />)}
+    {anchor && <g><rect x={anchor.x * width + 8} y={anchor.y * height + 8} width={Math.max(88, region.label.length * 7)} height="23" rx="5" fill="rgba(15,23,42,.9)" /><text x={anchor.x * width + 14} y={anchor.y * height + 24} fill="white" fontSize="12" fontWeight="700">{region.label}</text></g>}
+  </g>;
+}
+
+function RegionDraftOverlay({ points, width, height }: { points: SceneRegionPoint[]; width: number; height: number }) {
+  const value = points.map((point) => `${point.effective.x * width},${point.effective.y * height}`).join(" ");
+  return <g pointerEvents="none"><polyline points={value} fill="rgba(34,211,238,.12)" stroke="#22d3ee" strokeWidth="3" strokeDasharray="10 6" />{points.map((point, index) => <g key={index}><circle cx={point.effective.x * width} cy={point.effective.y * height} r="7" fill={point.snapped ? "#22d3ee" : "#f97316"} stroke="white" strokeWidth="2" /><text x={point.effective.x * width + 10} y={point.effective.y * height - 8} fill="white" fontSize="11">{index + 1}</text></g>)}</g>;
+}
+
+function ObjectOverlay({ object, selected, width, height, onStart }: { object: SceneObject; selected: boolean; width: number; height: number; onStart: (kind: "OBJECT" | "RESIZE", event: React.PointerEvent<SVGElement>) => void }) { return <g opacity={selected ? 1 : .45}><rect {...svgBox(object.bbox, width, height)} fill="rgba(249,115,22,.06)" stroke={selected ? "#f97316" : "#94a3b8"} strokeWidth={selected ? 3 : 1.5} strokeDasharray="9 7" onPointerDown={(event) => onStart("OBJECT", event)} /><rect x={object.bbox.x * width + 4} y={object.bbox.y * height + 4} width={Math.max(80, object.name.length * 8)} height="25" rx="5" fill="rgba(15,23,42,.88)" /><text x={object.bbox.x * width + 10} y={object.bbox.y * height + 21} fill="white" fontSize="14" fontWeight="700">{object.name}</text>{selected && !object.locked && <rect x={(object.bbox.x + object.bbox.width) * width - 10} y={(object.bbox.y + object.bbox.height) * height - 10} width="20" height="20" rx="4" fill="#f97316" onPointerDown={(event) => onStart("RESIZE", event)} />}</g>; }
 function MeasurementOverlay({ reference, width, height, selected, zoom, onSelect }: { reference: CalibrationReference; width: number; height: number; selected: boolean; zoom: number; onSelect: () => void }) {
   const baseColor = semanticColor(reference);
   const color = reference.residualStatus === "OUTLIER" ? "#ef4444" : reference.residualStatus === "WEAK" ? "#f59e0b" : baseColor;
@@ -570,12 +679,13 @@ function visibleReferences(state: SceneState) {
 }
 
 function placeHumanAt(state: SceneState, id: string, point: NormalizedPoint, width: number, height: number) {
-  const humans = state.humans.map((human) => human.id === id ? placeSingleHuman(human, snapPointToFloor(point, state.calibration.floorBaseline), state.calibration, width, height, human.placement.orientationDeg, "FREE", null) : human);
-  return { ...state, humans };
+  const constrained = constrainedHumanContact(state, point);
+  const humans = state.humans.map((human) => human.id === id ? placeSingleHuman(human, constrained.point, state.calibration, width, height, human.placement.orientationDeg, "FREE", null, state.reconstructionState) : human);
+  return constrained.deltaNormalized > 0 ? withMovementCorrection({ ...state, humans }, id, point, constrained.point, constrained.deltaNormalized) : { ...state, humans };
 }
 
-function placeSingleHuman(human: SceneHuman, point: NormalizedPoint, calibration: SceneState["calibration"], width: number, height: number, orientationDeg: number, positionMode: SceneHuman["placement"]["positionMode"], attachedObjectId: string | null): SceneHuman {
-  const model = createSceneWorldModel(calibration, width, height);
+function placeSingleHuman(human: SceneHuman, point: NormalizedPoint, calibration: SceneState["calibration"], width: number, height: number, orientationDeg: number, positionMode: SceneHuman["placement"]["positionMode"], attachedObjectId: string | null, reconstruction: SceneState["reconstructionState"] | null = null): SceneHuman {
+  const model = createSceneWorldModel(calibration, width, height, reconstruction);
   const projection = getHumanProjectionAt(model, human, point, { posture: human.pose.preset === "CUSTOM" ? "STANDING" : human.pose.preset, yawDeg: orientationDeg, fallbackPixelsPerCm: human.placement.lastScalePxPerCm ?? Math.max(.35, height * .003) });
   const pose = projection.pose;
   const approximateRoot = { x: (point.x - .5) * 300, y: 0, z: (.9 - point.y) * 300 };
@@ -583,24 +693,40 @@ function placeSingleHuman(human: SceneHuman, point: NormalizedPoint, calibration
 }
 
 function moveHumanInPerspective(state: SceneState, id: string, dx: number, dy: number, width: number, height: number) {
-  const humans = state.humans.map((human) => {
-    if (human.id !== id || human.locked) return human;
+  let correction: { before: NormalizedPoint; after: NormalizedPoint; deltaNormalized: number } | null = null;
+  const humans: SceneHuman[] = [];
+  for (const human of state.humans) {
+    if (human.id !== id || human.locked) { humans.push(human); continue; }
     const requested = { x: clamp(human.placement.contactPoint.x + dx), y: clamp(human.placement.contactPoint.y + dy) };
-    const point = human.placement.floorPinned ? snapPointToFloor(requested, state.calibration.floorBaseline) : requested;
-    return placeSingleHuman(human, point, state.calibration, width, height, human.placement.orientationDeg, human.placement.positionMode, human.placement.attachedObjectId);
-  });
-  return { ...state, humans };
+    const constrained = constrainedHumanContact(state, requested);
+    if (constrained.deltaNormalized > 0) correction = { before: requested, after: constrained.point, deltaNormalized: constrained.deltaNormalized };
+    humans.push(placeSingleHuman(human, constrained.point, state.calibration, width, height, human.placement.orientationDeg, human.placement.positionMode, human.placement.attachedObjectId, state.reconstructionState));
+  }
+  return correction ? withMovementCorrection({ ...state, humans }, id, correction.before, correction.after, correction.deltaNormalized) : { ...state, humans };
 }
 
-function rotateHuman(human: SceneHuman, point: NormalizedPoint, calibration: SceneState["calibration"], width: number, height: number): SceneHuman {
+function constrainedHumanContact(state: SceneState, requested: NormalizedPoint) {
+  const movement = state.regions.find((region) => region.type === "MOVEMENT_ZONE" && region.visible && region.quality !== "INVALID");
+  const feasible = movement ? nearestFeasiblePoint(requested, movement) : { point: requested, deltaNormalized: 0, corrected: false };
+  const floor = state.regions.find((region) => region.type === "FLOOR_REGION" && region.quality !== "INVALID");
+  const projectiveGround = floor && state.reconstructionState.worldGeometry[`region:${floor.id}`]?.status === "PROJECTIVE";
+  return { point: projectiveGround ? feasible.point : snapPointToFloor(feasible.point, state.calibration.floorBaseline), deltaNormalized: feasible.corrected ? feasible.deltaNormalized : 0 };
+}
+
+function withMovementCorrection(state: SceneState, humanId: string, before: NormalizedPoint, after: NormalizedPoint, deltaNormalized: number): SceneState {
+  const correction = { id: `repair:${humanId}:movement-zone`, type: "NEAREST_FEASIBLE" as const, entityId: humanId, before, after, delta: deltaNormalized, unit: "normalized" as const, reason: "PozycjÄ™ operatora ograniczono do najbliĹĽszego punktu w polu ruchu." };
+  return { ...state, reconstructionState: { ...state.reconstructionState, autoRepairs: [...state.reconstructionState.autoRepairs.filter((item) => item.id !== correction.id), correction] } };
+}
+
+function rotateHuman(human: SceneHuman, point: NormalizedPoint, calibration: SceneState["calibration"], width: number, height: number, reconstruction: SceneState["reconstructionState"] | null = null): SceneHuman {
   const orientation = Math.atan2((point.y - human.placement.contactPoint.y) * height, (point.x - human.placement.contactPoint.x) * width) * 180 / Math.PI;
-  const projected = placeSingleHuman(human, human.placement.contactPoint, calibration, width, height, orientation, human.placement.positionMode, human.placement.attachedObjectId);
+  const projected = placeSingleHuman(human, human.placement.contactPoint, calibration, width, height, orientation, human.placement.positionMode, human.placement.attachedObjectId, reconstruction);
   return { ...projected, placement: { ...projected.placement, orientationDeg: orientation, facingPreset: "CUSTOM" } };
 }
 
 function rescaleLockedHumans(state: SceneState, width: number, height: number) {
   const calibration = rebuildPerspectiveField(state.calibration);
-  return { ...state, calibration, humans: state.humans.map((human) => human.pose.scaleLocked ? placeSingleHuman(human, human.placement.contactPoint, calibration, width, height, human.placement.orientationDeg, human.placement.positionMode, human.placement.attachedObjectId) : human) };
+  return { ...state, calibration, humans: state.humans.map((human) => human.pose.scaleLocked ? placeSingleHuman(human, human.placement.contactPoint, calibration, width, height, human.placement.orientationDeg, human.placement.positionMode, human.placement.attachedObjectId, state.reconstructionState) : human) };
 }
 
 function floorPointNearObject(object: SceneObject, floor: SceneState["calibration"]["floorBaseline"]): NormalizedPoint {
@@ -616,19 +742,11 @@ function snapPointToFloor(point: NormalizedPoint, floor: SceneState["calibration
 
 function angleToObject(point: NormalizedPoint, object: SceneObject) { return Math.atan2(object.bbox.y + object.bbox.height / 2 - point.y, object.bbox.x + object.bbox.width / 2 - point.x) * 180 / Math.PI; }
 
-function applyViewPreset(state: SceneState, preset: SceneViewPreset): SceneState {
-  const layers = preset === "CLEAN" ? { CALIBRATION: false, OBJECT_DIMENSIONS: false, USER_MEASUREMENTS: false, HUMAN_REACH: false, SUGGESTIONS: false, DEBUG: false }
-    : preset === "DIMENSIONS" ? { CALIBRATION: false, OBJECT_DIMENSIONS: true, USER_MEASUREMENTS: true, HUMAN_REACH: false, SUGGESTIONS: true, DEBUG: false }
-      : preset === "CALIBRATION" ? { CALIBRATION: true, OBJECT_DIMENSIONS: false, USER_MEASUREMENTS: false, HUMAN_REACH: false, SUGGESTIONS: false, DEBUG: false }
-        : { CALIBRATION: false, OBJECT_DIMENSIONS: false, USER_MEASUREMENTS: false, HUMAN_REACH: true, SUGGESTIONS: false, DEBUG: false };
-  return { ...state, view: { ...state.view, preset, layers } };
-}
-
 function addInteractionPoint(update: (fn: (state: SceneState) => SceneState) => void, object: SceneObject, type: ObjectInteractionPointType, name: string) {
   const position = type === "PLACEMENT_POINT" ? { x: object.bbox.x + object.bbox.width * .72, y: object.bbox.y + object.bbox.height * .35 } : type === "GRIP_POINT" ? { x: object.bbox.x + object.bbox.width * .25, y: object.bbox.y + object.bbox.height * .45 } : { x: object.bbox.x + object.bbox.width / 2, y: object.bbox.y + object.bbox.height * .3 };
   updateObject(update, object.id, { interactionPoints: [...object.interactionPoints, { id: crypto.randomUUID(), name, type, position: { x: clamp(position.x), y: clamp(position.y) }, visible: true }] });
 }
-function newObject(bbox: NormalizedBox): SceneObject { return { id: crypto.randomUUID(), sourceClass: null, type: "OTHER", name: "Nowy element", bbox, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null, geometry3d: null, interactionPoints3d: [] }; }
+function newObject(bbox: NormalizedBox): SceneObject { return { id: crypto.randomUUID(), sourceClass: null, type: "OTHER", name: "Nowy element", bbox, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null, geometry3d: null, interactionPoints3d: [], regionIds: [], faceIds: [], planeIds: [], shapeAssumptions: [], reconstructionQuality: "UNSOLVED" }; }
 function updateObject(update: (fn: (state: SceneState) => SceneState) => void, id: string, patch: Partial<SceneObject>) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id ? { ...object, ...patch } : object) })); }
 function updateObject3d(update: (fn: (state: SceneState) => SceneState) => void, id: string, patch: Partial<NonNullable<SceneObject["geometry3d"]>>) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id && object.geometry3d ? { ...object, geometry3d: { ...object.geometry3d, ...patch } } : object) })); }
 function addInteractionPoint3d(update: (fn: (state: SceneState) => SceneState) => void, object: SceneObject, type: SceneObject["interactionPoints3d"][number]["type"]) { if (!object.geometry3d) return; const point = { id: crypto.randomUUID(), name: type === "GRIP" ? "Punkt chwytu" : "Punkt interakcji", type, positionCm: { ...object.geometry3d.positionCm }, rotationDeg: { x: 0, y: 0, z: 0 }, hand: null } satisfies SceneObject["interactionPoints3d"][number]; updateObject(update, object.id, { interactionPoints3d: [...object.interactionPoints3d, point] }); }
@@ -659,7 +777,6 @@ function lineProps(a: NormalizedPoint, b: NormalizedPoint, width: number, height
 function clamp(value: number, min = 0, max = 1) { return Math.max(min, Math.min(max, value)); }
 function CoordinateDebugPanel({ coordinates, rect }: { coordinates: PointerCoordinates; rect: EditorViewportRect | null }) { const display = coordinates.displayedImageRect, transformed = coordinates.transformedImageRect; return <div className="pointer-events-none absolute left-3 top-3 z-30 max-w-[min(360px,calc(100%-1.5rem))] rounded-lg border border-rose-400/60 bg-slate-950/90 p-3 font-mono text-[10px] leading-4 text-rose-100"><strong className="text-rose-300">Coordinate Engine V2</strong><div>screen: {coordinates.screen.x.toFixed(1)}, {coordinates.screen.y.toFixed(1)}</div><div>viewport: {coordinates.viewport.x.toFixed(1)}, {coordinates.viewport.y.toFixed(1)} / {rect?.width.toFixed(1) ?? "—"}×{rect?.height.toFixed(1) ?? "—"}</div><div>normalized: {coordinates.imageNormalized.x.toFixed(6)}, {coordinates.imageNormalized.y.toFixed(6)}</div><div>pixels: {coordinates.imagePixels.x.toFixed(1)}, {coordinates.imagePixels.y.toFixed(1)}</div><div>display rect: {display.left.toFixed(1)}, {display.top.toFixed(1)}, {display.width.toFixed(1)}×{display.height.toFixed(1)}</div><div>zoomed rect: {transformed.left.toFixed(1)}, {transformed.top.toFixed(1)}, {transformed.width.toFixed(1)}×{transformed.height.toFixed(1)}</div><div>inside: {coordinates.insideImage ? "true" : "false"}</div></div>; }
 function ToolButton({ icon: Icon, label, active = false, disabled = false, onClick }: { icon: typeof Move; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) { return <button title={label} aria-pressed={active} disabled={disabled} onClick={onClick} className={`flex min-h-10 items-center gap-2 rounded-lg px-2 text-xs font-semibold disabled:opacity-30 ${active ? "bg-primary text-white" : "bg-muted hover:bg-primary/10"}`}><Icon className="size-4" /><span className="hidden lg:inline">{label}</span></button>; }
-function ToolbarGroup({ label, children }: { label: string; children: React.ReactNode }) { return <div className="flex items-center gap-1 rounded-xl border border-border p-1" aria-label={label}>{children}</div>; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-xs font-semibold">{label}<span className="mt-1 block">{children}</span></label>; }
 function NumberField({ label, value, onChange }: { label: string; value: number | null; onChange: (value: number | null) => void }) { return <Field label={label}><input type="number" min="0.1" step="0.1" value={value ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className={controlClass} /></Field>; }
 function Datum({ label, value }: { label: string; value: string }) { return <div className="rounded-xl border border-border p-3"><dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>; }
@@ -667,17 +784,39 @@ function CalibrationDatum({ label, value }: { label: string; value: string }) { 
 function ActionCard({ icon: Icon, title, text, action, onClick }: { icon: typeof Ruler; title: string; text: string; action: string; onClick: () => void }) { return <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3"><div className="flex gap-2"><Icon className="mt-0.5 size-4 shrink-0" /><div><strong className="text-sm">{title}</strong><p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p></div></div><button onClick={onClick} className="mt-3 text-xs font-semibold text-primary">{action} →</button></div>; }
 function EmptyState({ text }: { text: string }) { return <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs leading-5 text-muted-foreground"><HelpCircle className="mx-auto mb-2 size-5" />{text}</div>; }
 function ResultCard({ title, value }: { title: string; value: string }) { return <div className="rounded-xl border border-border bg-muted/40 p-3"><span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{title}</span><strong className="mt-1 block text-xs">{value}</strong></div>; }
-function qualityLabel(quality: ReturnType<typeof calibrationQuality>) { return quality === "GOOD" ? "Dobra kalibracja" : quality === "PARTIAL" ? "Częściowa kalibracja" : quality === "ATTENTION_REQUIRED" ? "Kalibracja wymaga uwagi" : "Brak kalibracji"; }
 function formatDate(value: string | null) { if (!value) return "—"; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString("pl-PL") : "—"; }
 function workerStatusLabel(status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown" | undefined) { return ({ online: "Online", offline: "Offline", degraded: "Ograniczony", restarting: "Restart", crash_loop: "Błąd uruchamiania", unknown: "Nieznany" })[status ?? "unknown"]; }
 function sceneErrorMessage(code: string | null) { return ({ SCENE_JOB_CLAIM_FAILED: "Worker nie mógł pobrać zadania.", SCENE_IMAGE_PATH_MISSING: "Brakuje ścieżki zdjęcia źródłowego.", SCENE_IMAGE_DOWNLOAD_FAILED: "Nie udało się pobrać prywatnego zdjęcia.", SCENE_IMAGE_DECODE_FAILED: "Format zdjęcia nie mógł zostać odczytany.", SCENE_DETECTOR_INIT_FAILED: "Model detekcji nie uruchomił się.", SCENE_DETECTION_FAILED: "Detekcja obiektów nie powiodła się.", SCENE_GEOMETRY_FAILED: "Analiza geometrii nie powiodła się.", SCENE_RESULT_UPLOAD_FAILED: "Wynik analizy nie został zapisany w Storage.", SCENE_COMPLETE_RPC_FAILED: "Worker utracił możliwość zakończenia zadania.", SCENE_WORKER_OFFLINE: "Worker analizy sceny jest offline.", SCENE_JOB_STALLED: "Zadanie nie raportuje postępu." } as Record<string, string>)[code ?? ""] ?? "Automatyczna analiza zdjęcia nie powiodła się."; }
-function tabLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Człowiek", INTERACTIONS: "Interakcje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Kalibracja", SUGGESTIONS: "Sugestie" })[tab]; }
-function tabShortLabel(tab: Tab) { return ({ SCENE: "Scena", OBJECTS: "Obiekty", HUMANS: "Osoby", INTERACTIONS: "Relacje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Kalibr.", SUGGESTIONS: "Sugestie" })[tab]; }
+function tabLabel(tab: Tab) { return ({ SCENE: "Projekt", OBJECTS: "Obiekty", HUMANS: "Operatorzy", INTERACTIONS: "Interakcje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Geometria", SUGGESTIONS: "Sugestie" })[tab]; }
+function tabShortLabel(tab: Tab) { return ({ SCENE: "Projekt", OBJECTS: "Obiekty", HUMANS: "Operatorzy", INTERACTIONS: "Relacje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Geometria", SUGGESTIONS: "Sugestie" })[tab]; }
 function priorityLabel(priority: "CRITICAL" | "RECOMMENDED" | "OPTIONAL") { return priority === "CRITICAL" ? "Krytyczne" : priority === "RECOMMENDED" ? "Zalecane" : "Opcjonalne"; }
 function dimensionKeyLabel(key: ObjectDimensionKey) { return ({ heightCm: "Wysokość", widthCm: "Szerokość", depthCm: "Głębokość", workSurfaceHeightCm: "Wysokość powierzchni", lowerEdgeHeightCm: "Wysokość dolnej krawędzi", upperEdgeHeightCm: "Wysokość górnej krawędzi", seatHeightCm: "Wysokość siedziska", seatWidthCm: "Szerokość siedziska", backrestHeightCm: "Wysokość oparcia", seatDepthCm: "Głębokość siedziska", screenCenterHeightCm: "Wysokość środka ekranu", screenHeightCm: "Wysokość ekranu", userDistanceCm: "Odległość od operatora", keyShelfHeightCm: "Wysokość półki", workingWidthCm: "Szerokość robocza", controlHeightCm: "Wysokość sterowania" })[key]; }
 function provenanceLabel(source: GeometryMeasurement["source"]) { return ({ USER_MEASURED: "Pomiar użytkownika", WORKER_SUGGESTED: "Sugestia Workera", SCENE_ESTIMATED: "Estymacja ze sceny", USER_CONFIRMED_ESTIMATE: "Estymacja potwierdzona przez użytkownika", UNKNOWN: "Nieznane źródło" })[source]; }
 function residualStatusLabel(status: CalibrationReference["residualStatus"]) { return ({ UNASSESSED: "nieoceniona", GOOD: "spójna", WEAK: "słaba", OUTLIER: "odstająca" })[status]; }
 function scaleStatusLabel(status: SceneState["calibration"]["scaleField"]["status"]) { return ({ NO_SCALE: "brak skali", LOCAL_ONLY: "tylko lokalna", PERSPECTIVE_PARTIAL: "perspektywa częściowa", PERSPECTIVE_GOOD: "perspektywa dobra", INCONSISTENT: "referencje niespójne" })[status]; }
+function reconstructionStatusLabel(status: SceneState["reconstructionState"]["status"]) { return ({ UNSOLVED: "nieobliczona", QUEUED: "oczekuje", SOLVING: "obliczanie", SOLVED: "gotowa", PARTIAL: "częściowa", UNDERDETERMINED: "potrzebny wymiar", INCONSISTENT: "wymaga sprawdzenia", FAILED: "błąd" })[status]; }
+function regionLabel(type: SceneRegionType) { return ({ FLOOR_REGION: "Podłoga", WORK_SURFACE: "Powierzchnia blatu", OBJECT_TOP_FACE: "Górna powierzchnia", OBJECT_FRONT_FACE: "Przednia powierzchnia", OBJECT_SIDE_FACE: "Boczna powierzchnia", OBJECT_REGION: "Obiekt", MACHINE_REGION: "Maszyna", SHELF_REGION: "Półka", CONTROL_PANEL_REGION: "Panel sterowania", STANDING_ZONE: "Preferowane miejsce stania", MOVEMENT_ZONE: "Pole ruchu operatora", INTERACTION_ZONE: "Strefa interakcji", OBSTACLE_ZONE: "Przeszkoda", NO_GO_ZONE: "Strefa wyłączona", CUSTOM_REGION: "Obszar" })[type]; }
+function regionColor(type: SceneRegionType) { if (type === "FLOOR_REGION") return "#14b8a6"; if (type === "MOVEMENT_ZONE" || type === "STANDING_ZONE") return "#84cc16"; if (type === "OBSTACLE_ZONE" || type === "NO_GO_ZONE") return "#ef4444"; if (["WORK_SURFACE", "OBJECT_TOP_FACE", "SHELF_REGION"].includes(type)) return "#22d3ee"; return "#f97316"; }
+
+function snapRegionPoint(raw: NormalizedPoint, detection: SceneDetection | null, width: number, height: number): SceneRegionPoint {
+  const candidates = detection?.geometry_candidates ?? [];
+  let best: { point: NormalizedPoint; id: string; distance: number } | null = null;
+  const tolerance = Math.max(3, Math.hypot(width, height) * .004);
+  for (const line of candidates) {
+    const point = closestPointOnImageLine(raw, line.start, line.end, width, height);
+    const distance = Math.hypot((point.x - raw.x) * width, (point.y - raw.y) * height);
+    if (distance <= tolerance && (!best || distance < best.distance)) best = { point, id: line.id, distance };
+  }
+  return regionPoint(raw, best?.point ?? null, best?.id ?? null, best?.distance ?? null);
+}
+
+function closestPointOnImageLine(point: NormalizedPoint, start: NormalizedPoint, end: NormalizedPoint, width: number, height: number): NormalizedPoint {
+  const px = point.x * width, py = point.y * height, sx = start.x * width, sy = start.y * height, ex = end.x * width, ey = end.y * height;
+  const dx = ex - sx, dy = ey - sy, denominator = dx * dx + dy * dy;
+  if (denominator < 1e-9) return start;
+  const ratio = Math.max(0, Math.min(1, ((px - sx) * dx + (py - sy) * dy) / denominator));
+  return { x: (sx + ratio * dx) / width, y: (sy + ratio * dy) / height };
+}
 const postureOptions: [HumanPosture, string][] = [["STANDING", "Stojąca"], ["SEATED", "Siedząca"], ["REACHING", "Sięganie"], ["FORWARD_LEAN", "Pochylenie do przodu"], ["WORK_SURFACE", "Praca przy blacie"], ["ONE_HANDED", "Praca jednorącz"], ["TWO_HANDED", "Praca oburącz"]];
 function orderedHeightPoints(a: NormalizedPoint, b: NormalizedPoint, verticalDirection: NormalizedPoint | null) { const vertical = verticalDirection ?? { x: 0, y: -1 }, projectionA = a.x * vertical.x + a.y * vertical.y, projectionB = b.x * vertical.x + b.y * vertical.y; return projectionA > projectionB ? { bottom: b, top: a } : { bottom: a, top: b }; }
 function calibrationTargetRegion(calibration: SceneState["calibration"]): "LEFT" | "RIGHT" | "CENTER" | null { const region = calibrationAssistant(calibration).region; return region === "LEFT" || region === "RIGHT" || region === "CENTER" ? region : null; }

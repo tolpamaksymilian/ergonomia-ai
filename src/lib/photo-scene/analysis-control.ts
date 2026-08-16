@@ -116,6 +116,11 @@ function detectedObject(candidate: SceneDetectionCandidate): SceneObject {
     referencePoint: null,
     geometry3d: null,
     interactionPoints3d: [],
+    regionIds: [],
+    faceIds: [],
+    planeIds: [],
+    shapeAssumptions: ["TABLE", "WORK_SURFACE"].includes(candidate.suggested_scene_type) ? ["RECTANGULAR", "PLANAR"] : [],
+    reconstructionQuality: "UNSOLVED",
   };
 }
 

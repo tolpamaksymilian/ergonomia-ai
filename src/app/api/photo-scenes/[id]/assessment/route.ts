@@ -5,6 +5,7 @@ import { assessScene } from "@/lib/scene-ergonomics/processor";
 import { buildSceneDesignReport } from "@/lib/scene-ergonomics/report";
 import { SCENE_ERGONOMICS_VERSION, type SceneManualContext, type SceneTaskSequence } from "@/lib/scene-ergonomics/types";
 import { validateSceneState } from "@/lib/photo-scene/schema";
+import { sceneErgonomicsGeometryGate } from "@/lib/photo-scene/scene-reconstruction";
 import type { SceneState } from "@/types/photo-scene";
 
 const validId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id);
@@ -21,7 +22,8 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
   const{id}=await params;if(!validId(id))return NextResponse.json({error:"Nieprawidłowy identyfikator."},{status:400});const{supabase,user}=await requireUser();let body:unknown;try{body=await request.json()}catch{return NextResponse.json({error:"Nieprawidłowy JSON."},{status:400})}
   const payload=body as {task?:SceneTaskSequence|null;manual_context?:SceneManualContext};
   const{data:savedScene,error:sceneError}=await supabase.from("photo_scenes").select("scene_state").eq("analysis_id",id).maybeSingle();if(sceneError||!savedScene||!validateSceneState(savedScene.scene_state))return NextResponse.json({error:"Nie można odczytać zapisanego stanu sceny."},{status:422});
-  const input=buildSceneErgonomicsInput(id,savedScene.scene_state as SceneState,{task:payload.task??null,manualContext:payload.manual_context});let assessment;try{assessment=assessScene(input)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Nie udało się obliczyć oceny."},{status:422})}
+  const sceneState=savedScene.scene_state as SceneState,geometryGate=sceneErgonomicsGeometryGate(sceneState);if(!geometryGate.allowed)return NextResponse.json({error:geometryGate.reasons[0]??"Geometria sceny nie jest gotowa do oceny."},{status:422});
+  const input=buildSceneErgonomicsInput(id,sceneState,{task:payload.task??null,manualContext:payload.manual_context});let assessment;try{assessment=assessScene(input)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Nie udało się obliczyć oceny."},{status:422})}
   const report=buildSceneDesignReport(input,assessment),base=`${user.id}/${id}/results`,assessmentPath=`${base}/scene-ergonomic-assessment.json`,reportPath=`${base}/scene-design-report.json`,options={contentType:"application/json; charset=utf-8",upsert:true};
   const assessmentBlob=new Blob([JSON.stringify(assessment,null,2)],{type:"application/json"}),reportBlob=new Blob([JSON.stringify(report,null,2)],{type:"application/json"});
   const{error:uploadError}=await supabase.storage.from("analysis-scenes").upload(assessmentPath,assessmentBlob,options);if(uploadError)return NextResponse.json({error:"Nie udało się zapisać artefaktu oceny."},{status:500});

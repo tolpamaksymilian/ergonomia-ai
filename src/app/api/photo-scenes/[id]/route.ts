@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/access";
 import { validateSceneState } from "@/lib/photo-scene/schema";
+import { buildConstraintGraph } from "@/lib/photo-scene/scene-reconstruction";
+import type { SceneState } from "@/types/photo-scene";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,10 +13,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Nieprawidłowy JSON." }, { status: 400 }); }
   const state = (body as { scene_state?: unknown } | null)?.scene_state;
   if (!validateSceneState(state)) return NextResponse.json({ error: "Nieprawidłowy stan sceny." }, { status: 422 });
+  const persistedState: SceneState = { ...state, constraintGraph: buildConstraintGraph(state) };
   const { error } = await supabase.from("photo_scenes").update({
-    scene_state: state,
-    scene_schema_version: "1.4",
-    scene_builder_version: "photo-scene-builder-v0.8-beta.1",
+    scene_state: persistedState,
+    scene_schema_version: "1.5",
+    scene_builder_version: "photo-scene-builder-v0.9-beta.1",
     last_saved_at: new Date().toISOString(),
   }).eq("analysis_id", id);
   if (error) return NextResponse.json({ error: "Nie udało się zapisać sceny." }, { status: 500 });

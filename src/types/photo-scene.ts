@@ -109,6 +109,9 @@ export type SceneObject = {
   geometryMeasurements: GeometryMeasurement[]; interactionPoints: ObjectInteractionPoint[];
   referencePoint: (NormalizedPoint & { heightCm: number }) | null;
   geometry3d: ObjectGeometry3D | null; interactionPoints3d: InteractionPoint3D[];
+  regionIds: string[]; faceIds: string[]; planeIds: string[];
+  shapeAssumptions: SceneShapeAssumption[];
+  reconstructionQuality: ObjectReconstructionQuality;
 };
 
 export type ReferenceDimensionType = "HEIGHT" | "WIDTH" | "DEPTH" | "DISTANCE" | "WORK_SURFACE_HEIGHT" | "SHELF_HEIGHT" | "REACH_HEIGHT" | "CUSTOM";
@@ -146,6 +149,152 @@ export type SceneCalibration = {
     mappingStatus: "NONE" | "ORIENTATION_ONLY" | "PROJECTIVE";
   };
   references: CalibrationReference[]; scaleField: PerspectiveScaleField;
+};
+
+export type SceneGeometryProvenance =
+  | "USER_PROVIDED" | "USER_CONFIRMED" | "WORKER_DETECTED" | "WORKER_SUGGESTED"
+  | "SOLVER_DERIVED" | "SOLVER_ESTIMATED" | "AUTO_REPAIRED" | "ASSUMED" | "UNKNOWN";
+export type SceneRegionType =
+  | "FLOOR_REGION" | "WORK_SURFACE" | "OBJECT_TOP_FACE" | "OBJECT_FRONT_FACE"
+  | "OBJECT_SIDE_FACE" | "OBJECT_REGION" | "MACHINE_REGION" | "SHELF_REGION"
+  | "CONTROL_PANEL_REGION" | "STANDING_ZONE" | "MOVEMENT_ZONE" | "INTERACTION_ZONE"
+  | "OBSTACLE_ZONE" | "NO_GO_ZONE" | "CUSTOM_REGION";
+export type SceneRegionQuality = "UNKNOWN" | "LOW" | "MEDIUM" | "HIGH" | "INVALID";
+export type SceneRegionPoint = {
+  raw: NormalizedPoint;
+  snapped: NormalizedPoint | null;
+  effective: NormalizedPoint;
+  snapSourceId: string | null;
+  snapDistancePx: number | null;
+};
+export type SceneRegion = {
+  id: string;
+  type: SceneRegionType;
+  label: string;
+  polygonImageNormalized: SceneRegionPoint[];
+  associatedObjectId: string | null;
+  planeId: string | null;
+  source: SceneGeometryProvenance;
+  quality: SceneRegionQuality;
+  visible: boolean;
+  locked: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type SceneShapeAssumption = "RECTANGULAR" | "PLANAR" | "PARALLEL_EDGES" | "FREEFORM";
+export type ObjectReconstructionQuality = "UNSOLVED" | "HIGH" | "PARTIAL" | "TWO_D_ONLY" | "INVALID";
+export type ScenePlaneKind = "GROUND" | "OBJECT_TOP" | "OBJECT_FRONT" | "OBJECT_SIDE" | "SHELF" | "CONTROL_PANEL" | "CUSTOM";
+export type ScenePlane = {
+  id: string;
+  kind: ScenePlaneKind;
+  regionId: string | null;
+  objectId: string | null;
+  normal: Vector3Cm | null;
+  offsetCm: number | null;
+  homography: number[] | null;
+  source: SceneGeometryProvenance;
+  quality: SceneRegionQuality;
+  locked: boolean;
+};
+export type SceneObjectFace = {
+  id: string;
+  objectId: string;
+  regionId: string;
+  planeId: string | null;
+  kind: "TOP" | "FRONT" | "SIDE" | "FOOTPRINT" | "CUSTOM";
+};
+export type SceneConstraintNodeType =
+  | "ImagePoint" | "ImageLine" | "ImageRegion" | "WorldPoint" | "WorldLine"
+  | "WorldPlane" | "SceneObject" | "ObjectFace" | "GroundPlane" | "Camera" | "Dimension";
+export type SceneConstraintType =
+  | "DISTANCE" | "HEIGHT" | "WIDTH" | "DEPTH" | "COPLANAR" | "PARALLEL"
+  | "PERPENDICULAR" | "HORIZONTAL" | "VERTICAL" | "RECTANGULAR" | "SAME_HEIGHT"
+  | "ON_FLOOR" | "ON_PLANE" | "SHARED_EDGE" | "FIXED_POINT" | "USER_CONFIRMED";
+export type SceneConstraintStatus = "ACTIVE" | "SATISFIED" | "WEAK" | "OUTLIER" | "CONFLICT" | "DISABLED";
+export type SceneConstraintNode = { id: string; type: SceneConstraintNodeType; entityId: string; };
+export type SceneGeometryConstraint = {
+  id: string;
+  type: SceneConstraintType;
+  nodeIds: string[];
+  objectId: string | null;
+  regionId: string | null;
+  target: { kind: "POINT" | "EDGE" | "REGION" | "OBJECT"; id: string | null; point: NormalizedPoint | null };
+  rawValue: number | null;
+  effectiveValue: number | null;
+  unit: "cm" | "none";
+  source: SceneGeometryProvenance;
+  weight: number;
+  useForSolver: boolean;
+  status: SceneConstraintStatus;
+  residual: number | null;
+  imageSegment: { start: NormalizedPoint; end: NormalizedPoint } | null;
+};
+export type SceneConstraintGraph = {
+  version: "scene-constraint-graph-v1.0";
+  nodes: SceneConstraintNode[];
+  constraints: SceneGeometryConstraint[];
+};
+export type CameraModelV2 = {
+  version: "camera-model-v2.0";
+  status: "UNRESOLVED" | "PARTIAL" | "PROJECTIVE" | "CALIBRATED_APPROXIMATE";
+  vanishingDirections: { x: NormalizedPoint | null; y: NormalizedPoint | null; vertical: NormalizedPoint | null };
+  evidenceQuality: EvidenceQuality;
+  intrinsicsEstimated: boolean;
+  diagnostics: string[];
+};
+export type GeometryReadinessGoal = "HUMAN_PLACEMENT" | "WORK_HEIGHT" | "REACH" | "COLLISION" | "FULL_3D";
+export type GeometryReadinessStatus = "READY" | "PARTIAL" | "NEEDS_HEIGHT" | "NEEDS_WIDTH" | "NEEDS_DEPTH" | "INSUFFICIENT" | "INVALID" | "STALE";
+export type GeometryReadiness = Record<GeometryReadinessGoal, { status: GeometryReadinessStatus; reasons: string[] }>;
+export type GeometryCorrection = {
+  id: string;
+  type: "POLYGON_ORDER" | "SNAP" | "NEAREST_FEASIBLE" | "NUMERIC_CLAMP";
+  entityId: string;
+  before: unknown;
+  after: unknown;
+  delta: number;
+  unit: "px" | "cm" | "normalized";
+  reason: string;
+};
+export type GeometryConflict = { id: string; objectId: string | null; constraintIds: string[]; code: string; message: string };
+export type NextBestMeasurement = {
+  measurementKind: MeasurementKind;
+  objectId: string | null;
+  suggestedPoints: { start: NormalizedPoint; end: NormalizedPoint } | null;
+  reason: string;
+  expectedBenefit: string;
+};
+export type ReconstructionStatus = "UNSOLVED" | "QUEUED" | "SOLVING" | "SOLVED" | "PARTIAL" | "UNDERDETERMINED" | "INCONSISTENT" | "FAILED";
+export type SceneReconstructionState = {
+  version: "scene-reconstruction-v1.0-beta.1";
+  geometryVersion: "scene-geometry-v2.0-beta.1";
+  sceneRevision: string | null;
+  status: ReconstructionStatus;
+  cameraModel: CameraModelV2;
+  readiness: GeometryReadiness;
+  objectQuality: Record<string, ObjectReconstructionQuality>;
+  constraintResiduals: Record<string, number>;
+  outlierConstraintIds: string[];
+  autoRepairs: GeometryCorrection[];
+  conflicts: GeometryConflict[];
+  missingConstraints: string[];
+  nextBestMeasurements: NextBestMeasurement[];
+  derivedDimensions: Record<string, Partial<Record<"heightCm" | "widthCm" | "depthCm", number>>>;
+  worldGeometry: Record<string, {
+    status: ObjectReconstructionQuality | "PROJECTIVE" | "PARTIAL";
+    cornersCm: Vector3Cm[];
+    polygonCm?: Vector3Cm[];
+    sourcePlaneId?: string | null;
+  }>;
+  verticalScaleModel: {
+    kind: "UNRESOLVED" | "ROBUST_CONSTANT" | "INVERSE_AFFINE_VERTICAL" | "FALLBACK_LOCAL";
+    pixelsPerCm: number | null;
+    coefficients: [number, number] | null;
+    sourceConstraintIds: string[];
+    quality: SceneRegionQuality;
+  };
+  diagnostics: { code: string; message: string }[];
+  runtimeMs: number | null;
+  completedAt: string | null;
 };
 
 export type HumanProfilePreset = "SHORT" | "MEDIUM" | "TALL" | "CUSTOM";
@@ -215,7 +364,7 @@ export type TechnicalInsight = {
   code: "INSUFFICIENT_CALIBRATION" | "COMFORT_REACH_EXCEEDED" | "NATURAL_REACH_EXCEEDED" | "MISSING_OBJECT_DIMENSION" | "CALIBRATION_REGION_MISSING" | "PERSPECTIVE_DETECTED";
   message: string; objectId: string | null; humanId: string | null;
 };
-export type SceneLayerKey = "CALIBRATION" | "OBJECT_DIMENSIONS" | "USER_MEASUREMENTS" | "HUMAN_REACH" | "SUGGESTIONS" | "DEBUG";
+export type SceneLayerKey = "OBJECTS" | "SURFACES" | "SOLVER" | "FLOOR" | "CALIBRATION" | "OBJECT_DIMENSIONS" | "USER_MEASUREMENTS" | "HUMAN_REACH" | "SUGGESTIONS" | "DEBUG";
 export type SceneViewPreset = "CLEAN" | "DIMENSIONS" | "CALIBRATION" | "HUMAN";
 export type ReachDisplayMode = "COMFORT" | "FUNCTIONAL" | "MAXIMUM";
 export type SceneViewState = { layers: Record<SceneLayerKey, boolean>; preset: SceneViewPreset; focusMode: boolean; reachMode: ReachDisplayMode };
@@ -228,10 +377,12 @@ export type WorkerDimensionSuggestion = {
 export type PerspectiveEvidence = { dominant_vertical_angle_deg: number | null; dominant_horizontal_angle_deg: number | null; vanishing_point: NormalizedPoint | null; evidence_quality: EvidenceQuality };
 
 export type SceneState = {
-  schema_version: "1.4"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
+  schema_version: "1.5"; objects: SceneObject[]; calibration: SceneCalibration; humans: SceneHuman[];
+  regions: SceneRegion[]; planes: ScenePlane[]; objectFaces: SceneObjectFace[];
+  constraintGraph: SceneConstraintGraph; reconstructionState: SceneReconstructionState;
   geometryMeasurements: GeometryMeasurement[]; workerSuggestions: WorkerDimensionSuggestion[];
   viewport: { zoom: number; pan_x: number; pan_y: number };
-  selectedObjectId: string | null; selectedHumanId: string | null; selectedReferenceId: string | null;
+  selectedObjectId: string | null; selectedHumanId: string | null; selectedReferenceId: string | null; selectedRegionId: string | null;
   reachVisible: boolean; measurementFilter: "ALL" | "ACTIVE" | "SELECTED_OBJECT" | "CALIBRATION";
   view: SceneViewState; autoSuggestDimensions: boolean; technicalInsights: TechnicalInsight[];
   scene3d: Scene3DState;

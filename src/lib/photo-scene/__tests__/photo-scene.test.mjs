@@ -21,7 +21,7 @@ function sceneObject(id = "table", type = "TABLE") {
   return { id, sourceClass: type === "TABLE" ? "dining table" : null, type, name: id, bbox: { x: .1, y: .3, width: .5, height: .4 }, detectorConfidence: null, source: "USER", status: "USER_CONFIRMED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null };
 }
 
-test("empty schema 1.4 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
+test("empty schema 1.5 scene is valid", () => assert.equal(validateSceneState(emptySceneState()), true));
 
 test("consistent non-collinear references create a perspective scale field", () => {
   const scene = emptySceneState();
@@ -175,7 +175,7 @@ test("legacy schema 1.0 is normalized to 1.3 without losing object human or refe
   const human = createHuman("Operator", "#f97316");
   const legacy = { schema_version: "1.0", objects: [{ ...sceneObject(), geometryMeasurements: undefined, interactionPoints: undefined }], calibration: { status: "PARTIALLY_CALIBRATED", floorBaseline: null, anchors: [{ id: "old", lower: { x: .2, y: .8 }, upper: { x: .2, y: .5 }, pixelDistance: 300, realDistanceCm: 100, objectId: null, source: "USER_PROVIDED" }] }, human: human.profile, pose: human.pose, viewport: { zoom: 1, pan_x: 0, pan_y: 0 } };
   const normalized = normalizeSceneState(legacy);
-  assert.equal(normalized.schema_version, "1.4");
+  assert.equal(normalized.schema_version, "1.5");
   assert.equal(normalized.objects.length, 1); assert.equal(normalized.humans.length, 1); assert.equal(normalized.calibration.references[0].valueCm, 100);
   assert.equal(validateSceneState(normalized), true);
 });
@@ -184,7 +184,7 @@ test("legacy schema 1.1 keeps multiple humans and object measurements", () => {
   const scene = emptySceneState(); scene.objects.push(sceneObject()); scene.humans.push(createHuman("A", "#f97316"), createHuman("B", "#06b6d4", "TALL"));
   const legacy = { ...scene, schema_version: "1.1", geometryMeasurements: undefined, workerSuggestions: undefined, view: undefined };
   const normalized = normalizeSceneState(legacy);
-  assert.equal(normalized.schema_version, "1.4");
+  assert.equal(normalized.schema_version, "1.5");
   assert.equal(normalized.humans.length, 2);
   assert.equal(normalized.objects.length, 1);
 });

@@ -15,6 +15,7 @@ WORKER_DIRECTORY = Path(__file__).resolve().parents[1]
 ENV_PATH = WORKER_DIRECTORY / ".env"
 READINESS_RPC = "check_pipeline_readiness_v021"
 SCENE_READINESS_RPC = "check_photo_scene_readiness_v01"
+SCENE_RECONSTRUCTION_READINESS_RPC = "check_scene_reconstruction_readiness_v1"
 FLAG_NAMES = (
     "DATABASE_READY",
     "ERGONOMICS_SCHEMA_READY",
@@ -52,6 +53,14 @@ def fetch_readiness(client: Client) -> Mapping[str, Any]:
         result["database_ready"] = False
         missing = list(result.get("missing_rpcs", []))
         missing.append("photo_scene_readiness")
+        result["missing_rpcs"] = missing
+    reconstruction_response = client.rpc(SCENE_RECONSTRUCTION_READINESS_RPC, {}).execute()
+    if not isinstance(reconstruction_response.data, Mapping):
+        raise RuntimeError("invalid_scene_reconstruction_readiness_response")
+    if reconstruction_response.data.get("ready") is not True:
+        result["database_ready"] = False
+        missing = list(result.get("missing_rpcs", []))
+        missing.append("scene_reconstruction_readiness")
         result["missing_rpcs"] = missing
     return result
 

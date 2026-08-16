@@ -1,9 +1,10 @@
 import type {
-  CalibrationReference, GeometryMeasurement, NormalizedPoint, SceneCalibration, SceneHuman,
+  CalibrationReference, GeometryMeasurement, NormalizedPoint, SceneCalibration, SceneHuman, SceneReconstructionState,
 } from "../../types/photo-scene";
 import { estimateLocalScale, getCalibrationCoverageAt as calibrationCoverageAt } from "./calibration.ts";
 import { getGroundPlaneStatus, getProjectedHuman, type ProjectedHuman } from "./human-projection.ts";
 import { validateMeasurementForCalibration } from "./measurement-semantics.ts";
+import { getReconstructedVerticalScale } from "./scene-reconstruction.ts";
 
 export type VerticalScaleAtPoint = {
   pixelsPerCm: number | null;
@@ -18,18 +19,24 @@ export type SceneWorldModel = {
   imageWidth: number;
   imageHeight: number;
   verticalReferenceIds: string[];
+  reconstruction: SceneReconstructionState | null;
 };
 
-export function createSceneWorldModel(calibration: SceneCalibration, imageWidth: number, imageHeight: number): SceneWorldModel {
+export function createSceneWorldModel(calibration: SceneCalibration, imageWidth: number, imageHeight: number, reconstruction: SceneReconstructionState | null = null): SceneWorldModel {
   return {
     calibration,
     imageWidth,
     imageHeight,
     verticalReferenceIds: calibration.references.filter((reference) => validateMeasurementForCalibration(reference).valid).map((reference) => reference.id),
+    reconstruction,
   };
 }
 
 export function getVerticalScaleAt(model: SceneWorldModel, point: NormalizedPoint): VerticalScaleAtPoint {
+  if (model.reconstruction) {
+    const reconstructed = getReconstructedVerticalScale({ reconstructionState: model.reconstruction }, point);
+    if (reconstructed) return reconstructed;
+  }
   const coverage = getCalibrationCoverageAt(model, point);
   const estimate = estimateLocalScale(model.calibration, point, model.imageWidth, model.imageHeight);
   return {
