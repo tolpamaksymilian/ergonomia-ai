@@ -12,7 +12,7 @@ import { createHuman3DState } from "./human-3d-model.ts";
 import { geometry3dFromSceneObject } from "./object-3d-model.ts";
 import { createEmptyConstraintGraph, emptyReconstructionState, regionPoint } from "./scene-reconstruction.ts";
 
-const objectTypes = new Set(["WORK_SURFACE", "TABLE", "SHELF", "RACK", "CHAIR", "STOOL", "CONVEYOR", "MACHINE", "CONTROL_PANEL", "MONITOR", "CONTAINER", "PALLET", "WORK_ZONE", "HANDLE", "OTHER"]);
+const objectTypes = new Set(["WORK_SURFACE", "TABLE", "SHELF", "RACK", "CHAIR", "STOOL", "CONVEYOR", "MACHINE", "CONTROL_PANEL", "MONITOR", "CONTAINER", "PALLET", "WORK_ZONE", "HANDLE", "TOOL", "OBSTACLE", "OTHER"]);
 const dimensionKeys: ObjectDimensionKey[] = ["heightCm", "widthCm", "depthCm", "workSurfaceHeightCm", "lowerEdgeHeightCm", "upperEdgeHeightCm", "seatHeightCm", "seatWidthCm", "backrestHeightCm", "seatDepthCm", "screenCenterHeightCm", "screenHeightCm", "userDistanceCm", "keyShelfHeightCm", "workingWidthCm", "controlHeightCm"];
 const measurementKinds = new Set(["VERTICAL_HEIGHT", "HORIZONTAL_WIDTH", "DEPTH", "FLOOR_DISTANCE", "OBJECT_HEIGHT", "OBJECT_WIDTH", "OBJECT_DEPTH", "WORK_SURFACE_HEIGHT", "SHELF_HEIGHT", "SEAT_HEIGHT", "SCREEN_HEIGHT", "CUSTOM_DISTANCE"]);
 const measurementAxes = new Set(["VERTICAL", "HORIZONTAL", "GROUND_X", "GROUND_Y", "ARBITRARY"]);

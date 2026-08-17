@@ -22,19 +22,20 @@ export type GuidedReferenceInput = {
 };
 
 export function GuidedCalibrationForm({
-  start, end, objectName, verticalDirection, onSave, onCancel,
+  start, end, objectName, verticalDirection, initialType = "HEIGHT", onSave, onCancel,
 }: {
   start: NormalizedPoint;
   end: NormalizedPoint;
   objectName: string | null;
   verticalDirection: NormalizedPoint | null;
+  initialType?: ReferenceDimensionType;
   onSave: (input: GuidedReferenceInput) => void;
   onCancel: () => void;
 }) {
-  const [type, setType] = useState<ReferenceDimensionType>("HEIGHT");
-  const [name, setName] = useState(objectName ? `Wymiar: ${objectName}` : "Wysokość referencyjna");
+  const [type, setType] = useState<ReferenceDimensionType>(initialType);
+  const [name, setName] = useState(objectName ? `Wymiar: ${objectName}` : defaultReferenceName(initialType));
   const [value, setValue] = useState("");
-  const [useForCalibration, setUseForCalibration] = useState(true);
+  const [useForCalibration, setUseForCalibration] = useState(() => semanticsForReferenceType(initialType).axis === "VERTICAL");
   const [warningConfirmed, setWarningConfirmed] = useState(false);
   const semantics = useMemo(() => semanticsForReferenceType(type), [type]);
   const warning = measurementDirectionWarning(start, end, semantics, verticalDirection);
@@ -91,3 +92,16 @@ function Diagram({ title, lines, text }: { title: string; lines: string[]; text:
 }
 
 const controlClass = "mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
+function defaultReferenceName(type: ReferenceDimensionType) {
+  return ({
+    HEIGHT: "Wysokość referencyjna",
+    WORK_SURFACE_HEIGHT: "Wysokość blatu",
+    SHELF_HEIGHT: "Wysokość półki",
+    REACH_HEIGHT: "Wysokość punktu nad podłogą",
+    WIDTH: "Szerokość referencyjna",
+    DEPTH: "Głębokość referencyjna",
+    DISTANCE: "Odległość po podłodze",
+    CUSTOM: "Inny wymiar",
+  })[type];
+}

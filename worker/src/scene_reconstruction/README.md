@@ -24,7 +24,7 @@ Moduł nie używa GPU, modeli AI ani FFmpeg. Nie wykonuje scoringu ergonomiczneg
 
 ## Kontrakt i kolejka
 
-Polecenie „Analizuj zdjęcie” pozostaje osobnym etapem detekcji. „Oblicz geometrię sceny” zapisuje bieżący schemat 1.5 i atomowo ustawia `reconstruction_status = QUEUED`. Scene Reconstruction Worker przejmuje rekord przez `FOR UPDATE SKIP LOCKED`, ustawia `SOLVING`, raportuje heartbeat i kończy stanem `SOLVED`, `PARTIAL`, `UNDERDETERMINED` albo `INCONSISTENT`.
+W domyślnym Guided Setup jedno polecenie „Rozpoznaj i zbuduj scenę” uruchamia najpierw detekcję z kontekstem użytkownika, a po jej poprawnym zakończeniu atomowo ustawia `reconstruction_status = QUEUED`. Tryb zaawansowany zachowuje osobne polecenia detekcji i rekonstrukcji. Scene Reconstruction Worker przejmuje rekord przez `FOR UPDATE SKIP LOCKED`, ustawia `SOLVING`, raportuje heartbeat i kończy stanem `SOLVED`, `PARTIAL`, `UNDERDETERMINED` albo `INCONSISTENT`.
 
 Worker wykorzystuje znormalizowane punkty obrazu, regiony, powiązania obiektów, jawne wymiary i zapisane dowody Scene Detection. Nie pobiera filmu ani nie uruchamia pipeline’u VIDEO. Brakujące wymiary pozostają `UNKNOWN`; wynik wskazuje jeden `NextBestMeasurement` zamiast podstawiać typową wartość.
 

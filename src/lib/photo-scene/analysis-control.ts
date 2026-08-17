@@ -94,7 +94,9 @@ export function intersectionOverUnion(first: NormalizedBox, second: NormalizedBo
 function bestObjectMatch(objects: SceneObject[], candidate: SceneDetectionCandidate) {
   return objects
     .map((object) => ({ object, overlap: intersectionOverUnion(object.bbox, candidate.bounding_box) }))
-    .filter(({ object, overlap }) => overlap >= 0.58 && (object.type === candidate.suggested_scene_type || object.sourceClass === candidate.source_class))
+    .filter(({ object, overlap }) => object.source === "USER"
+      ? overlap >= 0.45
+      : overlap >= 0.58 && (object.type === candidate.suggested_scene_type || object.sourceClass === candidate.source_class))
     .sort((left, right) => right.overlap - left.overlap)[0]?.object ?? null;
 }
 

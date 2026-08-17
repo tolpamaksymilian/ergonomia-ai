@@ -75,7 +75,7 @@ export function PhotoSceneCreateForm({ userId, workstations, categories }: { use
       const { error: finalizeError } = await supabase.rpc("finalize_photo_scene_upload", {
         p_analysis_id: analysisId, p_image_width: metadata.width, p_image_height: metadata.height, p_image_orientation: metadata.orientation,
       });
-      if (finalizeError) throw new Error(`Nie udało się uruchomić detekcji sceny: ${finalizeError.message}`);
+      if (finalizeError) throw new Error(`Nie udało się przygotować konfiguracji sceny: ${finalizeError.message}`);
       router.push(`/panel/analizy/${analysisId}/scena`); router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Nie udało się utworzyć projektu.");
@@ -83,8 +83,8 @@ export function PhotoSceneCreateForm({ userId, workstations, categories }: { use
   }
 
   return <form onSubmit={submit} className="ui-card space-y-7 p-6 sm:p-8">
-    <header><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Photo Scenario Builder · Beta</p><h2 className="mt-2 text-2xl font-bold">Informacje i zdjęcie</h2><p className="mt-2 text-sm text-muted-foreground">Po zapisie detektor przygotuje kandydatów, których potwierdzisz lub poprawisz ręcznie.</p></header>
-    <ol className="grid grid-cols-3 gap-2 text-center text-[11px] sm:grid-cols-6">{["Informacje", "Zdjęcie", "Elementy", "Kalibracja", "Człowiek", "Edytor"].map((step, index) => <li key={step} className={`rounded-xl border px-2 py-2 ${index < 2 ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}>{index + 1}. {step}</li>)}</ol>
+    <header><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Photo Scene Builder · Beta</p><h2 className="mt-2 text-2xl font-bold">Informacje i zdjęcie</h2><p className="mt-2 text-sm text-muted-foreground">Po zapisie najpierw pokażesz systemowi podłogę i znane wymiary. Worker uruchomi się dopiero na Twoje polecenie.</p></header>
+    <ol className="grid grid-cols-3 gap-2 text-center text-[10px] lg:grid-cols-9">{["Zdjęcie", "Podłoga", "Wysokości", "Wymiary", "Obiekty", "Worker", "Weryfikacja", "Operator", "Ergonomia"].map((step, index) => <li key={step} className={`rounded-xl border px-2 py-2 ${index === 0 ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}>{index + 1}. {step}</li>)}</ol>
     <div className="grid gap-5 md:grid-cols-2">
       <label className="text-sm font-semibold">Nazwa projektu<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} required className="mt-2 min-h-11 w-full rounded-xl border border-border bg-card px-3" /></label>
       <label className="text-sm font-semibold">Stanowisko<select value={workstationId} onChange={(e) => setWorkstationId(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-card px-3"><option value="">Bez przypisania</option>{workstations.map((item) => <option key={item.id} value={item.id}>{item.name}{item.code ? ` · ${item.code}` : ""}</option>)}</select></label>
@@ -97,7 +97,7 @@ export function PhotoSceneCreateForm({ userId, workstations, categories }: { use
     {file && metadata && <div className="flex items-center gap-3 rounded-xl border border-green-300 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200"><Check className="size-5" />{file.name} · {metadata.width}×{metadata.height}px</div>}
     {error && <div role="alert" className="flex gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><TriangleAlert className="size-5 shrink-0" />{error}</div>}
     <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">Zdjęcie jest obrazem 2D. Detekcja wymaga potwierdzenia, a rzeczywiste wymiary wymagają ręcznej kalibracji. Ten moduł nie wykonuje jeszcze oceny ergonomicznej.</div>
-    <button type="submit" disabled={busy || !file} className="ui-button-primary w-full justify-center disabled:opacity-50">{busy ? <><LoaderCircle className="size-5 animate-spin" />Tworzenie projektu…</> : "Zapisz zdjęcie i otwórz edytor"}</button>
+    <button type="submit" disabled={busy || !file} className="ui-button-primary w-full justify-center disabled:opacity-50">{busy ? <><LoaderCircle className="size-5 animate-spin" />Tworzenie projektu…</> : "Dalej — oznacz podłogę"}</button>
   </form>;
 }
 

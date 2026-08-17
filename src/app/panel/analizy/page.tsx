@@ -126,5 +126,5 @@ function values(value: string | string[] | undefined) { return Array.isArray(val
 function uuid(value: string | undefined): value is string { return Boolean(value && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)); }
 function clean(value: string | undefined, max: number) { return (value ?? "").trim().slice(0,max).replace(/[,%()]/g, " "); }
 function formatDate(value: string) { return new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium" }).format(new Date(value)); }
-function sceneStatus(stage: string | null) { return stage === "scene-ready" ? "Scena gotowa" : stage === "scene-detection-failed" ? "Tryb ręczny" : stage === "scene-detection-processing" ? "Wykrywanie" : "W kolejce"; }
+function sceneStatus(stage: string | null) { return stage === "photo-scene-setup" ? "Konfiguracja" : stage === "scene-ready" ? "Scena gotowa" : stage === "scene-detection-failed" ? "Tryb ręczny" : stage === "scene-detection-processing" ? "Wykrywanie" : "W kolejce"; }
 function pageHref(raw: Params, page: number) { const params = new URLSearchParams(); for (const [key,value] of Object.entries(raw)) for (const item of values(value)) if (item) params.append(key,item); params.set("page",String(page)); return `/panel/analizy?${params}`; }

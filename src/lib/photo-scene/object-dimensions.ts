@@ -19,7 +19,10 @@ export const OBJECT_DIMENSIONS: Record<SceneObjectType, DimensionDefinition[]> =
   MACHINE: [...common, { key: "controlHeightCm", label: "Wysokość panelu roboczego", priority: "CRITICAL" }], CONTROL_PANEL: [{ key: "controlHeightCm", label: "Wysokość środka panelu", priority: "CRITICAL" }, ...common.slice(1)],
   CONTAINER: common, CONVEYOR: [{ key: "workSurfaceHeightCm", label: "Wysokość transportowa", priority: "CRITICAL" }, ...common.slice(1)],
   PALLET: common, WORK_ZONE: [{ key: "workingWidthCm", label: "Szerokość robocza", priority: "CRITICAL" }, { key: "depthCm", label: "Głębokość strefy", priority: "RECOMMENDED" }],
-  HANDLE: [{ key: "heightCm", label: "Wysokość uchwytu", priority: "CRITICAL" }], OTHER: common,
+  HANDLE: [{ key: "heightCm", label: "Wysokość uchwytu", priority: "CRITICAL" }],
+  TOOL: [{ key: "heightCm", label: "Wysokość odkładania", priority: "RECOMMENDED" }, { key: "widthCm", label: "Szerokość", priority: "OPTIONAL" }, { key: "depthCm", label: "Głębokość", priority: "OPTIONAL" }],
+  OBSTACLE: common,
+  OTHER: common,
 };
 
 export function dimensionsFor(type: SceneObjectType) { return OBJECT_DIMENSIONS[type]; }

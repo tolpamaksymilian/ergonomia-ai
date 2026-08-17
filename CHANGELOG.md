@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0-beta.1] - 2026-08-16
+
+- Przebudowano domyślne PHOTO_SCENE jako dziewięcioetapowy Guided Scene Setup: zdjęcie → podłoga i pole pracy → wysokości → opcjonalne wymiary → obiekty → Worker → weryfikacja → operator → ergonomia.
+- Nowe zdjęcie nie uruchamia już automatycznie Workera. Jedno CTA „Rozpoznaj i zbuduj scenę” przekazuje kontekst użytkownika do detekcji i kolejkuje istniejącą rekonstrukcję.
+- Dodano walidację minimum dwóch pionowych wysokości, poradę o ich przestrzennym rozłożeniu, polygonowe oznaczanie obiektów oraz jawne kojarzenie wcześniejszych wymiarów z obiektami.
+- Scene Detection v0.3 wykorzystuje ręczne adnotacje, filtruje nakładające się kandydaty i nigdy nie zastępuje danych `USER_PROVIDED`.
+- Zachowano Scene Schema 1.5, istniejący robust solver, Digital Human 3D, Scene Ergonomics oraz pełną ścieżkę VIDEO.
+
 ## [0.20.0-beta.1] - 2026-08-16
 
 - Dodano Scene Schema 1.5 z regionami, płaszczyznami, ścianami obiektów i Constraint Graph.

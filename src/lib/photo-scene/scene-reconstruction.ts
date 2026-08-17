@@ -54,6 +54,7 @@ export function emptyReconstructionState(): SceneReconstructionState {
     nextBestMeasurements: [], derivedDimensions: {}, worldGeometry: {},
     verticalScaleModel: { kind: "UNRESOLVED", pixelsPerCm: null, coefficients: null, sourceConstraintIds: [], quality: "UNKNOWN" },
     diagnostics: [], runtimeMs: null, completedAt: null,
+    reviewStatus: "UNREVIEWED", reviewedSceneRevision: null, reviewedAt: null,
   };
 }
 

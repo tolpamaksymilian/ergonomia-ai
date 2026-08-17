@@ -50,7 +50,7 @@ export type Scene3DState = {
 export type SceneObjectType =
   | "WORK_SURFACE" | "TABLE" | "SHELF" | "RACK" | "CHAIR" | "STOOL"
   | "CONVEYOR" | "MACHINE" | "CONTROL_PANEL" | "MONITOR" | "CONTAINER"
-  | "PALLET" | "WORK_ZONE" | "HANDLE" | "OTHER";
+  | "PALLET" | "WORK_ZONE" | "HANDLE" | "TOOL" | "OBSTACLE" | "OTHER";
 export type SceneObjectStatus = "DETECTED" | "USER_CONFIRMED" | "USER_MODIFIED" | "USER_ADDED" | "USER_REJECTED";
 export type ObjectDimensionKey =
   | "heightCm" | "widthCm" | "depthCm" | "workSurfaceHeightCm" | "lowerEdgeHeightCm"
@@ -295,6 +295,9 @@ export type SceneReconstructionState = {
   diagnostics: { code: string; message: string }[];
   runtimeMs: number | null;
   completedAt: string | null;
+  reviewStatus?: "UNREVIEWED" | "USER_REVIEWED";
+  reviewedSceneRevision?: string | null;
+  reviewedAt?: string | null;
 };
 
 export type HumanProfilePreset = "SHORT" | "MEDIUM" | "TALL" | "CUSTOM";
@@ -391,10 +394,21 @@ export type SceneState = {
 export type SceneDetectionCandidate = { id: string; source_class: string; suggested_scene_type: SceneObjectType; bounding_box: NormalizedBox; confidence: number | null; source: "YOLOX_X_COCO"; status: "DETECTED" };
 export type GeometryCandidate = { id: string; start: NormalizedPoint; end: NormalizedPoint; orientation: GeometryOrientation; evidence_quality: EvidenceQuality };
 export type SceneDetection = {
-  schema_version: "1.0"; detection_version: "scene-detection-v0.1-beta.1" | "scene-detection-v0.2-beta.1";
+  schema_version: "1.0"; detection_version: "scene-detection-v0.1-beta.1" | "scene-detection-v0.2-beta.1" | "scene-detection-v0.3-beta.1";
   result_status?: "SUCCESS" | "SUCCESS_NO_OBJECTS";
   analysis_id: string; source_image: { width: number; height: number }; candidates: SceneDetectionCandidate[];
   geometry_candidates?: GeometryCandidate[]; dimension_suggestions?: WorkerDimensionSuggestion[];
   perspective_evidence?: PerspectiveEvidence; floor_candidates?: GeometryCandidate[]; surface_candidates?: GeometryCandidate[];
+  user_annotation_context?: {
+    contract_version: "guided-scene-worker-context-v1.0";
+    scene_revision: string | null;
+    floor_region_count: number;
+    movement_zone_count: number;
+    height_reference_count: number;
+    dimension_reference_count: number;
+    manual_object_count: number;
+    manual_surface_count: number;
+    constraint_count: number;
+  };
   limitations: string[];
 };

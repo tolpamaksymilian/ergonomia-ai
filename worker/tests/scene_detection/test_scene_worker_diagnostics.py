@@ -21,6 +21,8 @@ def test_worker_exposes_real_queue_safe_self_test():
     assert '"--self-test"' in source
     assert "detector_candidates(self.detector_instance(), decoded)" in source
     assert "analyze_scene_geometry(decoded, candidates)" in source
+    assert "_load_user_annotations(analysis_id)" in source
+    assert "filter_candidates_against_user_annotations" in source
     assert "claim()" not in source[source.index("def self_test"):source.index("def run")]
 
 

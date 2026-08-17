@@ -13,6 +13,8 @@ import { HumanMannequin, type HumanDragKind } from "@/components/photo-scene/hum
 import { SceneErgonomicsPanel } from "@/components/photo-scene/scene-ergonomics-panel";
 import { GeometryPanel, ObjectGeometryV3Panel, ReconstructionProgress } from "@/components/photo-scene/scene-geometry-panel";
 import { CalibrationHelp, GuidedCalibrationForm, GuidedCanvasInstruction, type GuidedReferenceInput } from "@/components/photo-scene/guided-calibration";
+import { GuidedSceneSetup } from "@/components/photo-scene/guided-scene-setup";
+import { SceneSetupStepper } from "@/components/photo-scene/scene-setup-stepper";
 import { HUMAN_PRESETS, createConstraintGraph, createHuman, profileFromHeight, profileWithArmSpan, repairHumanModel, resetHumanPose, withUserSegment } from "@/lib/photo-scene/anthropometry";
 import { derivePhotoAnalysisUi, mergeSceneDetection } from "@/lib/photo-scene/analysis-control";
 import { calibrationAssistant, calibrationQuality, calibrationStatus, duplicateReference, rebuildPerspectiveField, referencePixelDistance } from "@/lib/photo-scene/calibration";
@@ -31,6 +33,12 @@ import { getSceneCollisions } from "@/lib/photo-scene/collision-3d";
 import { getMotionPathResult } from "@/lib/photo-scene/motion-3d";
 import { createHuman3DState, getHumanJointPositions3d, setHumanJointRotation, setHumanRoot } from "@/lib/photo-scene/human-3d-model";
 import { createSceneRegion, nearestFeasiblePoint, regionPoint } from "@/lib/photo-scene/scene-reconstruction";
+import {
+  bboxFromPolygon,
+  createMovementZoneFromFloor,
+  deriveGuidedSetupStatus,
+  type GuidedSceneStepId,
+} from "@/lib/photo-scene/guided-setup";
 import { attachObjectToHand, attachObjectTwoHanded, releaseObjectFromHand } from "@/lib/photo-scene/object-interaction-3d";
 import type {
   CalibrationReference, FingerName, GeometryMeasurement, HumanJointName, HumanPosture, NormalizedBox,
@@ -45,12 +53,15 @@ type Tool = "SELECT" | "PAN" | "ADD_OBJECT" | "FLOOR" | "REGION" | "REFERENCE" |
 type Tab = "SCENE" | "OBJECTS" | "HUMANS" | "INTERACTIONS" | "ERGONOMICS" | "DIMENSIONS" | "SUGGESTIONS";
 type DraftMeasurement = { start: NormalizedPoint; end: NormalizedPoint; objectId: string | null; regionId: string | null };
 type Drag = { kind: HumanDragKind | "OBJECT" | "RESIZE" | "PAN"; id?: string; joint?: HumanJointName; start: NormalizedPoint; startScreen: { x: number; y: number }; snapshot: SceneState };
+type EditorMode = "GUIDED" | "ADVANCED";
+type GuidedObjectDraft = { type: SceneObjectType; name: string; regionType: SceneRegionType };
 
 const objectLabels: Record<SceneObjectType, string> = {
   WORK_SURFACE: "Powierzchnia robocza", TABLE: "Stół", SHELF: "Półka", RACK: "Regał",
   CHAIR: "Krzesło", STOOL: "Stołek", CONVEYOR: "Przenośnik", MACHINE: "Maszyna",
   CONTROL_PANEL: "Panel sterowania", MONITOR: "Monitor", CONTAINER: "Pojemnik",
-  PALLET: "Paleta", WORK_ZONE: "Strefa robocza", HANDLE: "Uchwyt", OTHER: "Inny",
+  PALLET: "Paleta", WORK_ZONE: "Strefa robocza", HANDLE: "Uchwyt", TOOL: "Narzędzie",
+  OBSTACLE: "Przeszkoda", OTHER: "Inny",
 };
 const referenceLabels: Record<ReferenceDimensionType, string> = {
   HEIGHT: "Wysokość", WIDTH: "Szerokość", DEPTH: "Głębokość", DISTANCE: "Odległość",
@@ -71,6 +82,8 @@ export function PhotoSceneEditor(props: {
   const router = useRouter();
   const initial = useMemo(() => refreshInsights(mergeSceneDetection(props.initialState, props.detection)), [props.initialState, props.detection]);
   const [state, setState] = useState(initial);
+  const [editorMode, setEditorMode] = useState<EditorMode>("GUIDED");
+  const [guidedStep, setGuidedStep] = useState<GuidedSceneStepId>(() => deriveGuidedSetupStatus(initial).recommendedStep);
   const [history, setHistory] = useState<SceneState[]>([]), [future, setFuture] = useState<SceneState[]>([]);
   const [tool, setTool] = useState<Tool>("SELECT"), [tab, setTab] = useState<Tab>("SCENE");
   const [saveStatus, setSaveStatus] = useState<"SAVED" | "DIRTY" | "SAVING" | "ERROR">("SAVED");
@@ -84,6 +97,9 @@ export function PhotoSceneEditor(props: {
   const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
   const [ergonomicFocus, setErgonomicFocus] = useState<BodyRegion | null>(null);
   const [guidedCalibration, setGuidedCalibration] = useState(false);
+  const [guidedReferenceType, setGuidedReferenceType] = useState<ReferenceDimensionType>("HEIGHT");
+  const [referenceBeingReplaced, setReferenceBeingReplaced] = useState<string | null>(null);
+  const [guidedObjectDraft, setGuidedObjectDraft] = useState<GuidedObjectDraft | null>(null);
   const [floorMode, setFloorMode] = useState<"BASIC" | "QUADRILATERAL">("BASIC");
   const [floorPoints, setFloorPoints] = useState<NormalizedPoint[]>([]);
   const [regionPoints, setRegionPoints] = useState<SceneRegionPoint[]>([]);
@@ -113,9 +129,14 @@ export function PhotoSceneEditor(props: {
     () => false,
   );
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const guidedBuildLockRef = useRef(false);
   const latestRef = useRef(state);
   const previewStateRef = useRef<SceneState | null>(null), animationFrameRef = useRef<number | null>(null);
   useEffect(() => { latestRef.current = state; }, [state]);
+  useEffect(() => {
+    guidedBuildLockRef.current = ["ready-for-scene-detection", "scene-detection-processing"].includes(props.processingStage ?? "")
+      || ["QUEUED", "SOLVING"].includes(props.reconstructionStatus ?? state.reconstructionState.status);
+  }, [props.processingStage, props.reconstructionStatus, state.reconstructionState.status]);
   useEffect(() => {
     const incoming = props.initialState.reconstructionState;
     const current = latestRef.current.reconstructionState;
@@ -190,12 +211,16 @@ export function PhotoSceneEditor(props: {
   const commit = useCallback((next: SceneState) => {
     const previous = latestRef.current;
     const geometryChanged = previous.objects !== next.objects || previous.regions !== next.regions || previous.planes !== next.planes || previous.calibration !== next.calibration || previous.constraintGraph !== next.constraintGraph;
+    if (geometryChanged && guidedBuildLockRef.current) {
+      setReconstructionError("Poczekaj na zakończenie budowania sceny przed zmianą danych wejściowych.");
+      return;
+    }
     if (geometryChanged && ["QUEUED", "SOLVING"].includes(previous.reconstructionState.status)) {
       setReconstructionError("Poczekaj na zakończenie rekonstrukcji przed zmianą geometrii.");
       return;
     }
     const invalidated = geometryChanged && ["SOLVED", "PARTIAL", "UNDERDETERMINED", "INCONSISTENT"].includes(previous.reconstructionState.status)
-      ? { ...next, reconstructionState: { ...next.reconstructionState, status: "UNSOLVED" as const, readiness: Object.fromEntries(Object.entries(next.reconstructionState.readiness).map(([goal, item]) => [goal, { ...item, status: "STALE", reasons: ["Geometria zmieniła się — przelicz model."] }])) as SceneState["reconstructionState"]["readiness"] } }
+      ? { ...next, reconstructionState: { ...next.reconstructionState, status: "UNSOLVED" as const, reviewStatus: "UNREVIEWED" as const, reviewedSceneRevision: null, reviewedAt: null, readiness: Object.fromEntries(Object.entries(next.reconstructionState.readiness).map(([goal, item]) => [goal, { ...item, status: "STALE", reasons: ["Geometria zmieniła się — przelicz model."] }])) as SceneState["reconstructionState"]["readiness"] } }
       : next;
     setHistory((items) => [...items.slice(-49), previous]); setFuture([]);
     const refreshed = refreshInsights(invalidated); setState(refreshed); latestRef.current = refreshed; setSaveStatus("DIRTY");
@@ -216,7 +241,7 @@ export function PhotoSceneEditor(props: {
       if ((event.target as HTMLElement | null)?.matches("input, textarea, select")) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
-      if (event.key === "Escape") { setDraftMeasurement(null); setDraftStart(null); setFloorPoints([]); setRegionPoints([]); setGuidedCalibration(false); setTool("SELECT"); }
+      if (event.key === "Escape") { setDraftMeasurement(null); setDraftStart(null); setFloorPoints([]); setRegionPoints([]); setGuidedCalibration(false); setGuidedObjectDraft(null); setReferenceBeingReplaced(null); setTool("SELECT"); }
       if (event.key === "Enter" && tool === "REGION" && regionPoints.length >= 3) { event.preventDefault(); finishRegion(); }
       const shortcut = event.key.toLowerCase();
       if (shortcut === "v") setTool("SELECT"); if (shortcut === "h") setTool("PAN");
@@ -230,15 +255,28 @@ export function PhotoSceneEditor(props: {
 
   function finishRegion() {
     if (regionPoints.length < 3) return;
-    const region = createSceneRegion({ type: regionType, label: regionLabel(regionType), points: regionPoints.map((item) => item.raw), associatedObjectId: state.selectedObjectId });
+    const polygon = regionPoints.map((item) => item.raw);
+    const createdObject = guidedObjectDraft ? newObject(bboxFromPolygon(polygon), guidedObjectDraft.type, guidedObjectDraft.name) : null;
+    const associatedObjectId = createdObject?.id ?? state.selectedObjectId;
+    const region = createSceneRegion({ type: regionType, label: guidedObjectDraft?.name ?? regionLabel(regionType), points: polygon, associatedObjectId });
     region.polygonImageNormalized = regionPoints;
+    const replacingGuidedRegion = editorMode === "GUIDED" && ["FLOOR_REGION", "MOVEMENT_ZONE"].includes(regionType);
+    let regions = [...(replacingGuidedRegion ? state.regions.filter((item) => item.type !== regionType) : state.regions), region];
+    if (regionType === "FLOOR_REGION" && !regions.some((item) => item.type === "MOVEMENT_ZONE")) regions = [...regions, createMovementZoneFromFloor(region)];
+    const objects = createdObject
+      ? [...state.objects, { ...createdObject, regionIds: [region.id] }]
+      : state.objects.map((object) => object.id === associatedObjectId ? { ...object, regionIds: [...new Set([...object.regionIds, region.id])] } : object);
+    const calibration = regionType === "FLOOR_REGION" ? {
+      ...state.calibration,
+      floorBaseline: { start: polygon[0], end: polygon[1] },
+      floorPlane: { mode: "QUADRILATERAL" as const, points: polygon, actualGroundDimensionCm: null, mappingStatus: "ORIENTATION_ONLY" as const },
+    } : state.calibration;
     commit({
-      ...state, regions: [...state.regions, region], selectedRegionId: region.id,
-      objects: state.objects.map((object) => object.id === state.selectedObjectId ? { ...object, regionIds: [...new Set([...object.regionIds, region.id])] } : object),
+      ...state, regions, objects, calibration, selectedRegionId: region.id, selectedObjectId: associatedObjectId,
       reconstructionState: { ...state.reconstructionState, status: "UNSOLVED" },
     });
-    setRegionPoints([]); setTool("SELECT");
-    setTab(regionType === "MOVEMENT_ZONE" || regionType === "STANDING_ZONE" ? "HUMANS" : "OBJECTS");
+    setRegionPoints([]); setGuidedObjectDraft(null); setTool("SELECT");
+    if (editorMode === "ADVANCED") setTab(regionType === "MOVEMENT_ZONE" || regionType === "STANDING_ZONE" ? "HUMANS" : "OBJECTS");
   }
 
   function transformFor(viewport = state.viewport) {
@@ -262,7 +300,7 @@ export function PhotoSceneEditor(props: {
   }
   function pointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (!geometryReady) return;
-    if (["QUEUED", "SOLVING"].includes(state.reconstructionState.status) && ["ADD_OBJECT", "FLOOR", "REGION", "REFERENCE"].includes(tool)) { setReconstructionError("Poczekaj na zakończenie rekonstrukcji przed zmianą geometrii."); return; }
+    if ((guidedBuildLockRef.current || ["QUEUED", "SOLVING"].includes(state.reconstructionState.status)) && ["ADD_OBJECT", "FLOOR", "REGION", "REFERENCE"].includes(tool)) { setReconstructionError("Poczekaj na zakończenie budowania sceny przed zmianą geometrii."); return; }
     if (event.target !== event.currentTarget && !["ADD_OBJECT", "FLOOR", "REGION", "REFERENCE", "HUMAN"].includes(tool)) return;
     const coordinates = coordinatesFor(event, tool === "PAN");
     if (!coordinates) { setPointerOutside(true); return; }
@@ -319,11 +357,11 @@ export function PhotoSceneEditor(props: {
     const ordered = orderedHeightPoints(draftMeasurement.start, draftMeasurement.end, state.calibration.verticalDirection);
     const vertical = input.axis === "VERTICAL";
     const reference: CalibrationReference = {
-      id: crypto.randomUUID(), name: input.name.trim() || referenceLabels[input.type], dimensionType: input.type,
+      id: referenceBeingReplaced ?? crypto.randomUUID(), name: input.name.trim() || referenceLabels[input.type], dimensionType: input.type,
       valueCm: input.valueCm, unit: "cm", start: draftMeasurement.start, end: draftMeasurement.end,
       pixelDistance: referencePixelDistance(draftMeasurement.start, draftMeasurement.end, imageWidth, imageHeight), objectId: draftMeasurement.objectId,
       active: true, visible: true, locked: false, measurementKind: input.measurementKind, axis: input.axis,
-      plane: input.plane, purpose: input.purpose, useForCalibration: vertical && input.useForCalibration,
+      plane: input.plane, purpose: vertical && input.useForCalibration ? "CALIBRATION" : input.purpose, useForCalibration: vertical && input.useForCalibration,
       semanticStatus: "CONFIRMED", worldAnchors: vertical ? {
         bottom: { id: crypto.randomUUID(), imagePoint: ordered.bottom, worldHeightCm: 0, role: "BOTTOM" },
         top: { id: crypto.randomUUID(), imagePoint: ordered.top, worldHeightCm: input.valueCm, role: "TOP" },
@@ -331,7 +369,10 @@ export function PhotoSceneEditor(props: {
       source: "USER_PROVIDED", residual: null, residualStatus: "UNASSESSED", manualOverride: false,
     };
     update((current) => {
-      const calibration = { ...current.calibration, references: [...current.calibration.references, reference] };
+      const references = referenceBeingReplaced
+        ? current.calibration.references.map((item) => item.id === referenceBeingReplaced ? reference : item)
+        : [...current.calibration.references, reference];
+      const calibration = { ...current.calibration, references };
       calibration.status = calibrationStatus(calibration);
       const constraint: SceneGeometryConstraint = {
         id: `reference:${reference.id}`, type: reference.axis === "VERTICAL" ? "HEIGHT" : reference.axis === "GROUND_Y" ? "DEPTH" : reference.axis === "HORIZONTAL" || reference.axis === "GROUND_X" ? "WIDTH" : "DISTANCE",
@@ -341,9 +382,12 @@ export function PhotoSceneEditor(props: {
         status: reference.axis !== "VERTICAL" || reference.useForCalibration ? "ACTIVE" : "DISABLED", residual: null,
         imageSegment: { start: reference.start, end: reference.end },
       };
-      return rescaleLockedHumans({ ...current, calibration, constraintGraph: { ...current.constraintGraph, constraints: [...current.constraintGraph.constraints, constraint] }, reconstructionState: { ...current.reconstructionState, status: "UNSOLVED" } }, imageWidth, imageHeight);
+      const constraints = referenceBeingReplaced
+        ? [...current.constraintGraph.constraints.filter((item) => item.target.id !== referenceBeingReplaced), constraint]
+        : [...current.constraintGraph.constraints, constraint];
+      return rescaleLockedHumans({ ...current, calibration, constraintGraph: { ...current.constraintGraph, constraints }, reconstructionState: { ...current.reconstructionState, status: "UNSOLVED" } }, imageWidth, imageHeight);
     });
-    setDraftMeasurement(null); setGuidedCalibration(false); setTool("SELECT");
+    setDraftMeasurement(null); setReferenceBeingReplaced(null); setGuidedCalibration(false); setTool("SELECT");
   }
 
   function beginOverlayDrag(kind: HumanDragKind | "OBJECT" | "RESIZE", id: string, event: React.PointerEvent<SVGElement>, joint?: HumanJointName) {
@@ -394,16 +438,89 @@ export function PhotoSceneEditor(props: {
     if (suggestion?.suggestedPoints) setDraftMeasurement({ ...suggestion.suggestedPoints, objectId, regionId: objectId ? state.regions.find((region) => region.associatedObjectId === objectId)?.id ?? null : state.regions.find((region) => region.type === "FLOOR_REGION")?.id ?? null });
   }
 
+  function startGuidedRegion(type: SceneRegionType) {
+    setGuidedObjectDraft(null); setRegionType(type); setRegionPoints([]); setTool("REGION");
+  }
+
+  function startGuidedMeasurement(type: ReferenceDimensionType, referenceId?: string) {
+    const reference = referenceId ? state.calibration.references.find((item) => item.id === referenceId) : null;
+    setGuidedReferenceType(type);
+    setReferenceBeingReplaced(referenceId ?? null);
+    setGuidedCalibration(true);
+    setDraftMeasurement(null);
+    setState((current) => ({ ...current, selectedObjectId: reference?.objectId ?? current.selectedObjectId, selectedReferenceId: referenceId ?? null }));
+    setTool("REFERENCE");
+  }
+
+  function startGuidedObject(type: SceneObjectType) {
+    const regionByType: Partial<Record<SceneObjectType, SceneRegionType>> = {
+      TABLE: "WORK_SURFACE", WORK_SURFACE: "WORK_SURFACE", MONITOR: "CONTROL_PANEL_REGION",
+      RACK: "OBJECT_REGION", SHELF: "SHELF_REGION", MACHINE: "MACHINE_REGION",
+      CONTROL_PANEL: "CONTROL_PANEL_REGION", OBSTACLE: "OBSTACLE_ZONE", WORK_ZONE: "INTERACTION_ZONE",
+    };
+    setGuidedObjectDraft({ type, name: objectLabels[type], regionType: regionByType[type] ?? "OBJECT_REGION" });
+    setState((current) => ({ ...current, selectedObjectId: null }));
+    setRegionType(regionByType[type] ?? "OBJECT_REGION"); setRegionPoints([]); setTool("REGION");
+  }
+
+  function startGuidedObjectSurface(objectId: string, type: SceneRegionType) {
+    setGuidedObjectDraft(null);
+    setState((current) => ({ ...current, selectedObjectId: objectId }));
+    setRegionType(type); setRegionPoints([]); setTool("REGION");
+  }
+
+  function deleteReference(referenceId: string) {
+    update((current) => ({
+      ...current,
+      calibration: { ...current.calibration, references: current.calibration.references.filter((reference) => reference.id !== referenceId) },
+      constraintGraph: { ...current.constraintGraph, constraints: current.constraintGraph.constraints.filter((constraint) => constraint.target.id !== referenceId) },
+      selectedReferenceId: current.selectedReferenceId === referenceId ? null : current.selectedReferenceId,
+    }));
+  }
+
+  function toggleReference(referenceId: string) {
+    update((current) => ({ ...current, calibration: { ...current.calibration, references: current.calibration.references.map((reference) => reference.id === referenceId ? { ...reference, visible: !reference.visible } : reference) } }));
+  }
+
+  function associateMeasurement(referenceId: string, objectId: string) {
+    update((current) => ({
+      ...current,
+      calibration: { ...current.calibration, references: current.calibration.references.map((reference) => reference.id === referenceId ? { ...reference, objectId } : reference) },
+      constraintGraph: { ...current.constraintGraph, constraints: current.constraintGraph.constraints.map((constraint) => constraint.target.id === referenceId ? { ...constraint, objectId } : constraint) },
+    }));
+  }
+
+  async function startGuidedBuild() {
+    if (analysisStarting) return;
+    setAnalysisStarting(true); setAnalysisActionError(null); setReconstructionError(null);
+    if (!(await save())) { setAnalysisActionError("Najpierw zapisz scenę i spróbuj ponownie."); setAnalysisStarting(false); return; }
+    const response = await fetch(`/api/photo-scenes/${props.analysisId}/build`, { method: "POST" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      setAnalysisActionError(result?.error ?? "Nie udało się uruchomić budowania sceny."); guidedBuildLockRef.current = false; setAnalysisStarting(false); return;
+    }
+    guidedBuildLockRef.current = true;
+    window.sessionStorage.setItem(`photo-scene-analysis:${props.analysisId}`, "pending");
+    router.refresh(); window.setTimeout(() => setAnalysisStarting(false), 1_500);
+  }
+
+  function reviewReconstruction() {
+    if (!state.reconstructionState.sceneRevision || !["SOLVED", "PARTIAL", "UNDERDETERMINED", "INCONSISTENT"].includes(state.reconstructionState.status)) return;
+    update((current) => ({ ...current, reconstructionState: { ...current.reconstructionState, reviewStatus: "USER_REVIEWED", reviewedSceneRevision: current.reconstructionState.sceneRevision, reviewedAt: new Date().toISOString() } }));
+    setGuidedStep("HUMAN");
+  }
+
   const selectedObject = state.objects.find((object) => object.id === state.selectedObjectId) ?? null;
   const selectedHuman = state.humans.find((human) => human.id === state.selectedHumanId) ?? null;
+  const guidedStatus = useMemo(() => deriveGuidedSetupStatus(state), [state]);
   const quality = calibrationQuality(state.calibration), completion = sceneCompleteness(state);
   const analysisUi = derivePhotoAnalysisUi({ processingStage: props.processingStage, detection: props.detection, heartbeatAt: props.analysisHeartbeatAt, updatedAt: props.analysisUpdatedAt, workerStatus: worker?.status });
   const oldCoordinateScene = Boolean(props.sceneBuilderVersion && !props.sceneBuilderVersion.includes("v0.4") && (state.calibration.references.length || state.geometryMeasurements.length || state.objects.some((object) => object.geometryMeasurements.length)));
   const visibleObjects = state.objects.filter((object) => object.visible && object.status !== "USER_REJECTED" && (showDetectedObjects || object.status !== "DETECTED"));
 
-  return <div className="space-y-3"><WorkflowBar state={state} tab={tab} setTab={setTab} /><div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_390px]">
+  return <div className="space-y-3">{editorMode === "GUIDED" ? <SceneSetupStepper current={guidedStep} status={guidedStatus} onSelect={setGuidedStep} /> : <WorkflowBar state={state} tab={tab} setTab={setTab} />}<div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_410px]">
     <section className="ui-card min-w-0 overflow-hidden">
-      <Toolbar state={state} tool={tool} setTool={setTool} history={history.length} future={future.length} undo={undo} redo={redo} update={update} setTab={setTab} startRegion={(type) => { setRegionType(type); setRegionPoints([]); setTool("REGION"); }} />
+      {editorMode === "ADVANCED" ? <Toolbar state={state} tool={tool} setTool={setTool} history={history.length} future={future.length} undo={undo} redo={redo} update={update} setTab={setTab} startRegion={(type) => { setRegionType(type); setRegionPoints([]); setTool("REGION"); }} /> : <GuidedCanvasToolbar tool={tool} regionPoints={regionPoints.length} undo={undo} canUndo={history.length > 0} onAdvanced={() => setEditorMode("ADVANCED")} />}
       <div className={`grid overflow-hidden bg-neutral-950 p-2 sm:p-4 ${state.scene3d.workspaceMode === "SPLIT" ? "gap-3 lg:grid-cols-2" : ""}`}>
         <div className={`relative ${state.scene3d.workspaceMode === "THREE_D" ? "hidden" : ""}`}>
         {guidedCalibration && !draftMeasurement && <GuidedCanvasInstruction step={draftStart ? 2 : 1} targetRegion={calibrationTargetRegion(state.calibration)} />}
@@ -411,6 +528,7 @@ export function PhotoSceneEditor(props: {
           <defs><marker id="dimension-arrow" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto-start-reverse"><path d="M7 0L0 3.5L7 7" fill="none" stroke="context-stroke" strokeWidth="1.5" /></marker><marker id="facing-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="context-stroke" /></marker></defs>
           <g transform={getSceneSvgTransform(imageWidth, imageHeight, state.viewport)}>
             <image href={props.imageUrl} width={imageWidth} height={imageHeight} pointerEvents="none" />
+            <g pointerEvents={tool === "SELECT" ? "auto" : "none"}>
             {state.view.layers.SURFACES && state.regions.filter((region) => region.visible).map((region) => <RegionOverlay key={region.id} region={region} selected={region.id === state.selectedRegionId} width={imageWidth} height={imageHeight} onSelect={() => setState((current) => ({ ...current, selectedRegionId: region.id, selectedObjectId: region.associatedObjectId }))} />)}
             {visibleObjects.map((object) => <ObjectOverlay key={object.id} object={object} selected={object.id === state.selectedObjectId} width={imageWidth} height={imageHeight} onStart={(kind, event) => { setState((current) => ({ ...current, selectedObjectId: object.id })); beginOverlayDrag(kind, object.id, event); }} />)}
             {state.view.layers.CALIBRATION && state.calibration.floorBaseline && <line {...lineProps(state.calibration.floorBaseline.start, state.calibration.floorBaseline.end, imageWidth, imageHeight)} stroke="#22d3ee" strokeWidth="3" strokeDasharray="14 9" />}
@@ -420,6 +538,7 @@ export function PhotoSceneEditor(props: {
             <GeometryMeasurementsOverlay state={state} width={imageWidth} height={imageHeight} />
             {state.objects.flatMap((object) => object.interactionPoints.map((interaction) => ({ ...interaction, objectId: object.id }))).map((interaction) => interaction.visible && <g key={interaction.id}><circle cx={interaction.position.x * imageWidth} cy={interaction.position.y * imageHeight} r="7" fill="#0f172a" stroke="#f59e0b" strokeWidth="2" /><text x={interaction.position.x * imageWidth + 10} y={interaction.position.y * imageHeight + 4} fill="white" fontSize="11">{interaction.name}</text></g>)}
             {state.humans.filter((human) => human.visible).map((human) => <HumanMannequin key={human.id} human={human} width={imageWidth} height={imageHeight} calibration={state.calibration} reachVisible={state.reachVisible && state.view.layers.HUMAN_REACH} reachMode={state.view.reachMode} debug={debugScene || debugHuman} zoom={state.viewport.zoom} selected={human.id === state.selectedHumanId} onSelect={() => { setState((current) => ({ ...current, selectedHumanId: human.id })); setTab("HUMANS"); }} onStart={(kind, joint, event) => beginOverlayDrag(kind, human.id, event, joint)} />)}
+            </g>
             {draftStart && draftPoint && <line {...lineProps(draftStart, draftPoint, imageWidth, imageHeight)} stroke="#f97316" strokeWidth="4" strokeDasharray="12 8" />}
             {debugCoordinates && coordinateDebug && <g pointerEvents="none"><line x1={coordinateDebug.imagePixels.x - 18} y1={coordinateDebug.imagePixels.y} x2={coordinateDebug.imagePixels.x + 18} y2={coordinateDebug.imagePixels.y} stroke="#fb7185" strokeWidth="2" /><line x1={coordinateDebug.imagePixels.x} y1={coordinateDebug.imagePixels.y - 18} x2={coordinateDebug.imagePixels.x} y2={coordinateDebug.imagePixels.y + 18} stroke="#fb7185" strokeWidth="2" /><circle cx={coordinateDebug.imagePixels.x} cy={coordinateDebug.imagePixels.y} r="6" fill="none" stroke="#fff" strokeWidth="2" /></g>}
           </g>
@@ -433,7 +552,37 @@ export function PhotoSceneEditor(props: {
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-3 text-xs text-muted-foreground"><span>{pointerOutside ? <strong className="text-amber-600">Poza obszarem zdjęcia</strong> : "Oryginał pozostaje niezmieniony · geometria zapisywana w układzie 0–1"}</span><span className={saveStatus === "ERROR" ? "text-red-500" : ""}>{saveStatus === "SAVED" ? "Zapisano" : saveStatus === "SAVING" ? "Zapisywanie…" : saveStatus === "DIRTY" ? "Niezapisane zmiany" : "Błąd zapisu"}</span></footer>
     </section>
     <aside className="ui-card min-w-0 overflow-hidden">
+      {editorMode === "GUIDED" ? <GuidedSceneSetup
+        state={state}
+        step={guidedStep}
+        status={guidedStatus}
+        processingStage={props.processingStage}
+        detectionCount={props.detection?.candidates.length ?? 0}
+        measurementDraft={draftMeasurement}
+        measurementType={guidedReferenceType}
+        buildBusy={analysisStarting}
+        buildError={analysisActionError}
+        reconstructionError={reconstructionError}
+        onStepChange={setGuidedStep}
+        onStartRegion={startGuidedRegion}
+        onStartMeasurement={startGuidedMeasurement}
+        onSaveMeasurement={addReference}
+        onCancelMeasurement={() => { setDraftMeasurement(null); setReferenceBeingReplaced(null); setGuidedCalibration(false); setTool("SELECT"); }}
+        onDeleteReference={deleteReference}
+        onToggleReference={toggleReference}
+        onAddObject={startGuidedObject}
+        onAddObjectSurface={startGuidedObjectSurface}
+        onAssociateMeasurement={associateMeasurement}
+        onBuild={startGuidedBuild}
+        onReview={reviewReconstruction}
+        onOpenHuman={() => setTool("HUMAN")}
+        onOpenErgonomics={() => setGuidedStep("ERGONOMICS")}
+        onAdvanced={() => setEditorMode("ADVANCED")}
+        humanEditor={guidedStep === "HUMAN" ? <HumansPanel state={state} selected={selectedHuman} update={update} setTool={setTool} imageWidth={imageWidth} imageHeight={imageHeight} /> : undefined}
+        ergonomicsPanel={guidedStep === "ERGONOMICS" ? <SceneErgonomicsPanel analysisId={props.analysisId} state={state} selectedHumanId={state.selectedHumanId} focus={(humanId,objectId,region)=>{setErgonomicFocus(region);update((current)=>({...current,selectedHumanId:humanId,selectedObjectId:objectId,scene3d:{...current.scene3d,workspaceMode:"THREE_D"}}))}}/> : undefined}
+      /> : <>
       <div className="border-b border-border px-4 py-3 text-xs font-semibold">Scene Geometry V2 · {reconstructionStatusLabel(state.reconstructionState.status)}</div>
+      <div className="border-b border-border px-4 py-2"><button type="button" onClick={() => { setEditorMode("GUIDED"); setGuidedStep(deriveGuidedSetupStatus(state).recommendedStep); }} className="text-xs font-semibold text-primary hover:underline">← Wróć do konfiguracji krok po kroku</button></div>
       <nav className="grid grid-cols-5 border-b border-border">{(["SCENE", "OBJECTS", "DIMENSIONS", "HUMANS", "ERGONOMICS"] as Tab[]).map((item) => <button key={item} title={tabLabel(item)} aria-pressed={tab === item} onClick={() => setTab(item)} className={`min-h-12 px-1 text-[9px] font-bold sm:text-[11px] ${tab === item ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{tabShortLabel(item)}</button>)}</nav>
       <div className="max-h-[76vh] space-y-5 overflow-y-auto p-4">
         {tab === "SCENE" && <ScenePanel {...props} state={state} quality={quality} completion={completion} save={save} setTab={setTab} analysisUi={analysisUi} analysisStarting={analysisStarting} analysisActionError={analysisActionError} startPhotoAnalysis={startPhotoAnalysis} worker={worker} restartWorker={restartWorker} showDetectedObjects={showDetectedObjects} setShowDetectedObjects={setShowDetectedObjects} oldCoordinateScene={oldCoordinateScene} />}
@@ -444,9 +593,22 @@ export function PhotoSceneEditor(props: {
         {tab === "DIMENSIONS" && <><ReconstructionProgress status={state.reconstructionState.status} /><GeometryPanel state={state} starting={reconstructionStarting} error={reconstructionError} onCalculate={calculateGeometry} onPrepareMeasurement={prepareMeasurement} advanced={advancedGeometry} setAdvanced={setAdvancedGeometry} /><details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-bold">Wymiary i kalibracja legacy</summary><div className="mt-4 space-y-4"><DimensionsPanel state={state} draft={draftMeasurement} addReference={addReference} cancelDraft={() => { setDraftMeasurement(null); setGuidedCalibration(false); }} update={update} setTool={setTool} guidedCalibration={guidedCalibration} setGuidedCalibration={setGuidedCalibration} floorMode={floorMode} setFloorMode={setFloorMode} floorPointCount={floorPoints.length} /></div></details></>}
         {tab === "SUGGESTIONS" && <SuggestionsPanel state={state} update={update} setTab={setTab} setTool={setTool} />}
       </div>
+      </>}
     </aside>
     {analysisNotice && <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-emerald-500/40 bg-slate-950 p-4 text-sm text-white shadow-2xl"><p>{analysisNotice}</p>{props.detection?.dimension_suggestions?.length ? <button onClick={() => { setTab("SUGGESTIONS"); setAnalysisNotice(null); }} className="mt-2 text-xs font-bold text-cyan-300">Zobacz sugestie →</button> : null}</div>}
   </div></div>;
+}
+
+function GuidedCanvasToolbar({ tool, regionPoints, undo, canUndo, onAdvanced }: { tool: Tool; regionPoints: number; undo: () => void; canUndo: boolean; onAdvanced: () => void }) {
+  const instruction = tool === "REGION"
+    ? `Klikaj punkty obrysu${regionPoints ? ` · zapisano ${regionPoints}` : ""}. Enter lub podwójne kliknięcie kończy.`
+    : tool === "REFERENCE" ? "Kliknij początek i koniec wymiaru na zdjęciu."
+      : tool === "HUMAN" ? "Kliknij punkt kontaktu stóp z podłogą."
+        : "Wykonuj kolejne kroki w panelu po prawej stronie.";
+  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-3">
+    <div className="flex min-w-0 items-center gap-2"><span className={`size-2 shrink-0 rounded-full ${tool === "SELECT" ? "bg-emerald-500" : "animate-pulse bg-orange-500"}`} /><p className="text-xs font-semibold">{instruction}</p></div>
+    <div className="flex gap-2"><button type="button" disabled={!canUndo} onClick={undo} className="ui-button-secondary px-3 disabled:opacity-30"><Undo2 className="size-4" />Cofnij</button><button type="button" onClick={onAdvanced} className="ui-button-secondary px-3">Tryb zaawansowany</button></div>
+  </div>;
 }
 
 function WorkflowBar({ state, tab, setTab }: { state: SceneState; tab: Tab; setTab: (tab: Tab) => void }) {
@@ -746,7 +908,7 @@ function addInteractionPoint(update: (fn: (state: SceneState) => SceneState) => 
   const position = type === "PLACEMENT_POINT" ? { x: object.bbox.x + object.bbox.width * .72, y: object.bbox.y + object.bbox.height * .35 } : type === "GRIP_POINT" ? { x: object.bbox.x + object.bbox.width * .25, y: object.bbox.y + object.bbox.height * .45 } : { x: object.bbox.x + object.bbox.width / 2, y: object.bbox.y + object.bbox.height * .3 };
   updateObject(update, object.id, { interactionPoints: [...object.interactionPoints, { id: crypto.randomUUID(), name, type, position: { x: clamp(position.x), y: clamp(position.y) }, visible: true }] });
 }
-function newObject(bbox: NormalizedBox): SceneObject { return { id: crypto.randomUUID(), sourceClass: null, type: "OTHER", name: "Nowy element", bbox, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null, geometry3d: null, interactionPoints3d: [], regionIds: [], faceIds: [], planeIds: [], shapeAssumptions: [], reconstructionQuality: "UNSOLVED" }; }
+function newObject(bbox: NormalizedBox, type: SceneObjectType = "OTHER", name = "Nowy element"): SceneObject { return { id: crypto.randomUUID(), sourceClass: null, type, name, bbox, detectorConfidence: null, source: "USER", status: "USER_ADDED", visible: true, locked: false, measurements: emptyMeasurements(), geometryMeasurements: [], interactionPoints: [], referencePoint: null, geometry3d: null, interactionPoints3d: [], regionIds: [], faceIds: [], planeIds: [], shapeAssumptions: ["TABLE", "WORK_SURFACE"].includes(type) ? ["RECTANGULAR", "PLANAR"] : [], reconstructionQuality: "UNSOLVED" }; }
 function updateObject(update: (fn: (state: SceneState) => SceneState) => void, id: string, patch: Partial<SceneObject>) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id ? { ...object, ...patch } : object) })); }
 function updateObject3d(update: (fn: (state: SceneState) => SceneState) => void, id: string, patch: Partial<NonNullable<SceneObject["geometry3d"]>>) { update((state) => ({ ...state, objects: state.objects.map((object) => object.id === id && object.geometry3d ? { ...object, geometry3d: { ...object.geometry3d, ...patch } } : object) })); }
 function addInteractionPoint3d(update: (fn: (state: SceneState) => SceneState) => void, object: SceneObject, type: SceneObject["interactionPoints3d"][number]["type"]) { if (!object.geometry3d) return; const point = { id: crypto.randomUUID(), name: type === "GRIP" ? "Punkt chwytu" : "Punkt interakcji", type, positionCm: { ...object.geometry3d.positionCm }, rotationDeg: { x: 0, y: 0, z: 0 }, hand: null } satisfies SceneObject["interactionPoints3d"][number]; updateObject(update, object.id, { interactionPoints3d: [...object.interactionPoints3d, point] }); }
@@ -786,7 +948,7 @@ function EmptyState({ text }: { text: string }) { return <div className="rounded
 function ResultCard({ title, value }: { title: string; value: string }) { return <div className="rounded-xl border border-border bg-muted/40 p-3"><span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{title}</span><strong className="mt-1 block text-xs">{value}</strong></div>; }
 function formatDate(value: string | null) { if (!value) return "—"; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString("pl-PL") : "—"; }
 function workerStatusLabel(status: "online" | "offline" | "degraded" | "restarting" | "crash_loop" | "unknown" | undefined) { return ({ online: "Online", offline: "Offline", degraded: "Ograniczony", restarting: "Restart", crash_loop: "Błąd uruchamiania", unknown: "Nieznany" })[status ?? "unknown"]; }
-function sceneErrorMessage(code: string | null) { return ({ SCENE_JOB_CLAIM_FAILED: "Worker nie mógł pobrać zadania.", SCENE_IMAGE_PATH_MISSING: "Brakuje ścieżki zdjęcia źródłowego.", SCENE_IMAGE_DOWNLOAD_FAILED: "Nie udało się pobrać prywatnego zdjęcia.", SCENE_IMAGE_DECODE_FAILED: "Format zdjęcia nie mógł zostać odczytany.", SCENE_DETECTOR_INIT_FAILED: "Model detekcji nie uruchomił się.", SCENE_DETECTION_FAILED: "Detekcja obiektów nie powiodła się.", SCENE_GEOMETRY_FAILED: "Analiza geometrii nie powiodła się.", SCENE_RESULT_UPLOAD_FAILED: "Wynik analizy nie został zapisany w Storage.", SCENE_COMPLETE_RPC_FAILED: "Worker utracił możliwość zakończenia zadania.", SCENE_WORKER_OFFLINE: "Worker analizy sceny jest offline.", SCENE_JOB_STALLED: "Zadanie nie raportuje postępu." } as Record<string, string>)[code ?? ""] ?? "Automatyczna analiza zdjęcia nie powiodła się."; }
+function sceneErrorMessage(code: string | null) { return ({ SCENE_JOB_CLAIM_FAILED: "Worker nie mógł pobrać zadania.", SCENE_IMAGE_PATH_MISSING: "Brakuje ścieżki zdjęcia źródłowego.", SCENE_IMAGE_DOWNLOAD_FAILED: "Nie udało się pobrać prywatnego zdjęcia.", SCENE_CONTEXT_DOWNLOAD_FAILED: "Nie udało się pobrać ręcznych danych sceny.", SCENE_IMAGE_DECODE_FAILED: "Format zdjęcia nie mógł zostać odczytany.", SCENE_DETECTOR_INIT_FAILED: "Model detekcji nie uruchomił się.", SCENE_DETECTION_FAILED: "Detekcja obiektów nie powiodła się.", SCENE_GEOMETRY_FAILED: "Analiza geometrii nie powiodła się.", SCENE_RESULT_UPLOAD_FAILED: "Wynik analizy nie został zapisany w Storage.", SCENE_COMPLETE_RPC_FAILED: "Worker utracił możliwość zakończenia zadania.", SCENE_WORKER_OFFLINE: "Worker analizy sceny jest offline.", SCENE_JOB_STALLED: "Zadanie nie raportuje postępu." } as Record<string, string>)[code ?? ""] ?? "Automatyczna analiza zdjęcia nie powiodła się."; }
 function tabLabel(tab: Tab) { return ({ SCENE: "Projekt", OBJECTS: "Obiekty", HUMANS: "Operatorzy", INTERACTIONS: "Interakcje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Geometria", SUGGESTIONS: "Sugestie" })[tab]; }
 function tabShortLabel(tab: Tab) { return ({ SCENE: "Projekt", OBJECTS: "Obiekty", HUMANS: "Operatorzy", INTERACTIONS: "Relacje", ERGONOMICS: "Ergonomia", DIMENSIONS: "Geometria", SUGGESTIONS: "Sugestie" })[tab]; }
 function priorityLabel(priority: "CRITICAL" | "RECOMMENDED" | "OPTIONAL") { return priority === "CRITICAL" ? "Krytyczne" : priority === "RECOMMENDED" ? "Zalecane" : "Opcjonalne"; }

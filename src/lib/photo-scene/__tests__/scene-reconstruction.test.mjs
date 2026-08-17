@@ -100,6 +100,15 @@ test("79 80 81 80 use robust best fit with small residuals", () => {
   assert.ok(result.constraintResiduals["height-0"] <= 1.1);
 });
 
+test("adding three more valid heights cannot silently destabilize a two-height solution", () => {
+  const initial = solve(completeScene([80, 80]));
+  const enriched = solve(completeScene([80, 80, 79.8, 80.2, 80]));
+  assert.ok(["SOLVED", "PARTIAL"].includes(initial.status));
+  assert.ok(["SOLVED", "PARTIAL"].includes(enriched.status) || enriched.conflicts.length > 0);
+  assert.ok(Math.abs(enriched.derivedDimensions.table.heightCm - initial.derivedDimensions.table.heightCm) < .25);
+  assert.ok(Math.abs(enriched.verticalScaleModel.pixelsPerCm - initial.verticalScaleModel.pixelsPerCm) < .02);
+});
+
 test("80 80 80 300 isolates 300 as outlier and keeps human scale stable", () => {
   const result = solve(completeScene([80, 80, 80, 300]));
   assert.deepEqual(result.outlierConstraintIds, ["height-3"]);

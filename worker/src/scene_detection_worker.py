@@ -19,9 +19,23 @@ from rtmlib import YOLOX
 from supabase import Client, create_client
 
 try:
-    from scene_detection.processor import DETECTION_VERSION, analyze_scene_geometry, build_detection_document, normalize_detections
+    from scene_detection.processor import (
+        DETECTION_VERSION,
+        analyze_scene_geometry,
+        build_detection_document,
+        extract_user_annotations,
+        filter_candidates_against_user_annotations,
+        normalize_detections,
+    )
 except ModuleNotFoundError:  # Package import used by pytest and python -m.
-    from worker.src.scene_detection.processor import DETECTION_VERSION, analyze_scene_geometry, build_detection_document, normalize_detections
+    from worker.src.scene_detection.processor import (
+        DETECTION_VERSION,
+        analyze_scene_geometry,
+        build_detection_document,
+        extract_user_annotations,
+        filter_candidates_against_user_annotations,
+        normalize_detections,
+    )
 
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +75,7 @@ def classify_scene_error(error: BaseException, stage: str) -> SceneWorkerError:
     definitions = {
         "claim": ("SCENE_JOB_CLAIM_FAILED", "Nie udało się pobrać zadania analizy sceny.", True),
         "download": ("SCENE_IMAGE_DOWNLOAD_FAILED", "Nie udało się pobrać zdjęcia sceny.", True),
+        "context": ("SCENE_CONTEXT_DOWNLOAD_FAILED", "Nie udało się pobrać ręcznych danych sceny.", True),
         "decode": ("SCENE_IMAGE_DECODE_FAILED", "Nie udało się odczytać formatu zdjęcia.", False),
         "detector_init": ("SCENE_DETECTOR_INIT_FAILED", "Nie udało się uruchomić modelu detekcji sceny.", True),
         "detection": ("SCENE_DETECTION_FAILED", "Analiza obiektów na zdjęciu nie powiodła się.", True),
@@ -209,15 +224,20 @@ class SceneWorker:
             raise classify_scene_error(error, "decode") from error
         height, width = image.shape[:2]
         try:
+            user_annotations = self._load_user_annotations(analysis_id)
+        except Exception as error:
+            raise classify_scene_error(error, "context") from error
+        try:
             boxes, class_ids, inference_passes = detector_candidates(self.detector_instance(), image)
             candidates = normalize_detections(boxes, class_ids, image_width=width, image_height=height)
+            candidates = filter_candidates_against_user_annotations(candidates, user_annotations)
         except SceneWorkerError:
             raise
         except Exception as error:
             raise classify_scene_error(error, "detection") from error
         try:
             geometry = analyze_scene_geometry(image, candidates)
-            document = build_detection_document(analysis_id, width, height, candidates, geometry)
+            document = build_detection_document(analysis_id, width, height, candidates, geometry, user_annotations)
             detection_file = job_dir / "scene-detection.json"
             detection_file.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
         except (OSError, ValueError, cv2.error) as error:
@@ -251,6 +271,15 @@ class SceneWorker:
             analysis_id, title, document.get("result_status"), len(candidates), len(document.get("geometry_candidates", [])),
             len(document.get("dimension_suggestions", [])), inference_passes, time.perf_counter() - started, result_path,
         )
+
+    def _load_user_annotations(self, analysis_id: str) -> dict[str, Any]:
+        response = self.client.table("photo_scenes").select("scene_state,reconstruction_revision").eq("analysis_id", analysis_id).limit(1).execute()
+        rows = response.data if isinstance(response.data, list) else []
+        row = rows[0] if rows and isinstance(rows[0], Mapping) else None
+        if row is None or not isinstance(row.get("scene_state"), Mapping):
+            raise ValueError("scene_state_missing")
+        revision = str(row.get("reconstruction_revision") or "").strip() or None
+        return extract_user_annotations(row["scene_state"], revision)
 
     def _fail(self, analysis_id: str, title: str, error: SceneWorkerError) -> None:
         self.logger.error("analysis_id=%s title=%s stage=scene-detection-failed code=%s details=%s", analysis_id, title, error.code, error.technical_message)

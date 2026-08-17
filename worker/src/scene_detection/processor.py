@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import cv2
 import numpy as np
@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from .schemas import DetectionCandidate, NormalizedBox, NormalizedLine, SceneObjectType
 
 
-DETECTION_VERSION = "scene-detection-v0.2-beta.1"
+DETECTION_VERSION = "scene-detection-v0.3-beta.1"
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -87,6 +87,7 @@ def build_detection_document(
     image_height: int,
     candidates: Sequence[DetectionCandidate],
     geometry_analysis: dict[str, object] | None = None,
+    user_annotations: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     if not analysis_id.strip():
         raise ValueError("analysis_id is required")
@@ -113,7 +114,65 @@ def build_detection_document(
             "floor_candidates": geometry_analysis.get("floor_candidates", []),
             "surface_candidates": geometry_analysis.get("surface_candidates", []),
         })
+    if user_annotations is not None:
+        document["user_annotation_context"] = annotation_context_summary(user_annotations)
     return document
+
+
+def extract_user_annotations(scene_state: Mapping[str, Any], scene_revision: str | None) -> dict[str, Any]:
+    """Extract only geometry supplied by the user; humans and assessment data never enter detection."""
+    regions = scene_state.get("regions") if isinstance(scene_state.get("regions"), list) else []
+    references = _references(scene_state)
+    objects = scene_state.get("objects") if isinstance(scene_state.get("objects"), list) else []
+    graph = scene_state.get("constraintGraph") if isinstance(scene_state.get("constraintGraph"), Mapping) else {}
+    constraints = graph.get("constraints") if isinstance(graph.get("constraints"), list) else []
+    manual_regions = [item for item in regions if isinstance(item, Mapping) and item.get("source") == "USER_PROVIDED"]
+    return {
+        "contract_version": "guided-scene-worker-context-v1.0",
+        "scene_revision": scene_revision,
+        "floor_regions": [item for item in manual_regions if item.get("type") == "FLOOR_REGION"],
+        "movement_zones": [item for item in manual_regions if item.get("type") == "MOVEMENT_ZONE"],
+        "height_references": [item for item in references if item.get("active", True) and item.get("axis") == "VERTICAL"],
+        "dimension_references": [item for item in references if item.get("active", True) and item.get("axis") != "VERTICAL"],
+        "manual_objects": [item for item in objects if isinstance(item, Mapping) and item.get("source") == "USER" and item.get("status") != "USER_REJECTED"],
+        "manual_surfaces": [item for item in manual_regions if item.get("type") not in {"FLOOR_REGION", "MOVEMENT_ZONE"}],
+        "constraint_graph": {
+            "version": graph.get("version"),
+            "nodes": graph.get("nodes") if isinstance(graph.get("nodes"), list) else [],
+            "constraints": [item for item in constraints if isinstance(item, Mapping) and item.get("source") in {"USER_PROVIDED", "USER_CONFIRMED"}],
+        },
+    }
+
+
+def filter_candidates_against_user_annotations(
+    candidates: Sequence[DetectionCandidate],
+    user_annotations: Mapping[str, Any],
+) -> list[DetectionCandidate]:
+    """Keep additional detections, but remove candidates overlapping authoritative manual objects."""
+    manual_boxes: list[NormalizedBox] = []
+    for item in user_annotations.get("manual_objects", []):
+        if not isinstance(item, Mapping):
+            continue
+        box = _normalized_box(item.get("bbox"))
+        if box is not None:
+            manual_boxes.append(box)
+    return [candidate for candidate in candidates if not any(_iou(candidate.bounding_box, box) >= 0.45 for box in manual_boxes)]
+
+
+def annotation_context_summary(user_annotations: Mapping[str, Any]) -> dict[str, object]:
+    graph = user_annotations.get("constraint_graph")
+    constraints = graph.get("constraints", []) if isinstance(graph, Mapping) else []
+    return {
+        "contract_version": "guided-scene-worker-context-v1.0",
+        "scene_revision": user_annotations.get("scene_revision"),
+        "floor_region_count": len(user_annotations.get("floor_regions", [])),
+        "movement_zone_count": len(user_annotations.get("movement_zones", [])),
+        "height_reference_count": len(user_annotations.get("height_references", [])),
+        "dimension_reference_count": len(user_annotations.get("dimension_references", [])),
+        "manual_object_count": len(user_annotations.get("manual_objects", [])),
+        "manual_surface_count": len(user_annotations.get("manual_surfaces", [])),
+        "constraint_count": len(constraints),
+    }
 
 
 def analyze_scene_geometry(
@@ -245,3 +304,21 @@ def _suggestion_reason(dimension_type: str, orientation: str) -> str:
     if orientation == "DEPTH":
         return f"Candidate edge for {dimension_type}; depth remains unknown without reliable perspective evidence."
     return f"Candidate {orientation.lower()} edge derived from the confirmed object region for {dimension_type}."
+
+
+def _references(scene_state: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    calibration = scene_state.get("calibration")
+    raw = calibration.get("references") if isinstance(calibration, Mapping) else []
+    return [item for item in raw if isinstance(item, Mapping)] if isinstance(raw, list) else []
+
+
+def _normalized_box(value: Any) -> NormalizedBox | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        values = tuple(float(value[key]) for key in ("x", "y", "width", "height"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in values) or values[2] <= 0 or values[3] <= 0:
+        return None
+    return NormalizedBox(*values)
