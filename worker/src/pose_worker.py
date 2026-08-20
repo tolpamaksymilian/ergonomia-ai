@@ -1046,7 +1046,20 @@ def create_hand_pipeline_config(
     )
 
 
+def configure_text_streams() -> None:
+    """Use UTF-8 for worker logs when stdout/stderr are redirected to the manager."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def configure_logging() -> logging.Logger:
+    configure_text_streams()
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
     logger = logging.getLogger("ergonomia-ai-pose-worker")
@@ -2926,16 +2939,36 @@ def run_hand_rescue_pass(
             success, frame = capture.read()
             if not success or frame is None or frame.size == 0:
                 continue
-            expanded = {
-                side: enlarge_roi(
-                    hand_rois[side][index],
+            # Rescue may be requested for only one side on a given frame.
+            # Do not put ``None`` into the union when the opposite hand has no
+            # predicted ROI.  This was the source of:
+            # TypeError: 'NoneType' object is not subscriptable.
+            expanded: dict[str, tuple[int, int, int, int] | None] = {}
+            for side in ("left", "right"):
+                if index not in indexes_by_side[side]:
+                    continue
+
+                source_roi = hand_rois[side][index]
+                if source_roi is None:
+                    continue
+
+                expanded_roi = enlarge_roi(
+                    source_roi,
                     frame_width=frame_width,
                     frame_height=frame_height,
                     scale=settings.hand_rescue_roi_scale,
                 )
-                for side in ("left", "right")
-            }
-            roi = union_hand_roi(expanded, frame_width=frame_width, frame_height=frame_height)
+                if expanded_roi is not None:
+                    expanded[side] = expanded_roi
+
+            roi = union_hand_roi(
+                expanded,
+                frame_width=frame_width,
+                frame_height=frame_height,
+            )
+            if roi is None:
+                continue
+
             try:
                 candidates = rescue_engine.detect(
                     frame,
@@ -2961,8 +2994,21 @@ def run_hand_rescue_pass(
                     summary["rescued_observations"][side] += 1
                     summary["_rescued_frame_indexes"][side].append(index)
             summary["attempted_frames"] += 1
-    except (RuntimeError, OSError, ValueError) as error:
-        logger.warning("Hand Rescue pominięty: %s.", type(error).__name__)
+    except (
+        RuntimeError,
+        OSError,
+        ValueError,
+        TypeError,
+        IndexError,
+        OverflowError,
+        cv2.error,
+    ) as error:
+        # Hand Rescue is an optional quality-improvement pass.  Its failure
+        # must not invalidate a body/hand result already collected in Pass 1.
+        logger.exception(
+            "Hand Rescue pominięty po błędzie %s; zachowuję wynik Pass 1.",
+            type(error).__name__,
+        )
         summary["error"] = type(error).__name__
     finally:
         capture.release()

@@ -441,19 +441,45 @@ def predict_hand_rois(
 
 
 def union_hand_roi(
-    rois: dict[str, tuple[int, int, int, int]],
+    rois: dict[str, tuple[int, int, int, int] | None],
     *,
     frame_width: int,
     frame_height: int,
 ) -> tuple[int, int, int, int] | None:
-    if not rois:
+    """Return a clipped union of all valid hand ROIs.
+
+    A frame can have an ROI for only one hand.  Hand Rescue therefore may
+    legitimately pass ``None`` for the other side.  Treat missing or
+    degenerate ROIs as unavailable instead of letting them crash the whole
+    Pose pipeline.
+    """
+    if frame_width <= 0 or frame_height <= 0:
         return None
-    values = list(rois.values())
+
+    values: list[tuple[int, int, int, int]] = []
+    for value in rois.values():
+        if value is None or len(value) != 4:
+            continue
+
+        x1, y1, x2, y2 = (int(coordinate) for coordinate in value)
+        x1 = max(0, min(frame_width, x1))
+        y1 = max(0, min(frame_height, y1))
+        x2 = max(0, min(frame_width, x2))
+        y2 = max(0, min(frame_height, y2))
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        values.append((x1, y1, x2, y2))
+
+    if not values:
+        return None
+
     return (
-        max(0, min(value[0] for value in values)),
-        max(0, min(value[1] for value in values)),
-        min(frame_width, max(value[2] for value in values)),
-        min(frame_height, max(value[3] for value in values)),
+        min(value[0] for value in values),
+        min(value[1] for value in values),
+        max(value[2] for value in values),
+        max(value[3] for value in values),
     )
 
 
