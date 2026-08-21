@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Mapping
+from typing import Mapping, Protocol, Sequence
 
 import cv2
 import numpy as np
@@ -160,6 +160,18 @@ class OverlayDiagnostics:
     safety_rejections: int
     maximum_rendered_length: float
     severities: dict[str, str]
+    render_sources: dict[str, int] = field(default_factory=dict)
+
+
+class BoneRenderOverride(Protocol):
+    """Narrow bridge used by the V6 renderer without coupling V4 to V6."""
+
+    first: tuple[float, float] | None
+    second: tuple[float, float] | None
+    alpha: float
+    confidence: float
+    safety_rejected: bool
+    source: object
 
 
 @dataclass
@@ -346,6 +358,10 @@ def draw_pose_overlay_v4(
     config: OverlayConfig,
     palette: OverlayPalette,
     bbox: np.ndarray | None = None,
+    render_bone_overrides: Mapping[str, BoneRenderOverride] | None = None,
+    render_joint_points: np.ndarray | None = None,
+    render_joint_scores: np.ndarray | None = None,
+    render_joint_sources: Sequence[str] | None = None,
 ) -> tuple[np.ndarray, OverlayDiagnostics]:
     output = image.copy()
     height, width = output.shape[:2]
@@ -357,6 +373,7 @@ def draw_pose_overlay_v4(
 
     severities = _metric_severities(metrics, color_hysteresis, config.metric_quality_threshold)
     rendered: list[RenderedBone] = []
+    source_counts: dict[str, int] = {}
     for name, (first_index, second_index) in BODY_BONES.items():
         bone = graph.bones[name]
         first = graph.analysis_points[first_index] if graph.analysis_scores[first_index] > 0.0 else None
@@ -374,18 +391,33 @@ def draw_pose_overlay_v4(
             bone.quality,
         )
         expected_pixels = bone.reference_length * graph.body_scale if bone.reference_length is not None else None
-        item = render_controller.update(
-            name,
-            first,
-            second,
-            valid=bone.valid,
-            render_confidence=render_confidence,
-            body_scale=graph.body_scale,
-            expected_length=expected_pixels,
-            frame_width=width,
-            frame_height=height,
-            severity=severity,
-        )
+        override = render_bone_overrides.get(name) if render_bone_overrides is not None else None
+        if override is not None:
+            source_name = getattr(override.source, "value", str(override.source))
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
+            item = RenderedBone(
+                name=name,
+                phase=BoneRenderPhase.VISIBLE if override.first is not None and override.second is not None and override.alpha > 0.0 else BoneRenderPhase.HIDDEN,
+                alpha=override.alpha,
+                first=override.first,
+                second=override.second,
+                confidence=override.confidence,
+                safety_rejected=override.safety_rejected,
+                severity=VisualSeverity.TEMPORARY if source_name not in {"MEASURED", "REFINED_MEASUREMENT"} else severity,
+            )
+        else:
+            item = render_controller.update(
+                name,
+                first,
+                second,
+                valid=bone.valid,
+                render_confidence=render_confidence,
+                body_scale=graph.body_scale,
+                expected_length=expected_pixels,
+                frame_width=width,
+                frame_height=height,
+                severity=severity,
+            )
         rendered.append(item)
         if item.first is not None and item.second is not None and item.alpha > 0.0:
             _draw_alpha_line(
@@ -398,15 +430,38 @@ def draw_pose_overlay_v4(
             )
 
     for index, joint in enumerate(graph.joints):
-        if not joint.valid or joint.coordinates is None or joint.quality < config.render_quality_threshold:
+        override_point = (
+            render_joint_points[index]
+            if render_joint_points is not None and index < len(render_joint_points)
+            else None
+        )
+        override_quality = (
+            float(render_joint_scores[index])
+            if render_joint_scores is not None and index < len(render_joint_scores)
+            else 0.0
+        )
+        using_joint_override = bool(
+            override_point is not None
+            and override_quality > 0.0
+            and np.isfinite(override_point).all()
+        )
+        coordinates = (
+            tuple(float(value) for value in override_point)
+            if using_joint_override
+            else joint.coordinates
+        )
+        render_quality = override_quality if using_joint_override else joint.quality
+        if coordinates is None or render_quality < min(config.render_quality_threshold, 0.35):
             if config.debug and joint.predicted_position is not None:
                 cv2.circle(output, _integer_point(joint.predicted_position), joint_radius, palette.debug_expected, 1, cv2.LINE_AA)
             continue
         color = palette.neutral
         limb = "left" if joint.name.startswith("left_") else "right" if joint.name.startswith("right_") else "center"
         halo = (190, 245, 255) if limb == "left" else (255, 220, 185) if limb == "right" else palette.text
-        cv2.circle(output, _integer_point(joint.coordinates), joint_radius + 1, halo, 1, cv2.LINE_AA)
-        cv2.circle(output, _integer_point(joint.coordinates), max(1, joint_radius - 1), color, -1, cv2.LINE_AA)
+        if render_joint_sources is not None and index < len(render_joint_sources) and render_joint_sources[index] not in {"MEASURED", "REFINED_MEASUREMENT"}:
+            color = palette.temporary
+        cv2.circle(output, _integer_point(coordinates), joint_radius + 1, halo, 1, cv2.LINE_AA)
+        cv2.circle(output, _integer_point(coordinates), max(1, joint_radius - 1), color, -1, cv2.LINE_AA)
 
     _draw_hand(output, left_hand, severities.get("left_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius)
     _draw_hand(output, right_hand, severities.get("right_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius)
@@ -442,6 +497,7 @@ def draw_pose_overlay_v4(
         safety_rejections=sum(item.safety_rejected for item in rendered),
         maximum_rendered_length=max(lengths, default=0.0),
         severities={name: value.value for name, value in severities.items()},
+        render_sources=source_counts,
     )
     return output, diagnostics
 

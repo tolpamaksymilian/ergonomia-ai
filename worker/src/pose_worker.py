@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import logging
 import math
@@ -9,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,26 @@ from pose_v3.tracking import (
     TrackingState,
 )
 from ergonomics.processor import compute_overlay_metrics_from_frame
-from pose_v5 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+try:
+    from worker.src.pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from worker.src.pose_v6.integration import augment_pose_document_v6
+    from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
+    from worker.src.pose_v6.optical_flow import track_point_forward_backward
+    from worker.src.pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
+    from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
+    from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from pose_v6.integration import augment_pose_document_v6
+    from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
+    from pose_v6.optical_flow import track_point_forward_backward
+    from pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
+    from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
 from pose_v5.camera_motion import CameraMotionEstimator
 from pose_v5.config import CameraMotionConfig, PoseV5Config, RefinementConfig
 from pose_v5.integration import augment_pose_document_v5
@@ -67,8 +87,8 @@ from pose_v5.holding import (
 )
 from pose_v4.graph import (
     BiomechanicalPoseGraph,
+    JOINT_NAMES,
     PoseGraphConfig,
-    apply_interpolation_metadata,
     summarize_pose_graph,
 )
 from pose_v4.hand_graph import (
@@ -108,12 +128,12 @@ LOG_DIRECTORY = WORKER_DIRECTORY / "logs"
 
 QUALITY_VERSION = POSE_VERSION
 TRACKING_METHOD = (
-    "coco-yolox-biomechanical-identity-state-machine-v5"
+    "coco-yolox-track-conditioned-biomechanical-v6"
 )
 HAND_TRACKING_METHOD = (
     "mediapipe-adaptive-roi-global-assignment-hand-graph-v3"
 )
-SMOOTHING_METHOD = "offline-bidirectional-body-v3+offline-hand-v3"
+SMOOTHING_METHOD = "offline-bidirectional-hermite-flow-body-v6+offline-hand-v3"
 
 COCO_CLASS_NAMES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
@@ -401,7 +421,7 @@ def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
 
     if model_mode != "performance":
         raise RuntimeError(
-            "Pose Pipeline V4 korzysta z modelu performance. "
+            "Pose Pipeline V6 korzysta z modelu performance. "
             "Ustaw POSE_MODEL_MODE=performance."
         )
 
@@ -1167,7 +1187,11 @@ class StrictWholebodyModel:
     1. Wieloklasowy COCO YOLOX-X wykrywa obiekty.
     2. Zachowujemy wyłącznie klasę 0 = person.
     3. RTMW otrzymuje wyłącznie zatwierdzone bounding boxy.
-    4. Brak bounding boxa zwraca pusty wynik i nie uruchamia RTMW.
+    4. Initial acquisition zawsze wymaga bounding boxa z YOLOX.
+
+    Pose V6 może osobno wywołać ``infer_on_bboxes`` dla krótkotrwałego,
+    track-conditioned recovery ROI. Nie jest to inference całej klatki, a jego
+    źródło jest zapisywane jako TRACK_PREDICTED zamiast YOLOX_MEASURED.
     """
 
     def __init__(
@@ -1356,17 +1380,43 @@ class StrictWholebodyModel:
             : self.settings.detector_max_people
         ]
 
-        pose_started_at = time.perf_counter()
-        keypoints, scores = self.pose_model(
-            frame,
-            bboxes=accepted_boxes,
-        )
-        self.last_timing_seconds["pose"] = time.perf_counter() - pose_started_at
+        return self.infer_on_bboxes(frame, accepted_boxes)
 
-        return normalize_pose_arrays(
-            keypoints,
-            scores,
+    def infer_on_bboxes(
+        self,
+        frame: np.ndarray,
+        bounding_boxes: list[np.ndarray],
+        *,
+        timing_key: str = "pose",
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Run RTMW only on explicit, already bounded person ROIs."""
+
+        if not bounding_boxes:
+            return self.empty_result()
+        height, width = frame.shape[:2]
+        safe_boxes: list[np.ndarray] = []
+        for box in bounding_boxes:
+            values = np.asarray(box, dtype=np.float32).reshape(-1)
+            if values.size != 4 or not np.isfinite(values).all():
+                continue
+            values = values.copy()
+            values[[0, 2]] = np.clip(values[[0, 2]], 0.0, max(0, width - 1))
+            values[[1, 3]] = np.clip(values[[1, 3]], 0.0, max(0, height - 1))
+            if values[2] - values[0] >= 4.0 and values[3] - values[1] >= 4.0:
+                safe_boxes.append(values)
+        if not safe_boxes:
+            return self.empty_result()
+        pose_started_at = time.perf_counter()
+        keypoints, scores = self.pose_model(frame, bboxes=safe_boxes)
+        elapsed = time.perf_counter() - pose_started_at
+        self.last_timing_seconds[timing_key] = (
+            self.last_timing_seconds.get(timing_key, 0.0) + elapsed
         )
+        if timing_key != "pose":
+            self.last_timing_seconds["pose"] = (
+                self.last_timing_seconds.get("pose", 0.0) + elapsed
+            )
+        return normalize_pose_arrays(keypoints, scores)
 
     @staticmethod
     def empty_result() -> tuple[np.ndarray, np.ndarray]:
@@ -1775,8 +1825,14 @@ def select_primary_person(
     frame_height: int,
     settings: PoseWorkerSettings,
     previous_bbox: np.ndarray | None,
+    presence_threshold: float | None = None,
 ) -> PoseCandidate | None:
     best_candidate: PoseCandidate | None = None
+    effective_presence_threshold = (
+        float(np.clip(presence_threshold, 0.0, 1.0))
+        if presence_threshold is not None
+        else settings.body_presence_threshold
+    )
 
     frame_area = max(
         1.0,
@@ -1810,7 +1866,7 @@ def select_primary_person(
         ]
         body_valid_mask = (
             body_scores
-            >= settings.body_presence_threshold
+            >= effective_presence_threshold
         )
         body_keypoint_count = int(
             np.count_nonzero(
@@ -1830,7 +1886,7 @@ def select_primary_person(
             if (
                 index < usable_body_count
                 and body_scores[index]
-                >= settings.body_presence_threshold
+                >= effective_presence_threshold
             )
         ]
         hip_indices = [
@@ -1839,7 +1895,7 @@ def select_primary_person(
             if (
                 index < usable_body_count
                 and body_scores[index]
-                >= settings.body_presence_threshold
+                >= effective_presence_threshold
             )
         ]
 
@@ -1849,7 +1905,7 @@ def select_primary_person(
         bbox = get_body_bbox(
             person_keypoints,
             person_scores,
-            settings.body_presence_threshold,
+            effective_presence_threshold,
         )
 
         if bbox is None:
@@ -3028,6 +3084,84 @@ def run_hand_rescue_pass(
     return summary
 
 
+def _apply_pose_v6_optical_flow(
+    video_path: Path,
+    active_segment: ActiveSegment,
+    records: list[dict[str, Any]],
+    temporal_frames: list[TemporalFrame],
+    config: PoseV6Config,
+    *,
+    frame_width: int,
+    frame_height: int,
+) -> list[TemporalFrame]:
+    """Stream frames once and fill only still-missing, short analytical gaps."""
+
+    if not config.optical_flow.enabled or not records or not temporal_frames:
+        return temporal_frames
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise RuntimeError("OpenCV cannot open source for Pose V6 optical flow")
+    capture.set(cv2.CAP_PROP_POS_FRAMES, active_segment.start_frame)
+    output = list(temporal_frames)
+    previous_gray: np.ndarray | None = None
+    previous_frame: TemporalFrame | None = None
+    last_anchor_timestamps = np.full((BODY_POINT_COUNT,), np.nan, dtype=np.float64)
+    try:
+        for index, record in enumerate(records):
+            success, image = capture.read()
+            if not success or image is None or image.size == 0:
+                raise RuntimeError(f"Cannot read optical-flow frame {record['source_frame_index']}")
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            timestamp = float(record["source_timestamp_seconds"])
+            scene_cut = bool(
+                record["camera_motion"] is not None
+                and record["camera_motion"].scene_cut
+            )
+            current = output[index]
+            if scene_cut:
+                previous_gray = None
+                previous_frame = None
+                last_anchor_timestamps[:] = np.nan
+            for joint in range(min(BODY_POINT_COUNT, len(current.sources))):
+                if current.analysis_scores[joint] > 0.0:
+                    if current.sources[joint] != PointSource.FLOW_TRACKED:
+                        last_anchor_timestamps[joint] = timestamp
+                    continue
+                if previous_gray is None or previous_frame is None or previous_frame.analysis_scores[joint] <= 0.0:
+                    continue
+                anchor_timestamp = last_anchor_timestamps[joint]
+                age = timestamp - anchor_timestamp if np.isfinite(anchor_timestamp) else math.inf
+                if age > config.optical_flow.maximum_age_seconds:
+                    continue
+                bbox = record.get("bbox_array")
+                graph = record["pose_graph"]
+                flow = track_point_forward_backward(
+                    previous_gray,
+                    gray,
+                    tuple(float(value) for value in previous_frame.analysis_points[joint]),
+                    config=config.optical_flow,
+                    frame_width=frame_width,
+                    frame_height=frame_height,
+                    body_bbox=bbox if isinstance(bbox, np.ndarray) else None,
+                    body_scale=float(graph.body_scale),
+                )
+                if flow.valid and flow.point is not None and flow.forward_backward_error is not None:
+                    current = merge_flow_result(
+                        current,
+                        joint,
+                        flow.point,
+                        flow.flow_quality,
+                        flow.forward_backward_error,
+                        age,
+                    )
+            output[index] = current
+            previous_gray = gray
+            previous_frame = current
+    finally:
+        capture.release()
+    return output
+
+
 def process_pose_video(
     supabase: Client | None,
     settings: PoseWorkerSettings,
@@ -3040,7 +3174,7 @@ def process_pose_video(
     logger: logging.Logger,
 ) -> PoseProcessingResult:
     """
-    Pose Pipeline V4 działa dwupasowo i rozdziela RAW, ANALYSIS oraz RENDER.
+    Pose Pipeline V6 działa dwupasowo i rozdziela RAW, ANALYSIS oraz RENDER.
 
     Przebieg 1:
     - RTMW wyznacza ciało,
@@ -3073,11 +3207,16 @@ def process_pose_video(
     diagnostics_path = job_directory / "pose-diagnostics.json"
     thumbnail_path = job_directory / "pose-thumbnail.jpg"
 
+    pose_v6_config = load_pose_v6_config()
     tracker = PersonTrackingStateMachine(
+        # V6 derives continuity windows from seconds and the real video FPS.
         TrackingConfig(
             keypoint_threshold=settings.body_presence_threshold,
-            reacquire_confirm_frames=settings.body_reacquire_confirm_frames,
-            lost_after_missing_frames=settings.body_lost_after_missing_frames,
+            reacquire_confirm_frames=frames_for_seconds(0.10, fps, minimum=2),
+            lost_after_missing_frames=frames_for_seconds(
+                pose_v6_config.temporal.hard_lost_seconds,
+                fps,
+            ),
             maximum_center_jump_ratio=settings.track_max_center_jump_ratio,
             edge_margin_ratio=settings.body_edge_margin_ratio,
         )
@@ -3095,7 +3234,10 @@ def process_pose_video(
                 ),
                 bone_log_tolerance=settings.body_bone_log_tolerance,
             ),
-            maximum_prediction_frames=settings.body_max_prediction_frames,
+            maximum_prediction_frames=frames_for_seconds(
+                pose_v6_config.temporal.track_recovery_seconds,
+                fps,
+            ),
             maximum_scale_change_ratio=settings.body_scale_max_change_ratio,
         )
     )
@@ -3111,6 +3253,15 @@ def process_pose_video(
         ),
     )
     camera_motion_estimator = CameraMotionEstimator(pose_v5_config.camera)
+    bbox_motion_estimator = BBoxMotionEstimator()
+    motion_analyzer = MotionAnalyzer(pose_v6_config.motion)
+    previous_motion = MotionObservation(
+        MotionState.NORMAL_MOTION,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
     scene_cut_count = 0
 
     body_records: list[dict[str, Any]] = []
@@ -3162,9 +3313,19 @@ def process_pose_video(
                 pose_graph = BiomechanicalPoseGraph(pose_graph.config)
                 hand_assignment_memory = HandAssignmentMemory()
                 previous_bbox = None
+                bbox_motion_estimator.reset()
+                motion_analyzer.reset()
+                previous_motion = MotionObservation(
+                    MotionState.NORMAL_MOTION,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                )
                 scene_cut_count += 1
 
             inference_started_at = time.perf_counter()
+            source_timestamp = source_frame_index / fps
             keypoints_array, scores_array = model(frame)
             selection_bbox = (
                 previous_bbox
@@ -3178,12 +3339,81 @@ def process_pose_video(
                 height,
                 settings,
                 selection_bbox,
+                (
+                    settings.body_presence_threshold * 0.90
+                    if tracker.state
+                    in {
+                        TrackingState.TRACKED,
+                        TrackingState.PARTIAL,
+                        TrackingState.OCCLUDED,
+                    }
+                    else None
+                ),
             )
+            yolox_candidate_detected = candidate is not None
+            bbox_source = (
+                BBoxSource.YOLOX_MEASURED
+                if yolox_candidate_detected
+                else BBoxSource.MISSING
+            )
+            predicted_bbox = None
+            recovery_attempted = False
+            camera_translation = (
+                (
+                    float(camera_motion.translation_x),
+                    float(camera_motion.translation_y),
+                )
+                if camera_motion is not None
+                else (0.0, 0.0)
+            )
+            if candidate is not None:
+                bbox_motion_estimator.observe(
+                    candidate.bbox,
+                    source_timestamp,
+                    camera_translation=camera_translation,
+                )
+            else:
+                roi_multiplier = (
+                    1.16
+                    if previous_motion.state == MotionState.EXTREME_MOTION
+                    else 1.08
+                    if previous_motion.state == MotionState.FAST_MOTION
+                    else 1.0
+                )
+                predicted_bbox = bbox_motion_estimator.predict(
+                    source_timestamp,
+                    frame_width=width,
+                    frame_height=height,
+                    roi_scale=pose_v6_config.recovery_roi_scale * roi_multiplier,
+                    camera_translation=camera_translation,
+                )
+                if recovery_allowed(
+                    predicted_bbox,
+                    tracking_state=tracker.state.value,
+                    scene_cut=bool(camera_motion is not None and camera_motion.scene_cut),
+                    maximum_age_seconds=pose_v6_config.temporal.track_recovery_seconds,
+                ) and predicted_bbox is not None:
+                    recovery_attempted = True
+                    recovery_keypoints, recovery_scores = model.infer_on_bboxes(
+                        frame,
+                        [predicted_bbox.bbox_xyxy],
+                        timing_key="pose_recovery",
+                    )
+                    candidate = select_primary_person(
+                        recovery_keypoints,
+                        recovery_scores,
+                        width,
+                        height,
+                        settings,
+                        predicted_bbox.bbox_xyxy,
+                        settings.body_presence_threshold * 0.86,
+                    )
+                    if candidate is not None:
+                        bbox_source = BBoxSource.TRACK_PREDICTED
             object_detection_frames.append(list(model.last_object_detections))
 
             raw_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
             raw_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
-            source_timestamp = source_frame_index / fps
             candidate_detected = candidate is not None
 
             if candidate is not None:
@@ -3191,6 +3421,45 @@ def process_pose_video(
                 usable_score_count = min(KEYPOINT_COUNT, candidate.scores.shape[0])
                 raw_points[:usable_point_count] = candidate.keypoints[:usable_point_count]
                 raw_scores[:usable_score_count] = candidate.scores[:usable_score_count]
+
+            prevalidation_image_quality = analyze_image_quality_v2(
+                frame,
+                body_roi=(
+                    tuple(int(round(float(value))) for value in candidate.bbox)
+                    if candidate is not None
+                    else None
+                ),
+                left_hand_roi=None,
+                right_hand_roi=None,
+            )
+
+            current_motion = (
+                motion_analyzer.update(
+                    raw_points,
+                    raw_scores,
+                    candidate.bbox,
+                    source_timestamp,
+                    camera_translation=camera_translation,
+                )
+                if candidate is not None
+                else previous_motion
+            )
+            previous_motion = current_motion
+            if (
+                tracker.state != TrackingState.LOST
+                and (
+                    prevalidation_image_quality.global_quality.motion_blur
+                    or prevalidation_image_quality.body_quality.motion_blur
+                )
+            ):
+                current_motion = MotionObservation(
+                    current_motion.state,
+                    current_motion.median_joint_speed_scale_per_second,
+                    current_motion.endpoint_speed_scale_per_second,
+                    current_motion.bbox_speed_scale_per_second,
+                    min(2.30, current_motion.gate_multiplier * 1.18),
+                )
+                previous_motion = current_motion
 
             tracking = tracker.update(
                 detected=candidate_detected,
@@ -3200,6 +3469,7 @@ def process_pose_video(
                 frame_width=width,
                 frame_height=height,
                 candidate_quality=(candidate.selection_score if candidate is not None else 0.0),
+                motion_gate_multiplier=current_motion.gate_multiplier,
             )
             if tracker.last_bbox is not None:
                 previous_bbox = tracker.last_bbox.copy()
@@ -3213,6 +3483,7 @@ def process_pose_video(
                 frame_height=height,
                 timestamp_seconds=source_timestamp,
                 relative_depth=None,
+                motion_gate_multiplier=current_motion.gate_multiplier,
             )
             validation_seconds += time.perf_counter() - validation_started_at
             validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
@@ -3325,7 +3596,11 @@ def process_pose_video(
                     "source_timestamp_seconds": source_timestamp,
                     "output_timestamp_seconds": processed_frames / fps,
                     "detected": tracking.accept_pose,
-                    "raw_person_detected": candidate_detected,
+                    "raw_person_detected": yolox_candidate_detected,
+                    "bbox_source": bbox_source.value,
+                    "motion_v6": current_motion.to_dict(),
+                    "refined_measurement": False,
+                    "recovery_attempted": recovery_attempted,
                     "track_started": track_started,
                     "track_ended": tracking.state == TrackingState.LOST,
                     "tracking_state": tracking.state.value,
@@ -3348,6 +3623,13 @@ def process_pose_video(
                         else None
                     ),
                     "bbox_array": candidate.bbox.copy() if candidate is not None else None,
+                    "render_bbox_array": (
+                        candidate.bbox.copy()
+                        if candidate is not None
+                        else predicted_bbox.bbox_xyxy.copy()
+                        if predicted_bbox is not None
+                        else None
+                    ),
                     "image_quality_v2": analyze_image_quality_v2(
                         frame,
                         body_roi=(
@@ -3358,6 +3640,10 @@ def process_pose_video(
                         left_hand_roi=predicted_rois.get("left"),
                         right_hand_roi=predicted_rois.get("right"),
                     ),
+                    "prevalidation_motion_blur": bool(
+                        prevalidation_image_quality.global_quality.motion_blur
+                        or prevalidation_image_quality.body_quality.motion_blur
+                    ),
                     "camera_motion": camera_motion,
                     "pose_graph": graph_frame,
                     "hand_union_roi": combined_hand_roi,
@@ -3365,6 +3651,9 @@ def process_pose_video(
                     "timing_seconds": {
                         "detector": model.last_timing_seconds.get("detector", 0.0),
                         "pose": model.last_timing_seconds.get("pose", 0.0),
+                        "pose_recovery": model.last_timing_seconds.get(
+                            "pose_recovery", 0.0
+                        ),
                         "hands": hand_seconds,
                     },
                     "hand_error": hand_error,
@@ -3391,7 +3680,7 @@ def process_pose_video(
                     analysis_id,
                     settings.worker_id,
                     min(progress, 70),
-                    "pose-v3-collecting-body-and-hands",
+                    "pose-v6-collecting-body-and-hands",
                 )
     finally:
         capture.release()
@@ -3431,14 +3720,39 @@ def process_pose_video(
                 "reasons": [
                     *list(record["tracking_reasons"]),
                     *(
-                        ["BONE_OUTLIER"]
+                        ["PERSON_DETECTOR_MISS"]
+                        if record["bbox_source"] == BBoxSource.TRACK_PREDICTED.value
+                        else []
+                    ),
+                    *(
+                        ["FAST_MOTION_DROPOUT"]
+                        if pose_v6_config.refinement_fast_motion_enabled
+                        and record["motion_v6"]["state"]
+                        in {
+                            MotionState.FAST_MOTION.value,
+                            MotionState.EXTREME_MOTION.value,
+                        }
+                        and float(record["pose_graph"].quality) < 0.72
+                        else []
+                    ),
+                    *(
+                        ["MOTION_BLUR"]
+                        if record["prevalidation_motion_blur"]
+                        else []
+                    ),
+                    *(
+                        ["BONE_OUTLIER", "BONE_REJECTION_BURST"]
                         if any(
                             not bone.valid
                             for bone in record["pose_graph"].bones.values()
                         )
                         else []
                     ),
-                    *(["LOW_HAND_QUALITY"] if record["hand_error"] or hand_assignment_failed else []),
+                    *(
+                        ["LOW_HAND_QUALITY", "HAND_DROPOUT"]
+                        if record["hand_error"] or hand_assignment_failed
+                        else []
+                    ),
                 ],
             })
         difficult_segments, _ = detect_difficult_segments(
@@ -3452,7 +3766,7 @@ def process_pose_video(
         try:
             refinement_hand_engine = MediaPipeHandEngine(create_hand_pipeline_config(settings))
         except (RuntimeError, OSError, ValueError) as error:
-            logger.warning("Pose V5 hand refinement niedostępny dla %s: %s.", analysis_id, type(error).__name__)
+            logger.warning("Pose V6 hand refinement niedostępny dla %s: %s.", analysis_id, type(error).__name__)
         if refinement_capture.isOpened():
             try:
                 def refine_body_frame(
@@ -3469,13 +3783,55 @@ def process_pose_video(
                         return None
                     refined_keypoints, refined_scores = model(refinement_frame)
                     previous = record.get("bbox_array")
-                    refined = select_primary_person(
+                    refined_candidates: list[PoseCandidate] = []
+                    detector_refined = select_primary_person(
                         refined_keypoints,
                         refined_scores,
                         width,
                         height,
                         settings,
                         previous if isinstance(previous, np.ndarray) else None,
+                        settings.body_presence_threshold * 0.90,
+                    )
+                    if detector_refined is not None:
+                        refined_candidates.append(detector_refined)
+                    needs_motion_crops = (
+                        detector_refined is None
+                        or record["bbox_source"] == BBoxSource.TRACK_PREDICTED.value
+                        or record["motion_v6"]["state"]
+                        in {
+                            MotionState.FAST_MOTION.value,
+                            MotionState.EXTREME_MOTION.value,
+                        }
+                    )
+                    motion_box = record.get("render_bbox_array")
+                    if needs_motion_crops and isinstance(motion_box, np.ndarray):
+                        center = (motion_box[:2] + motion_box[2:]) * 0.5
+                        size = motion_box[2:] - motion_box[:2]
+                        for scale in (1.0, 1.28):
+                            crop = np.concatenate(
+                                (center - size * 0.5 * scale, center + size * 0.5 * scale)
+                            ).astype(np.float32)
+                            recovery_points, recovery_scores = model.infer_on_bboxes(
+                                refinement_frame,
+                                [crop],
+                                timing_key="pose_recovery",
+                            )
+                            recovery_candidate = select_primary_person(
+                                recovery_points,
+                                recovery_scores,
+                                width,
+                                height,
+                                settings,
+                                motion_box,
+                                settings.body_presence_threshold * 0.86,
+                            )
+                            if recovery_candidate is not None:
+                                refined_candidates.append(recovery_candidate)
+                    refined = (
+                        max(refined_candidates, key=lambda item: item.selection_score)
+                        if refined_candidates
+                        else None
                     )
                     if refined is None:
                         return None
@@ -3544,7 +3900,7 @@ def process_pose_video(
                     )
             except (cv2.error, ValueError, TypeError, RuntimeError) as error:
                 logger.warning(
-                    "Pose V5 Pass 2 pominięty dla analizy %s; Pass 1 zachowany: %s.",
+                    "Pose V6 Pass 2 pominięty dla analizy %s; Pass 1 zachowany: %s.",
                     analysis_id,
                     type(error).__name__,
                 )
@@ -3557,7 +3913,7 @@ def process_pose_video(
             if refinement_hand_engine is not None:
                 refinement_hand_engine.close()
             logger.warning(
-                "Pose V5 Pass 2 nie otworzył filmu dla analizy %s; Pass 1 zachowany.",
+                "Pose V6 Pass 2 nie otworzył filmu dla analizy %s; Pass 1 zachowany.",
                 analysis_id,
             )
 
@@ -3571,9 +3927,12 @@ def process_pose_video(
                 record["raw_points"] = replacement["raw_points"]
                 record["raw_scores"] = replacement["raw_scores"]
                 record["bbox_array"] = replacement["bbox"]
+                record["render_bbox_array"] = replacement["bbox"].copy()
                 record["bbox_xyxy"] = [
                     round(float(value), 2) for value in replacement["bbox"]
                 ]
+                record["bbox_source"] = BBoxSource.TEMPORAL_REFINED.value
+                record["refined_measurement"] = True
                 refined_hands = replacement.get("raw_hands")
                 if isinstance(refined_hands, dict):
                     for side in ("left", "right"):
@@ -3593,6 +3952,9 @@ def process_pose_video(
                     frame_height=height,
                     timestamp_seconds=float(record["source_timestamp_seconds"]),
                     relative_depth=None,
+                    motion_gate_multiplier=float(
+                        record["motion_v6"].get("gate_multiplier", 1.0)
+                    ),
                 )
                 record["pose_graph"] = replayed
                 validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
@@ -3611,22 +3973,102 @@ def process_pose_video(
         [record["tracking_state"] for record in body_records],
         frame_width=width,
         frame_height=height,
-        maximum_gap_frames=settings.body_max_interpolation_gap_frames,
+        # V6 owns gap filling and provenance.  This legacy helper now performs
+        # only its robust bidirectional smoothing over actual measurements.
+        maximum_gap_frames=0,
         interpolation_allowed=[
             record["pose_graph"].interpolation_allowed()
             for record in body_records
         ],
     )
-    for index, record in enumerate(body_records):
-        record["smoothed_points"] = smoothed_points[index]
-        record["smoothed_scores"] = smoothed_scores[index]
-        record["body_interpolated"] = interpolation_masks[index]
-        record["pose_graph"] = apply_interpolation_metadata(
-            record["pose_graph"],
-            smoothed_points[index],
-            smoothed_scores[index],
-            interpolation_masks[index],
+    temporal_frames = reconstruct_temporal_sequence(
+        smoothed_points,
+        smoothed_scores,
+        [record["raw_scores"] for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [
+            bool(
+                record["camera_motion"] is not None
+                and record["camera_motion"].scene_cut
+            )
+            for record in body_records
+        ],
+        maximum_interpolation_seconds=(
+            pose_v6_config.temporal.analysis_interpolation_seconds
+        ),
+        maximum_prediction_seconds=(
+            pose_v6_config.temporal.render_persistence_seconds
+        ),
+        refined_frames={
+            index
+            for index, record in enumerate(body_records)
+            if bool(record["refined_measurement"])
+        },
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    try:
+        temporal_frames = _apply_pose_v6_optical_flow(
+            video_path,
+            active_segment,
+            body_records,
+            temporal_frames,
+            pose_v6_config,
+            frame_width=width,
+            frame_height=height,
         )
+    except (cv2.error, RuntimeError, ValueError, TypeError) as error:
+        logger.warning(
+            "Pose V6 optical flow unavailable for %s; Hermite reconstruction retained: %s.",
+            analysis_id,
+            type(error).__name__,
+        )
+    for index, record in enumerate(body_records):
+        temporal = temporal_frames[index]
+        graph = record["pose_graph"]
+        expected_bone_lengths = {
+            name: (
+                bone.reference_length * float(graph.body_scale)
+                if bone.reference_length is not None
+                else None
+            )
+            for name, bone in graph.bones.items()
+        }
+        temporal_bones = validate_analysis_bones(
+            temporal,
+            BODY_BONES,
+            expected_bone_lengths,
+            body_scale=float(graph.body_scale),
+        )
+        unsafe_reconstructed_joints = {
+            endpoint
+            for name, diagnostic in temporal_bones.items()
+            if diagnostic["valid"] is False
+            for endpoint in BODY_BONES[name]
+            if temporal.sources[endpoint]
+            in {PointSource.INTERPOLATED, PointSource.FLOW_TRACKED}
+        }
+        if unsafe_reconstructed_joints:
+            temporal = reject_reconstructed_analysis_joints(
+                temporal,
+                unsafe_reconstructed_joints,
+            )
+            temporal_frames[index] = temporal
+            temporal_bones = validate_analysis_bones(
+                temporal,
+                BODY_BONES,
+                expected_bone_lengths,
+                body_scale=float(graph.body_scale),
+            )
+        record["smoothed_points"] = temporal.analysis_points
+        record["smoothed_scores"] = temporal.analysis_scores
+        record["body_interpolated"] = np.asarray(
+            [source == PointSource.INTERPOLATED for source in temporal.sources],
+            dtype=bool,
+        )
+        record["temporal_v6"] = temporal
+        record["temporal_joints_v6"] = temporal.joint_metadata(JOINT_NAMES)
+        record["temporal_bones_v6"] = temporal_bones
     smoothing_seconds = time.perf_counter() - smoothing_started_at
 
     if processed_frames <= 0:
@@ -3648,19 +4090,26 @@ def process_pose_video(
         analysis_id,
         settings.worker_id,
         72,
-        "pose-v3-validating-hand-trajectories",
+        "pose-v6-temporal-reconstruction",
     )
 
     hand_validation_started_at = time.perf_counter()
+    hand_temporal_config = replace(
+        hand_engine.config,
+        max_interpolation_gap_frames=frames_for_seconds(
+            min(0.12, pose_v6_config.temporal.analysis_interpolation_seconds),
+            fps,
+        ),
+    )
     left_hand_result = stabilize_hand_track(
         "left",
         raw_hand_frames["left"],
-        hand_engine.config,
+        hand_temporal_config,
     )
     right_hand_result = stabilize_hand_track(
         "right",
         raw_hand_frames["right"],
-        hand_engine.config,
+        hand_temporal_config,
     )
     left_hand_result = enhance_hand_track(
         left_hand_result,
@@ -3849,10 +4298,15 @@ def process_pose_video(
         debug=settings.debug_overlay,
     )
     render_controller = BoneRenderController(overlay_config)
+    persistent_renderer = PersistentBoneRenderer(
+        persistence_seconds=pose_v6_config.temporal.render_persistence_seconds,
+        minimum_quality=min(settings.render_quality_threshold, 0.35),
+    )
     color_hysteresis = MetricColorHysteresis()
     overlay_palette = OverlayPalette()
     overlay_diagnostics_records: list[dict[str, object]] = []
     overlay_metric_frames: list[dict[str, dict[str, object]]] = []
+    render_v6_frames: list[dict[str, PersistentBone]] = []
 
     try:
         for frame_offset, body_record in enumerate(body_records):
@@ -3874,6 +4328,10 @@ def process_pose_video(
                 ),
                 "scores": serialize_scores(body_record["smoothed_scores"]),
                 "body_quality": body_record["pose_graph"].to_dict(),
+                "temporal_v6": {
+                    "joints": body_record["temporal_joints_v6"],
+                    "analysis_bones": body_record["temporal_bones_v6"],
+                },
                 "left_hand": serialize_hand_frame(left_frame),
                 "right_hand": serialize_hand_frame(right_frame),
             }
@@ -3888,6 +4346,56 @@ def process_pose_video(
                 if isinstance(bbox_value, list) and len(bbox_value) == 4
                 else None
             )
+            render_bbox_value = body_record.get("render_bbox_array")
+            render_bbox_array = (
+                np.asarray(render_bbox_value, dtype=np.float32)
+                if render_bbox_value is not None
+                and np.asarray(render_bbox_value).size == 4
+                else bbox_array
+            )
+            temporal: TemporalFrame = body_record["temporal_v6"]
+            camera = body_record["camera_motion"]
+            scene_cut = bool(camera is not None and camera.scene_cut)
+            if scene_cut:
+                persistent_renderer.reset()
+            bone_overrides: dict[str, PersistentBone] = {}
+            for bone_name, (first_index, second_index) in BODY_BONES.items():
+                graph_bone = body_record["pose_graph"].bones[bone_name]
+                first_point = (
+                    temporal.render_points[first_index]
+                    if temporal.render_scores[first_index] > 0.0
+                    else None
+                )
+                second_point = (
+                    temporal.render_points[second_index]
+                    if temporal.render_scores[second_index] > 0.0
+                    else None
+                )
+                expected_length = (
+                    graph_bone.reference_length
+                    * float(body_record["pose_graph"].body_scale)
+                    if graph_bone.reference_length is not None
+                    else None
+                )
+                bone_overrides[bone_name] = persistent_renderer.update(
+                    bone_name,
+                    first_point,
+                    second_point,
+                    first_source=temporal.sources[first_index].value,
+                    second_source=temporal.sources[second_index].value,
+                    confidence=min(
+                        float(temporal.render_scores[first_index]),
+                        float(temporal.render_scores[second_index]),
+                    ),
+                    timestamp_seconds=float(body_record["source_timestamp_seconds"]),
+                    bbox=render_bbox_array,
+                    expected_length=expected_length,
+                    frame_width=width,
+                    frame_height=height,
+                    hard_lost=body_record["tracking_state"] == TrackingState.LOST.value,
+                    scene_cut=False,
+                )
+            render_v6_frames.append(bone_overrides)
             rendered_frame, overlay_diagnostics = draw_pose_overlay_v4(
                 frame,
                 body_record["pose_graph"],
@@ -3902,7 +4410,30 @@ def process_pose_video(
                 config=overlay_config,
                 palette=overlay_palette,
                 bbox=bbox_array,
+                render_bone_overrides=bone_overrides,
+                render_joint_points=temporal.render_points,
+                render_joint_scores=temporal.render_scores,
+                render_joint_sources=[source.value for source in temporal.sources],
             )
+            if settings.debug_overlay:
+                render_source_counts = Counter(
+                    item.source.value for item in bone_overrides.values()
+                )
+                cv2.putText(
+                    rendered_frame,
+                    (
+                        f"V6 bbox={body_record['bbox_source']} "
+                        f"motion={body_record['motion_v6']['state']} "
+                        f"measured={render_source_counts.get('MEASURED', 0)} "
+                        f"predicted={render_source_counts.get('HELD', 0) + render_source_counts.get('KINEMATIC_PREDICTED', 0)}"
+                    ),
+                    (18, 58),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.46,
+                    (190, 235, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
             overlay_diagnostics_records.append(
                 {
                     "rendered_bones": overlay_diagnostics.rendered_bones,
@@ -3910,6 +4441,14 @@ def process_pose_video(
                     "safety_rejections": overlay_diagnostics.safety_rejections,
                     "maximum_rendered_length": round(overlay_diagnostics.maximum_rendered_length, 3),
                     "severities": overlay_diagnostics.severities,
+                    "render_sources": overlay_diagnostics.render_sources,
+                    "bone_sources": {
+                        name: item.source.value for name, item in bone_overrides.items()
+                    },
+                    "bone_prediction_age_seconds": {
+                        name: round(item.age_seconds, 6)
+                        for name, item in bone_overrides.items()
+                    },
                 }
             )
 
@@ -3917,7 +4456,7 @@ def process_pose_video(
             cv2.putText(
                 rendered_frame,
                 (
-                    "Ergonomia AI Worker V0.5 | aktywny fragment "
+                    "Ergonomia AI Pose V6 | aktywny fragment "
                     f"{output_timestamp:05.2f}s / "
                     f"{active_segment.duration_seconds:05.2f}s"
                 ),
@@ -3955,6 +4494,8 @@ def process_pose_video(
                     ),
                     "detected": body_record["detected"],
                     "raw_person_detected": body_record["raw_person_detected"],
+                    "bbox_source": body_record["bbox_source"],
+                    "motion_v6": body_record["motion_v6"],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
                     "tracking_state": body_record["tracking_state"],
@@ -3984,6 +4525,17 @@ def process_pose_video(
                         body_record["smoothed_scores"],
                     ),
                     "body_interpolated": body_record["body_interpolated"].astype(bool).tolist(),
+                    "temporal_v6": {
+                        "analysis_render_separated": True,
+                        "joints": body_record["temporal_joints_v6"],
+                        "analysis_bones": body_record["temporal_bones_v6"],
+                        "analysis_source_counts": dict(
+                            Counter(
+                                source.value
+                                for source in body_record["temporal_v6"].sources[:BODY_POINT_COUNT]
+                            )
+                        ),
+                    },
                     "camera_motion": (
                         body_record["camera_motion"].to_dict()
                         if body_record["camera_motion"] is not None
@@ -4095,7 +4647,7 @@ def process_pose_video(
                     analysis_id,
                     settings.worker_id,
                     min(progress, 88),
-                    "pose-v3-rendering-validated-results",
+                    "pose-v6-rendering-persistent-skeleton",
                 )
     finally:
         render_capture.release()
@@ -4175,6 +4727,14 @@ def process_pose_video(
         overlay_metric_frames,
         output_timestamps,
     )
+    temporal_v6_summary = summarize_temporal_frames(
+        temporal_frames,
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        joint_names=JOINT_NAMES,
+        fps=fps,
+    )
+    render_v6_summary = summarize_render_sources(render_v6_frames)
+    temporal_worst_frames = rank_temporal_worst_frames(body_records)
     runtime_breakdown = {
         "person_detection_ms": round(1000.0 * sum(
             float(record["timing_seconds"]["detector"])
@@ -4182,6 +4742,10 @@ def process_pose_video(
         ), 3),
         "body_pose_ms": round(1000.0 * sum(
             float(record["timing_seconds"]["pose"])
+            for record in body_records
+        ), 3),
+        "track_conditioned_pose_recovery_ms": round(1000.0 * sum(
+            float(record["timing_seconds"]["pose_recovery"])
             for record in body_records
         ), 3),
         "hand_ms": round(1000.0 * (sum(
@@ -4198,7 +4762,7 @@ def process_pose_video(
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
-        "generated_by": "Ergonomia AI Worker V0.4",
+        "generated_by": "Ergonomia AI Worker V0.8",
         "worker_version": WORKER_VERSION,
         "pipeline_version": QUALITY_VERSION,
         "pose_version": POSE_VERSION,
@@ -4222,12 +4786,16 @@ def process_pose_video(
         "coordinate_space": "source-video-pixels",
         "primary_person_only": True,
         "strict_bbox_required": True,
+        "strict_bbox_scope": "initial-acquisition-and-bounded-track-recovery",
+        "track_conditioned_pose_recovery": True,
         "data_contract": {
             "raw": "unmodified-model-observations",
-            "analysis": "validated-measurements-only",
-            "render": "quality-gated-visualization-only",
+            "analysis": "validated-measurements-and-explicit-safe-reconstruction",
+            "render": "persistent-motion-aware-visualization",
             "predictions_are_measurements": False,
             "missing_values_are_carried_forward": False,
+            "render_only_is_analysis_usable": False,
+            "point_sources": [source.value for source in PointSource],
         },
         "source": {
             "width": width,
@@ -4270,6 +4838,15 @@ def process_pose_video(
                 6,
             ),
             "pose_presence_ratio": round(presence_ratio, 6),
+            "measurement_coverage_ratio": temporal_v6_summary[
+                "measurement_coverage_ratio"
+            ],
+            "analysis_usable_coverage_ratio": temporal_v6_summary[
+                "analysis_usable_coverage_ratio"
+            ],
+            "render_bone_coverage_ratio": render_v6_summary[
+                "render_bone_coverage_ratio"
+            ],
             "first_processed_source_timestamp_seconds": round(
                 float(body_records[0]["source_timestamp_seconds"]), 6
             ),
@@ -4359,6 +4936,17 @@ def process_pose_video(
                 "draw_objects": settings.draw_objects,
                 "geometric_severity_is_normative_risk": False,
             },
+            "pose_v6": {
+                "profile": pose_v6_config.profile,
+                "track_conditioned_rtmw_recovery": True,
+                "track_recovery_seconds": pose_v6_config.temporal.track_recovery_seconds,
+                "hard_lost_seconds": pose_v6_config.temporal.hard_lost_seconds,
+                "analysis_interpolation_seconds": pose_v6_config.temporal.analysis_interpolation_seconds,
+                "render_persistence_seconds": pose_v6_config.temporal.render_persistence_seconds,
+                "flow_enabled": pose_v6_config.optical_flow.enabled,
+                "flow_max_error": pose_v6_config.optical_flow.maximum_forward_backward_error,
+                "recovery_roi_scale": pose_v6_config.recovery_roi_scale,
+            },
             "draw_hands": settings.draw_hands,
             "draw_face": settings.draw_face,
             "debug_overlay": settings.debug_overlay,
@@ -4382,6 +4970,14 @@ def process_pose_video(
                 "reacquisition_count": tracker.reacquisition_count,
                 "losses": tracker.track_loss_count,
                 "reacquisitions": tracker.reacquisition_count,
+                "recovery_attempts": sum(
+                    bool(record["recovery_attempted"])
+                    for record in body_records
+                ),
+                "recovery_successes": sum(
+                    record["bbox_source"] == BBoxSource.TRACK_PREDICTED.value
+                    for record in body_records
+                ),
                 "person_switches": None,
                 "person_switch_measurement_available": False,
                 "partial_frames": partial_frames,
@@ -4435,6 +5031,8 @@ def process_pose_video(
                 "external_load_known": False,
             },
             "movement": movement_summary,
+            "temporal_v6": temporal_v6_summary,
+            "render_v6": render_v6_summary,
             "runtime_breakdown": runtime_breakdown,
         },
         "frames": frames_data,
@@ -4444,6 +5042,12 @@ def process_pose_video(
         result_document,
         config=pose_v5_config,
         refinement_results=refinement_results,
+    )
+    result_document = augment_pose_document_v6(
+        result_document,
+        config=pose_v6_config,
+        temporal_summary=temporal_v6_summary,
+        render_summary=render_v6_summary,
     )
 
     output_json_path.write_text(
@@ -4510,12 +5114,13 @@ def process_pose_video(
                 *worst_hand_frames,
                 *holding_transition_frames,
                 *worst_quality_frames,
+                *[int(item["frame_index"]) for item in temporal_worst_frames],
             ]
         )
     )[:20]
 
     diagnostics_document = {
-        "schema_version": "3.0",
+        "schema_version": "4.0",
         "worker_version": WORKER_VERSION,
         "pipeline_version": QUALITY_VERSION,
         "pose_version": POSE_VERSION,
@@ -4554,7 +5159,9 @@ def process_pose_video(
         },
         "holding": result_document["summary"]["holding"],
         "movement": movement_summary,
+        "temporal_v6": temporal_v6_summary,
         "render": {
+            **render_v6_summary,
             "safety_rejections": sum(
                 int(item["safety_rejections"])
                 for item in overlay_diagnostics_records
@@ -4577,6 +5184,7 @@ def process_pose_video(
         "worst_bone_outlier_frames": worst_bone_outliers,
         "worst_hand_frames": worst_hand_frames,
         "holding_transition_frames": holding_transition_frames[:10],
+        "temporal_worst_frames": temporal_worst_frames,
     }
     diagnostics_path.write_text(
         json.dumps(diagnostics_document, ensure_ascii=False, indent=2),
@@ -4584,10 +5192,10 @@ def process_pose_video(
     )
 
     logger.info(
-        "Pose V0.4 zakończone: frames_total=%d body_valid_ratio=%.3f "
+        "Pose V6 zakończone: frames_total=%d body_valid_ratio=%.3f "
         "left_hand_valid_ratio=%.3f right_hand_valid_ratio=%.3f "
         "track_losses=%d reacquisitions=%d holding_left_seconds=%.3f "
-        "holding_right_seconds=%.3f bimanual_seconds=%.3f runtime=%.2fs.",
+        "holding_right_seconds=%.3f bimanual_seconds=%.3f render_coverage=%.3f runtime=%.2fs.",
         processed_frames,
         presence_ratio,
         left_hand_result.summary.valid_ratio,
@@ -4597,6 +5205,7 @@ def process_pose_video(
         left_holding_summary.likely_holding_seconds,
         right_holding_summary.likely_holding_seconds,
         bimanual_holding["likely_holding_seconds"],
+        float(render_v6_summary["render_bone_coverage_ratio"]),
         time.perf_counter() - processing_started_at,
     )
     if hand_failure_count:
@@ -4768,7 +5377,7 @@ def process_analysis(
     )
 
     logger.info(
-        "Rozpoczynam Pose Pipeline V4 / Worker %s: %s — %s",
+        "Rozpoczynam Pose Pipeline V6 / Worker %s: %s — %s",
         WORKER_VERSION,
         analysis_id,
         analysis.get("title"),
@@ -4780,7 +5389,7 @@ def process_analysis(
             analysis_id,
             settings.worker_id,
             21,
-            "downloading-for-pose-v3",
+            "downloading-for-pose-v6",
         )
 
         video_path = download_source_video(
@@ -4804,7 +5413,7 @@ def process_analysis(
             analysis_id,
             settings.worker_id,
             30,
-            "pose-inference-active-segment-v3",
+            "pose-inference-active-segment-v6",
         )
 
         hand_engine = MediaPipeHandEngine(
@@ -4831,7 +5440,7 @@ def process_analysis(
             analysis_id,
             settings.worker_id,
             91,
-            "uploading-pose-results-v3",
+            "uploading-pose-results-v6",
         )
 
         (
@@ -4850,7 +5459,7 @@ def process_analysis(
             analysis_id,
             settings.worker_id,
             97,
-            "saving-pose-results-v3",
+            "saving-pose-results-v6",
         )
 
         complete_pose_inference_v3(
@@ -4871,7 +5480,7 @@ def process_analysis(
         )
     except Exception as error:
         logger.exception(
-            "Błąd Pose Pipeline V4 dla analizy %s.",
+            "Błąd Pose Pipeline V6 dla analizy %s.",
             analysis_id,
         )
 
@@ -4914,7 +5523,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
             analysis = claim_next_pose_analysis(supabase, settings.worker_id)
 
             if analysis is None:
-                logger.info("Brak analiz gotowych do Pose Pipeline V4.")
+                logger.info("Brak analiz gotowych do Pose Pipeline V6.")
 
                 if once:
                     return 0
@@ -4936,7 +5545,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
             logger.info("Worker został zatrzymany.")
             return 0
         except Exception:
-            logger.exception("Nieobsłużony błąd cyklu Pose Pipeline V4.")
+            logger.exception("Nieobsłużony błąd cyklu Pose Pipeline V6.")
 
             if once:
                 return 1
@@ -4946,7 +5555,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ergonomia AI Worker V0.4 — Pose Pipeline V4"
+        description="Ergonomia AI Worker V0.8 — Pose Pipeline V6"
     )
     parser.add_argument(
         "--once",

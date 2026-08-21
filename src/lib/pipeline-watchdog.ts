@@ -15,6 +15,8 @@ const activeStages = new Set([
   "claimed", "claimed-for-preprocessing", "downloading-source", "preprocessing-video", "saving-preprocessing-results",
   "pose-claimed", "downloading-for-pose", "downloading-for-pose-v3", "initializing-pose-inference", "pose-inference",
   "pose-inference-active-segment-v3", "pose-v3-rendering-validated-results", "uploading-pose-results-v3", "saving-pose-results-v3",
+  "pose-v6-collecting-body-and-hands", "pose-v6-temporal-reconstruction", "pose-v6-rendering-persistent-skeleton",
+  "downloading-for-pose-v6", "pose-inference-active-segment-v6", "uploading-pose-results-v6", "saving-pose-results-v6",
   "ergonomics-processing", "risk-processing", "report-processing",
 ]);
 

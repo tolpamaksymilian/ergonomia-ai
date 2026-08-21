@@ -1,13 +1,14 @@
 # Ergonomics Metrics Engine V1
 
-Moduł odczytuje plik `pose-keypoints.json` w schemacie Pose Pipeline V3.0, V3.1 lub V4.0 i tworzy
+Moduł odczytuje plik `pose-keypoints.json` w obsługiwanych schematach Pose
+Pipeline 3.0–6.0 i tworzy
 `ergonomics-metrics.json` z surowymi pomiarami geometrycznymi dla każdej klatki
 aktywnego fragmentu. Nie wykonuje punktacji RULA/REBA, progów ostrzegawczych,
 zapisu do Supabase ani interpolacji metryk.
 
 ## Wejście i wyjście
 
-Obsługiwane wejście ma `schema_version: "3.0"` albo `"3.1"`. Punkty ciała są odczytywane z
+Obsługiwane wejście ma `schema_version` od `"3.0"` do `"6.0"`. Punkty ciała są odczytywane z
 `frames[].smoothed_keypoints` oraz `frames[].scores` w formacie COCO WholeBody
 133. Próg jakości pochodzi z `configuration.keypoint_threshold`; przy jego braku
 stosowana jest wartość V3.0 `0.78`.
@@ -79,3 +80,7 @@ worker\.venv\Scripts\python.exe -m pytest worker\tests\ergonomics -q
 
 Moduł korzysta wyłącznie ze standardowej biblioteki Pythona i NumPy. Testy nie
 ładują modeli, OpenCV, Supabase, MediaPipe, GPU ani zasobów sieciowych.
+Schemat Pose `6.0` dodaje `frames[].temporal_v6.joints`. Silnik respektuje
+`analysis_usable`: bezpieczne próbki `INTERPOLATED`/`FLOW_TRACKED` nadal muszą
+spełnić próg jakości, natomiast `KINEMATIC_PREDICTED` i render `HELD` nie są
+traktowane jako pomiar ergonomiczny.

@@ -27,6 +27,7 @@ class TrackingConfig:
     edge_margin_ratio: float = 0.025
     partial_minimum_valid_joints: int = 5
     occluded_minimum_valid_joints: int = 8
+    locked_keypoint_threshold_ratio: float = 0.90
 
 
 @dataclass(frozen=True)
@@ -79,14 +80,20 @@ class PersonTrackingStateMachine:
         frame_width: int,
         frame_height: int,
         candidate_quality: float,
+        motion_gate_multiplier: float = 1.0,
     ) -> TrackingDecision:
         if not detected or bbox is None or not _valid_bbox(bbox):
             return self._handle_missing()
 
+        observation_threshold = self.config.keypoint_threshold * (
+            self.config.locked_keypoint_threshold_ratio
+            if self.state not in {TrackingState.LOST, TrackingState.REACQUIRING}
+            else 1.0
+        )
         valid_count, partial = _visibility_state(
             points,
             scores,
-            self.config.keypoint_threshold,
+            observation_threshold,
             frame_width,
             frame_height,
             self.config.edge_margin_ratio,
@@ -94,16 +101,18 @@ class PersonTrackingStateMachine:
         if valid_count < self.config.partial_minimum_valid_joints:
             return self._handle_missing(reason="INSUFFICIENT_VISIBLE_JOINTS")
 
-        body_signature = _body_signature(points, scores, bbox, self.config.keypoint_threshold)
+        body_signature = _body_signature(points, scores, bbox, observation_threshold)
         signature_similarity = _signature_similarity(
             body_signature,
             self.last_body_signature,
         )
+        gate_multiplier = max(1.0, float(motion_gate_multiplier))
         identity_score = self._identity_score(
             bbox,
             frame_width,
             frame_height,
             signature_similarity,
+            gate_multiplier,
         )
         scale_change = (
             _bbox_scale_change(np.asarray(bbox, dtype=np.float32), self.last_bbox)
@@ -124,12 +133,12 @@ class PersonTrackingStateMachine:
             self.state not in {TrackingState.LOST, TrackingState.REACQUIRING}
             and self.last_bbox is not None
             and bbox_iou(np.asarray(bbox, dtype=np.float32), self.last_bbox) < 0.01
-            and center_jump > self.config.maximum_center_jump_ratio
+            and center_jump > self.config.maximum_center_jump_ratio * gate_multiplier
         ):
             return self._handle_missing(reason="BBOX_CENTER_JUMP")
         if (
             self.state not in {TrackingState.LOST, TrackingState.REACQUIRING}
-            and scale_change > self.config.maximum_scale_change_ratio
+            and scale_change > self.config.maximum_scale_change_ratio * math.sqrt(gate_multiplier)
         ):
             return self._handle_missing(reason="BBOX_SCALE_OUTLIER")
         if (
@@ -225,6 +234,7 @@ class PersonTrackingStateMachine:
         frame_width: int,
         frame_height: int,
         signature_similarity: float | None,
+        gate_multiplier: float,
     ) -> float:
         if self.last_bbox is None:
             return 1.0
@@ -237,7 +247,7 @@ class PersonTrackingStateMachine:
         center_ratio = float(np.linalg.norm(current_center - previous_center)) / diagonal
         movement = max(
             0.0,
-            1.0 - center_ratio / max(self.config.maximum_center_jump_ratio, 1e-6),
+            1.0 - center_ratio / max(self.config.maximum_center_jump_ratio * gate_multiplier, 1e-6),
         )
         current_height = max(1.0, float(current[3] - current[1]))
         previous_height = max(1.0, float(previous[3] - previous[1]))

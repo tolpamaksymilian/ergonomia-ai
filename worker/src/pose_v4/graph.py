@@ -127,8 +127,8 @@ class PoseGraphConfig:
     torso_occlusion_margin_ratio: float = 0.08
 
     def validate(self) -> None:
-        if self.maximum_prediction_frames < 0 or self.maximum_prediction_frames > 5:
-            raise ValueError("maximum_prediction_frames must be in range 0..5")
+        if self.maximum_prediction_frames < 0 or self.maximum_prediction_frames > 120:
+            raise ValueError("maximum_prediction_frames must be in range 0..120")
         if not 0.0 < self.prediction_damping <= 1.0:
             raise ValueError("prediction_damping must be in range (0, 1]")
         if self.candidate_distance_gate_scale <= 0.0:
@@ -406,6 +406,7 @@ class BiomechanicalPoseGraph:
         frame_height: int,
         timestamp_seconds: float,
         relative_depth: np.ndarray | None = None,
+        motion_gate_multiplier: float = 1.0,
     ) -> PoseGraphFrame:
         local = self.local_validator.validate(
             raw_points,
@@ -414,6 +415,7 @@ class BiomechanicalPoseGraph:
             tracking,
             frame_width,
             frame_height,
+            motion_gate_multiplier=max(1.0, motion_gate_multiplier),
         )
         delta = self._frame_delta(timestamp_seconds)
         anchors = _body_anchors(local)
@@ -441,6 +443,7 @@ class BiomechanicalPoseGraph:
             frame_width,
             frame_height,
             delta,
+            max(1.0, motion_gate_multiplier),
         )
         limbs = self._limb_states(joints, bbox, frame_width, frame_height)
         joints = self._apply_chain_hierarchy(joints, limbs)
@@ -505,10 +508,11 @@ class BiomechanicalPoseGraph:
         width: int,
         height: int,
         delta: float,
+        motion_gate_multiplier: float,
     ) -> list[JointState]:
         output: list[JointState] = []
         torso_bounds = _torso_bounds(local.points, local.scores, body_scale)
-        gate_multiplier = (
+        gate_multiplier = motion_gate_multiplier * (
             self.config.reacquiring_gate_multiplier
             if tracking.state == TrackingState.REACQUIRING
             else 1.0

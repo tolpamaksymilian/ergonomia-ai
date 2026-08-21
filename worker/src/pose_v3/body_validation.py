@@ -65,6 +65,7 @@ class BodyValidationConfig:
     maximum_joint_acceleration_bbox_ratio: float = 0.55
     bone_log_tolerance: float = 0.42
     maximum_bone_direction_change_degrees: float = 120.0
+    locked_keypoint_threshold_ratio: float = 0.90
     profile_minimum_samples: int = 4
     profile_maximum_samples: int = 90
 
@@ -152,6 +153,8 @@ class BodyValidator:
         tracking: TrackingDecision,
         frame_width: int,
         frame_height: int,
+        *,
+        motion_gate_multiplier: float = 1.0,
     ) -> BodyValidationResult:
         output_points = np.zeros((points.shape[0], 2), dtype=np.float32)
         output_scores = np.zeros((scores.shape[0],), dtype=np.float32)
@@ -171,6 +174,16 @@ class BodyValidator:
                 if tracking.state == TrackingState.OCCLUDED
                 else RejectionReason.TRACK_LOST
             )
+
+        gate_multiplier = max(1.0, float(motion_gate_multiplier))
+        locked_observation = tracking.accept_pose and tracking.state in {
+            TrackingState.TRACKED,
+            TrackingState.PARTIAL,
+            TrackingState.OCCLUDED,
+        }
+        confidence_threshold = self.config.keypoint_threshold * (
+            self.config.locked_keypoint_threshold_ratio if locked_observation else 1.0
+        )
 
         for index in range(BODY_POINT_COUNT):
             raw_confidence = (
@@ -193,7 +206,7 @@ class BodyValidator:
             if reason is None:
                 if index >= usable or not np.isfinite(points[index]).all():
                     reason = RejectionReason.INVALID_COORDINATE
-                elif raw_confidence < self.config.keypoint_threshold:
+                elif raw_confidence < confidence_threshold:
                     reason = RejectionReason.LOW_CONFIDENCE
                 else:
                     coordinate = np.asarray(points[index], dtype=np.float32)
@@ -218,7 +231,7 @@ class BodyValidator:
                     1.0 - velocity_norm / self.config.maximum_joint_velocity_bbox_ratio,
                 )
                 quality_components.append(velocity_quality)
-                if velocity_norm > self.config.maximum_joint_velocity_bbox_ratio:
+                if velocity_norm > self.config.maximum_joint_velocity_bbox_ratio * gate_multiplier:
                     reason = RejectionReason.JOINT_VELOCITY_OUTLIER
                 else:
                     acceleration = float(np.linalg.norm(velocity - self._previous_velocity[index]))
@@ -227,7 +240,7 @@ class BodyValidator:
                         1.0 - acceleration / self.config.maximum_joint_acceleration_bbox_ratio,
                     )
                     quality_components.append(acceleration_quality)
-                    if acceleration > self.config.maximum_joint_acceleration_bbox_ratio:
+                    if acceleration > self.config.maximum_joint_acceleration_bbox_ratio * gate_multiplier * gate_multiplier:
                         reason = RejectionReason.JOINT_ACCELERATION_OUTLIER
 
             valid = reason is None and coordinate is not None
@@ -283,9 +296,9 @@ class BodyValidator:
                         0.0,
                         1.0
                         - direction_change
-                        / self.config.maximum_bone_direction_change_degrees,
+                        / (self.config.maximum_bone_direction_change_degrees * gate_multiplier),
                     )
-                    if direction_change > self.config.maximum_bone_direction_change_degrees:
+                    if direction_change > self.config.maximum_bone_direction_change_degrees * gate_multiplier:
                         valid = False
             quality = (
                 float(

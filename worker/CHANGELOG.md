@@ -1,5 +1,13 @@
 # Worker changelog
 
+## 0.8.0-beta.1
+
+- Pose `pose-v6.0-beta.1`, schema 6.0: przewidywany bbox, track-conditioned RTMW, motion modes i natychmiastowe bezpieczne podparcie krótkich missów detektora.
+- Offline reconstruction rozdziela `MEASURED`, `REFINED_MEASUREMENT`, `INTERPOLATED`, `FLOW_TRACKED`, `KINEMATIC_PREDICTED`, `REJECTED` i `MISSING`.
+- Per-bone persistent renderer korzysta z ruchu i skali bboxa; scene cut i HARD LOST są twardymi granicami.
+- Ergonomics zachowuje data honesty: render-only nie jest wejściem do metryk.
+- Dodano syntetyczne testy dropoutów, szybkiego ruchu, optical flow, identity oraz ciągłości renderu bez GPU.
+
 ## 0.7.0-beta.1
 
 - Pipeline Supervisor `pipeline-supervisor-v1.0-beta.1` z preflightem, heartbeat, blokadą pojedynczej instancji i ochroną przed crash loop.

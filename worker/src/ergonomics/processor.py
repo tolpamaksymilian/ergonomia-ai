@@ -15,7 +15,7 @@ from .schemas import FramePose, METRIC_NAMES, MetricResult, PointSample, Rejecti
 from .temporal import frame_durations, movement_features, reject_isolated_metric_spikes
 
 
-SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0", "5.1"})
+SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0", "5.1", "6.0"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
@@ -79,6 +79,7 @@ def _body_point(
     scores: Any,
     threshold: float,
     diagnostic: Any = None,
+    temporal_diagnostic: Any = None,
 ) -> PointSample:
     coordinate_value = keypoints[index] if isinstance(keypoints, list) and index < len(keypoints) else None
     coordinates, coordinate_reason = _parse_coordinates(coordinate_value)
@@ -86,7 +87,20 @@ def _body_point(
     score = _finite_number(score_value)
     if coordinate_reason is not None:
         return PointSample(name, None, 0.0, coordinate_reason)
-    if isinstance(diagnostic, dict) and diagnostic.get("valid") is False:
+    temporal_allows_analysis = (
+        isinstance(temporal_diagnostic, dict)
+        and temporal_diagnostic.get("analysis_usable") is True
+    )
+    if (
+        isinstance(temporal_diagnostic, dict)
+        and temporal_diagnostic.get("analysis_usable") is False
+    ):
+        return PointSample(name, coordinates, 0.0, "geometry_validation_failed")
+    if (
+        isinstance(diagnostic, dict)
+        and diagnostic.get("valid") is False
+        and not temporal_allows_analysis
+    ):
         reason_code = diagnostic.get("reason")
         reason_codes = diagnostic.get("rejection_reasons")
         if not isinstance(reason_code, str) and isinstance(reason_codes, list):
@@ -175,6 +189,13 @@ def _parse_frame(value: Any, threshold: float) -> FramePose:
         and isinstance(body_quality.get("joints"), list)
         else []
     )
+    temporal_v6 = frame.get("temporal_v6")
+    temporal_joints = (
+        temporal_v6.get("joints")
+        if isinstance(temporal_v6, dict)
+        and isinstance(temporal_v6.get("joints"), dict)
+        else {}
+    )
     body = {
         name: _body_point(
             name,
@@ -183,11 +204,21 @@ def _parse_frame(value: Any, threshold: float) -> FramePose:
             scores,
             threshold,
             joint_diagnostics[index] if index < len(joint_diagnostics) else None,
+            temporal_joints.get(name),
         )
         for name, index in BODY_KEYPOINT_INDICES.items()
     }
     return FramePose(
-        person_detected=frame.get("detected") is True,
+        person_detected=(
+            frame.get("detected") is True
+            or sum(
+                item.get("analysis_usable") is True
+                for item in temporal_joints.values()
+                if isinstance(item, dict)
+            )
+            >= 8
+            and str(frame.get("tracking_state", "")).upper() != "LOST"
+        ),
         body=body,
         left_hand=_parse_hand("left", frame.get("left_hand")),
         right_hand=_parse_hand("right", frame.get("right_hand")),
@@ -225,6 +256,35 @@ def summarize_metric(results: list[MetricResult]) -> dict[str, int | float | Non
     }
 
 
+def _explicitly_invalid_bones(frame: dict[str, Any]) -> set[str]:
+    body_quality = frame.get("body_quality")
+    bones = (
+        body_quality.get("bones")
+        if isinstance(body_quality, dict) and isinstance(body_quality.get("bones"), dict)
+        else {}
+    )
+    invalid = {
+        name
+        for name, diagnostic in bones.items()
+        if isinstance(diagnostic, dict) and diagnostic.get("valid") is False
+    }
+    temporal_v6 = frame.get("temporal_v6")
+    temporal_bones = (
+        temporal_v6.get("analysis_bones")
+        if isinstance(temporal_v6, dict)
+        and isinstance(temporal_v6.get("analysis_bones"), dict)
+        else {}
+    )
+    for name, diagnostic in temporal_bones.items():
+        if not isinstance(name, str) or not isinstance(diagnostic, dict):
+            continue
+        if diagnostic.get("valid") is True:
+            invalid.discard(name)
+        elif diagnostic.get("valid") is False:
+            invalid.add(name)
+    return invalid
+
+
 def compute_overlay_metrics_from_frame(
     frame: dict[str, Any],
     *,
@@ -242,17 +302,7 @@ def compute_overlay_metrics_from_frame(
         raise ValueError("quality_threshold must be in range 0..1")
     pose = _parse_frame(frame, quality_threshold)
     metrics = compute_frame_metrics(pose)
-    body_quality = frame.get("body_quality")
-    bones = (
-        body_quality.get("bones")
-        if isinstance(body_quality, dict) and isinstance(body_quality.get("bones"), dict)
-        else {}
-    )
-    invalid_bones = {
-        name
-        for name, diagnostic in bones.items()
-        if isinstance(diagnostic, dict) and diagnostic.get("valid") is False
-    }
+    invalid_bones = _explicitly_invalid_bones(frame)
     for name, dependency in METRIC_DEPENDENCIES.items():
         required_bones = dependency.get("required_bones", [])
         if (
@@ -289,18 +339,7 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
         raw_frame_dict = raw_frame if isinstance(raw_frame, dict) else {}
         frame_pose = _parse_frame(raw_frame_dict, threshold)
         metrics = compute_frame_metrics(frame_pose)
-        body_quality = raw_frame_dict.get("body_quality")
-        bone_diagnostics = (
-            body_quality.get("bones")
-            if isinstance(body_quality, dict)
-            and isinstance(body_quality.get("bones"), dict)
-            else {}
-        )
-        explicitly_invalid_bones = {
-            name
-            for name, diagnostic in bone_diagnostics.items()
-            if isinstance(diagnostic, dict) and diagnostic.get("valid") is False
-        }
+        explicitly_invalid_bones = _explicitly_invalid_bones(raw_frame_dict)
         for name, dependency in METRIC_DEPENDENCIES.items():
             required_bones = dependency.get("required_bones", [])
             if (

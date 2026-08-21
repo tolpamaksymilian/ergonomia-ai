@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.22.0-beta.1] - 2026-08-21
+
+- Pose Pipeline `pose-v6.0-beta.1` dodaje track-conditioned RTMW recovery po krótkim miss YOLOX oraz FPS-aware granice recovery, rekonstrukcji i HARD LOST.
+- Offline pass rozdziela pomiary, bezpieczną rekonstrukcję i dane render-only; interpolacja Hermite, walidowany optical flow i predykcja kinematyczna mają jawne źródła.
+- Persistent Bone Renderer usuwa pojedyncze mignięcia i przesuwa fallback razem z przewidywanym bboxem zamiast zamrażać szkielet.
+- Ergonomics Metrics Engine obsługuje schema 6.0 i nigdy nie traktuje kinematycznej predykcji ani render hold jako pomiaru.
+- Dodano diagnostykę motion episodes, per-bone coverage, źródeł renderu, dropoutów i czasu track-conditioned recovery.
+- Zachowano modele YOLOX-X/RTMW/MediaPipe, prywatny Storage, RPC, downstream Risk/Report oraz niezależną ścieżkę PHOTO_SCENE.
+
 ## [0.21.0-beta.1] - 2026-08-16
 
 - Przebudowano domyślne PHOTO_SCENE jako dziewięcioetapowy Guided Scene Setup: zdjęcie → podłoga i pole pracy → wysokości → opcjonalne wymiary → obiekty → Worker → weryfikacja → operator → ergonomia.

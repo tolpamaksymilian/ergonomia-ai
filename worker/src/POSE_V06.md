@@ -1,0 +1,55 @@
+# Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
+
+Wersje: aplikacja `0.22.0-beta.1`, worker `0.8.0-beta.1`, Pose
+`pose-v6.0-beta.1`, schema `6.0`.
+
+## Architektura
+
+V6 rozszerza, a nie kopiuje pipeline V3–V5. Initial acquisition pozostaje
+`YOLOX-X → wybrany person bbox → RTMW WholeBody`. Po stabilnym lock-on krótki
+miss YOLOX może użyć przewidywanego bboxa ze stanem center/size i ich
+prędkościami. RTMW nadal dostaje wyłącznie ograniczony ROI; nigdy całą klatkę.
+Identity gate nadal uwzględnia IoU, środek, skalę i sygnaturę barki–biodra.
+
+Pass 1 zapisuje surowe obserwacje, bbox source, motion state, obrazową jakość i
+decyzje trackera. Trudne segmenty mogą przejść bounded Pass 2 na cropie
+detektora, predicted cropie lub jednym powiększonym cropie. Scene cut resetuje
+tracker, bbox estimator, motion analyzer, flow i renderer.
+
+Po Pass 2 offline Temporal Reconstruction korzysta z obu stron luki. Krótkie
+luki otrzymują ograniczoną interpolację Hermite z malejącą jakością. Pozostałe
+krótkie luki mogą przejść pyramidal Lucas–Kanade z forward-backward check,
+kontrolą bboxa i maksymalnego przemieszczenia. Brakujący środkowy joint
+shoulder–elbow–wrist lub hip–knee–ankle może zostać odtworzony z przecięcia
+okręgów o stabilnych długościach, ale wyłącznie jako render-only.
+
+## Kontrakt jakości
+
+- `MEASURED` i `REFINED_MEASUREMENT`: obserwacje modelu po walidacji.
+- `INTERPOLATED` i `FLOW_TRACKED`: jawna rekonstrukcja; do ergonomii trafia
+  tylko przy `analysis_usable=true`, poprawnej kości i wymaganej jakości.
+- `KINEMATIC_PREDICTED`: wsparcie wizualne, nigdy pomiar ergonomiczny.
+- `HELD`: motion-aware per-bone fallback renderera, nigdy pomiar.
+- `REJECTED` i `MISSING`: brak poprawnej geometrii analitycznej.
+
+Measurement coverage, reconstructed coverage i render coverage są raportowane
+oddzielnie. Coverage nie jest accuracy ani confidence względem ground truth.
+
+## Test na prawdziwym filmie
+
+1. Zachowaj kopię aktualnych artefaktów analizy jako BEFORE.
+2. Ustaw w `worker/.env` tylko wtedy, gdy chcesz odejść od domyślnych wartości;
+   pełna lista V6 jest w `.env.example`.
+3. Ponów wyłącznie etap Pose zgodnie z istniejącą procedurą projektu i uruchom
+   lokalny Pipeline Manager albo `pose_worker.py --once`.
+4. Pobierz `pose-overlay.mp4`, `pose-keypoints.json` i `pose-diagnostics.json`.
+5. Porównaj: measurement coverage, analysis usable coverage, render bone
+   coverage, single-frame bone/full-skeleton dropout, recovery attempts,
+   per-bone source counts, track losses, hand valid ratio i runtime breakdown.
+6. Obejrzyj szybki wyprost ręki, pochylenie, obrót tułowia, wejście/wyjście z
+   kadru, drugą osobę i każdą granicę sceny. Sprawdź, czy `HELD` podąża za bboxem
+   oraz czy po HARD LOST nic nie pozostaje w pustym miejscu.
+
+Repo nie zawiera fixture prawdziwego filmu z ground truth, dlatego nie podajemy
+procentowej poprawy accuracy. Syntetyczne testy mierzą ciągłość, provenance i
+bezpieczne granice, nie dokładność biomechaniczną na realnym nagraniu.
