@@ -9,6 +9,7 @@ const health = {
   supervisor_pid: 1, pipeline_pid: 2, started_at: null, last_heartbeat_at: "2026-08-10T11:59:55Z",
   analysis_id: null, stage: null, last_progress_at: null, restart_count: 0,
   preflight_status: "OK", preflight: [], last_error: null,
+  health_persistence: "healthy", health_read_status: "current", health_unavailable_since: null,
 };
 const analysis = { id: "a", status: "queued", processing_stage: "queued", updated_at: "2026-08-10T11:59:50Z" };
 
@@ -42,4 +43,22 @@ test("degraded preflight is exposed while supervisor heartbeat stays available",
 test("process control cannot be inferred from client health data", () => {
   assert.equal("secret" in health, false);
   assert.equal("control_allowed" in health, false);
+});
+
+test("a two-second heartbeat delay stays inside the normal grace period", () => {
+  assert.equal(classifyPipelineWatchdog(analysis, { ...health, last_heartbeat_at: "2026-08-10T11:59:58Z" }, now), "QUEUE_OK");
+});
+
+test("fresh database worker heartbeat distinguishes persistence degradation from offline", () => {
+  const pose = { ...analysis, status: "processing", processing_stage: "pose-v6-temporal-reconstruction", heartbeat_at: "2026-08-10T11:59:20Z" };
+  assert.equal(
+    classifyPipelineWatchdog(pose, { ...health, last_heartbeat_at: "2026-08-10T11:58:00Z" }, now),
+    "HEALTH_PERSISTENCE_DEGRADED",
+  );
+});
+
+test("temporary unreadable health is degraded before it becomes offline", () => {
+  const unavailable = { ...health, status: "unknown", last_heartbeat_at: null, health_persistence: "unknown", health_read_status: "unavailable", health_unavailable_since: "2026-08-10T11:59:55Z" };
+  assert.equal(classifyPipelineWatchdog(analysis, unavailable, now), "HEALTH_PERSISTENCE_DEGRADED");
+  assert.equal(classifyPipelineWatchdog(analysis, { ...unavailable, health_unavailable_since: "2026-08-10T11:58:00Z" }, now), "WORKER_OFFLINE");
 });

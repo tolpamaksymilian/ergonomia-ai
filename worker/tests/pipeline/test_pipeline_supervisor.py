@@ -27,7 +27,7 @@ def test_atomic_heartbeat_is_sanitized_runtime_json(tmp_path: Path) -> None:
     supervisor.heartbeat("online")
     payload = json.loads(health.read_text(encoding="utf-8"))
     assert payload["status"] == "online"
-    assert payload["supervisor_version"] == "pipeline-supervisor-v1.0-beta.1"
+    assert payload["supervisor_version"] == "pipeline-supervisor-v1.1-beta.1"
     serialized = health.read_text(encoding="utf-8").lower()
     assert "supabase_secret_key" not in serialized
     assert "authorization" not in serialized

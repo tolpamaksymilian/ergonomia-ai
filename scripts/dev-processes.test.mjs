@@ -7,7 +7,9 @@ import {
   ManagedProcessStartError,
   resolveNextProcess,
   resolvePythonProcess,
+  runtimeSupervisorMatches,
   spawnManagedProcess,
+  supervisorRestartDelay,
 } from "./dev-processes.mjs";
 
 test("Next.js uses the current Node executable without a cmd or shell", () => {
@@ -99,4 +101,28 @@ test("managed processes preserve cwd and env while keeping shell disabled", asyn
   assert.equal(receivedOptions.cwd, "C:\\repo");
   assert.equal(receivedOptions.env.TEST_VALUE, "present");
   assert.equal(receivedOptions.shell, false);
+});
+
+test("dev supervisor reuses only the same fresh repository instance", () => {
+  const now = Date.parse("2026-08-21T10:00:00Z");
+  const health = {
+    supervisor_pid: 321,
+    supervisor_instance_id: "instance-a",
+    last_heartbeat_at: "2026-08-21T09:59:57Z",
+    status: "online",
+  };
+  const lock = {
+    pid: 321,
+    instance_id: "instance-a",
+    repository_root: "C:\\repo",
+  };
+  assert.equal(runtimeSupervisorMatches({ health, lock, repoRoot: "C:\\repo", now }), true);
+  assert.equal(runtimeSupervisorMatches({ health, lock: { ...lock, instance_id: "other" }, repoRoot: "C:\\repo", now }), false);
+  assert.equal(runtimeSupervisorMatches({ health, lock: { ...lock, repository_root: "C:\\other" }, repoRoot: "C:\\repo", now }), false);
+});
+
+test("dev supervisor restart policy is bounded and cannot rapid-loop", () => {
+  assert.deepEqual([1, 2, 3].map(supervisorRestartDelay), [500, 1_500, 4_000]);
+  assert.equal(supervisorRestartDelay(4), null);
+  assert.equal(supervisorRestartDelay(0), null);
 });

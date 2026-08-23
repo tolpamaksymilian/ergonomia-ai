@@ -6,6 +6,7 @@ export type PipelineWatchdogCode =
   | "CLAIM_DELAY"
   | "PROCESSING"
   | "DEGRADED"
+  | "HEALTH_PERSISTENCE_DEGRADED"
   | "STALLED"
   | "FAILED"
   | "COMPLETED"
@@ -19,6 +20,7 @@ export const pipelineAlerts: Record<PipelineWatchdogCode, { title: string; descr
   CLAIM_DELAY: { title: "Worker nie może jeszcze pobrać analizy", description: "System sprawdza kolejkę i spróbuje odzyskać etap automatycznie.", tone: "warning" },
   PROCESSING: { title: "Pipeline pracuje", description: "Heartbeat jest świeży; długi etap Pose nie jest traktowany jako zatrzymany tylko z powodu stałego procentu.", tone: "info" },
   DEGRADED: { title: "Worker wymaga uwagi", description: "Supervisor działa, ale kontrola gotowości wykryła problem. Szczegóły techniczne wskazują brakujący element.", tone: "warning" },
+  HEALTH_PERSISTENCE_DEGRADED: { title: "Worker działa z ograniczoną diagnostyką", description: "Analiza może być kontynuowana, ale zapis lub odczyt lokalnego heartbeat jest chwilowo ograniczony.", tone: "warning" },
   STALLED: { title: "Etap nie odpowiada", description: "Ostatnia aktywność workera jest nieaktualna. Dane wcześniejszych etapów pozostają zachowane.", tone: "error" },
   FAILED: { title: "Etap analizy nie powiódł się", description: "Można bezpiecznie ponowić wyłącznie nieudany etap.", tone: "error" },
   COMPLETED: { title: "Pipeline zakończony", description: "Wymagane artefakty analizy zostały przygotowane.", tone: "success" },

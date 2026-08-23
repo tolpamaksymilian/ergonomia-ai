@@ -17,7 +17,9 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,8 +27,13 @@ from typing import Any, Callable, Sequence
 
 from dotenv import dotenv_values, load_dotenv
 
+try:
+    from worker.src.runtime_state import atomic_write_json, cleanup_stale_temp_files
+except ModuleNotFoundError:  # direct execution: python worker/src/pipeline_supervisor.py
+    from runtime_state import atomic_write_json, cleanup_stale_temp_files
 
-SUPERVISOR_VERSION = "pipeline-supervisor-v1.0-beta.1"
+
+SUPERVISOR_VERSION = "pipeline-supervisor-v1.1-beta.1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 WORKER_ROOT = REPOSITORY_ROOT / "worker"
 ENV_PATH = WORKER_ROOT / ".env"
@@ -45,6 +52,8 @@ REQUIRED_ENVIRONMENT = (
 )
 BACKOFF_SECONDS = (2.0, 5.0, 10.0, 20.0, 30.0)
 SECRET_MARKERS = ("secret", "token", "jwt", "authorization", "apikey", "password")
+HEALTH_WARNING_INTERVAL_SECONDS = 30.0
+LOCK_GUARD_STALE_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -88,51 +97,154 @@ def is_process_alive(pid: int) -> bool:
     return True
 
 
-def _read_lock_pid(path: Path) -> int | None:
+def _read_lock_payload(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return None
-    value = payload.get("pid") if isinstance(payload, dict) else None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_lock_pid(path: Path) -> int | None:
+    payload = _read_lock_payload(path)
+    value = payload.get("pid") if payload is not None else None
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def acquire_lock(path: Path = LOCK_PATH, *, pid: int | None = None) -> None:
+def process_matches_supervisor(pid: int, repository_root: Path = REPOSITORY_ROOT) -> bool:
+    """Best-effort protection against a stale lock whose PID was reused."""
+
+    if not is_process_alive(pid):
+        return False
+    if pid == os.getpid():
+        return True
+    expected_script = str((repository_root / "worker" / "src" / "pipeline_supervisor.py").resolve()).casefold()
+    try:
+        if os.name == "nt":
+            command = (
+                "$p=Get-CimInstance Win32_Process -Filter \"ProcessId = "
+                f"{pid}\" -ErrorAction Stop; [Console]::Out.Write($p.CommandLine)"
+            )
+            completed = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=3,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if completed.returncode != 0:
+                return True  # conservative: never risk a duplicate writer
+            command_line = completed.stdout.casefold()
+        else:
+            command_path = Path(f"/proc/{pid}/cmdline")
+            if not command_path.is_file():
+                return True
+            command_line = command_path.read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").casefold()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return "pipeline_supervisor.py" in command_line and expected_script in command_line
+
+
+@contextmanager
+def _lock_acquisition_guard(path: Path):
+    """Serialize stale-lock inspection so check/remove/create cannot race."""
+
+    guard = path.with_name(f"{path.name}.acquire")
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            guard.mkdir()
+            break
+        except FileExistsError as error:
+            try:
+                stale = time.time() - guard.stat().st_mtime > LOCK_GUARD_STALE_SECONDS
+                if stale:
+                    guard.rmdir()
+                    continue
+            except FileNotFoundError:
+                continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise SupervisorLockError("pipeline_supervisor_lock_guard_timeout") from error
+            time.sleep(0.025)
+    try:
+        yield
+    finally:
+        try:
+            guard.rmdir()
+        except FileNotFoundError:
+            pass
+
+
+def acquire_lock(
+    path: Path = LOCK_PATH,
+    *,
+    pid: int | None = None,
+    instance_id: str | None = None,
+    repository_root: Path = REPOSITORY_ROOT,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     owner_pid = pid or os.getpid()
-    if path.exists():
-        existing_pid = _read_lock_pid(path)
-        if existing_pid is not None and is_process_alive(existing_pid):
-            raise SupervisorLockError(f"pipeline_supervisor_already_running:{existing_pid}")
-        path.unlink(missing_ok=True)
-    payload = json.dumps(
-        {"pid": owner_pid, "started_at": utc_now(), "version": SUPERVISOR_VERSION},
-        ensure_ascii=False,
-    ).encode("utf-8")
-    try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-    except FileExistsError as error:
-        raise SupervisorLockError("pipeline_supervisor_lock_race") from error
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(payload)
+    owner_instance = instance_id or str(uuid.uuid4())
+    resolved_root = str(repository_root.resolve())
+    with _lock_acquisition_guard(path):
+        if path.exists():
+            current = _read_lock_payload(path)
+            existing_pid = _read_lock_pid(path)
+            lock_root = current.get("repository_root") if current is not None else None
+            matching_root = lock_root is None or (
+                isinstance(lock_root, str)
+                and Path(lock_root).resolve() == repository_root.resolve()
+            )
+            if (
+                existing_pid is not None
+                and matching_root
+                and process_matches_supervisor(existing_pid, repository_root)
+            ):
+                raise SupervisorLockError(f"pipeline_supervisor_already_running:{existing_pid}")
+            path.unlink(missing_ok=True)
+        payload = json.dumps(
+            {
+                "pid": owner_pid,
+                "instance_id": owner_instance,
+                "repository_root": resolved_root,
+                "started_at": utc_now(),
+                "version": SUPERVISOR_VERSION,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except FileExistsError as error:
+            raise SupervisorLockError("pipeline_supervisor_lock_race") from error
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
 
 
-def release_lock(path: Path = LOCK_PATH, *, pid: int | None = None) -> None:
+def release_lock(
+    path: Path = LOCK_PATH,
+    *,
+    pid: int | None = None,
+    instance_id: str | None = None,
+) -> None:
     if not path.exists():
         return
-    owner = _read_lock_pid(path)
-    if owner in {None, pid or os.getpid()}:
+    payload = _read_lock_payload(path)
+    if payload is None:
+        return
+    owner = payload.get("pid")
+    owner_instance = payload.get("instance_id")
+    pid_matches = owner == (pid or os.getpid())
+    instance_matches = instance_id is None or owner_instance == instance_id
+    if pid_matches and instance_matches:
         path.unlink(missing_ok=True)
-
-
-def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False),
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
 
 
 def sanitize_message(value: object, *, maximum_length: int = 500) -> str:
@@ -280,6 +392,7 @@ class PipelineSupervisor:
         self.lock_path = lock_path
         self.process_factory = process_factory
         self.stop_request_path = stop_request_path
+        self.instance_id = str(uuid.uuid4())
         self.child: subprocess.Popen[str] | None = None
         self.stop_requested = False
         self.started_at = utc_now()
@@ -292,6 +405,17 @@ class PipelineSupervisor:
         self.stage: str | None = None
         self.final_status = "offline"
         self.final_state = "stopped"
+        self.runtime_status = "offline"
+        self.runtime_state = "stopped"
+        self.last_heartbeat_attempt_at: str | None = None
+        self.last_heartbeat_success_at: str | None = None
+        self.health_write_failures_total = 0
+        self.health_write_failures_consecutive = 0
+        self.health_replace_retries_total = 0
+        self.health_write_last_error: str | None = None
+        self.health_write_last_error_at: str | None = None
+        self._last_health_warning_monotonic: float | None = None
+        self._heartbeat_lock = threading.Lock()
         self._output_thread: threading.Thread | None = None
 
     def consume_stop_request(self) -> bool:
@@ -301,18 +425,57 @@ class PipelineSupervisor:
         self.stop_requested = True
         return True
 
-    def heartbeat(self, status: str, *, state: str | None = None) -> None:
-        atomic_write_json(
-            self.health_path,
-            {
+    def _health_warning_due(self, now: float) -> bool:
+        return (
+            self._last_health_warning_monotonic is None
+            or now - self._last_health_warning_monotonic >= HEALTH_WARNING_INTERVAL_SECONDS
+        )
+
+    @staticmethod
+    def _filesystem_error_context(error: OSError) -> str:
+        return sanitize_message(
+            " ".join(
+                (
+                    f"type={type(error).__name__}",
+                    f"errno={error.errno}",
+                    f"winerror={getattr(error, 'winerror', None)}",
+                    "operation=os.replace",
+                )
+            ),
+            maximum_length=240,
+        )
+
+    def heartbeat(self, status: str, *, state: str | None = None) -> bool:
+        """Persist diagnostic health without making it pipeline critical path."""
+
+        with self._heartbeat_lock:
+            attempt_at = utc_now()
+            self.last_heartbeat_attempt_at = attempt_at
+            self.runtime_status = status
+            self.runtime_state = state or ("busy" if self.analysis_id else "idle")
+            previous_failures = self.health_write_failures_consecutive
+            log_retries = self._health_warning_due(time.monotonic())
+
+            def retry_log(error: OSError, attempt: int, maximum: int, delay: float) -> None:
+                if log_retries:
+                    print(
+                        "[SUPERVISOR] Heartbeat write temporarily blocked by Windows; "
+                        f"retry {attempt}/{maximum} in {delay * 1000:.0f} ms "
+                        f"({self._filesystem_error_context(error)}).",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+            payload = {
                 "schema_version": "1.0",
                 "supervisor_version": SUPERVISOR_VERSION,
                 "status": status,
-                "state": state or ("busy" if self.analysis_id else "idle"),
+                "state": self.runtime_state,
+                "supervisor_instance_id": self.instance_id,
                 "supervisor_pid": os.getpid(),
                 "pipeline_pid": self.child.pid if self.child and self.child.poll() is None else None,
                 "started_at": self.started_at,
-                "last_heartbeat_at": utc_now(),
+                "last_heartbeat_at": attempt_at,
                 "analysis_id": self.analysis_id,
                 "stage": self.stage,
                 "last_progress_at": self.last_progress_at,
@@ -320,8 +483,50 @@ class PipelineSupervisor:
                 "preflight_status": preflight_state(self.preflight),
                 "preflight": [item.to_dict() for item in self.preflight],
                 "last_error": self.last_error,
-            },
-        )
+                "health_persistence": "healthy",
+                "health_write_failures_total": self.health_write_failures_total,
+                "health_write_failures_consecutive": 0,
+                "health_replace_retries_total": self.health_replace_retries_total,
+                "last_health_write_attempt_at": attempt_at,
+                "last_health_write_success_at": attempt_at,
+                "last_health_write_error": self.health_write_last_error,
+                "last_health_write_error_at": self.health_write_last_error_at,
+            }
+            try:
+                result = atomic_write_json(
+                    self.health_path,
+                    payload,
+                    on_retry=retry_log,
+                )
+            except OSError as error:
+                self.health_write_failures_total += 1
+                self.health_write_failures_consecutive += 1
+                self.health_write_last_error = self._filesystem_error_context(error)
+                self.health_write_last_error_at = attempt_at
+                now = time.monotonic()
+                if self._health_warning_due(now):
+                    self._last_health_warning_monotonic = now
+                    print(
+                        "[SUPERVISOR] HEALTH_PERSISTENCE_DEGRADED "
+                        f"{self.health_write_last_error} "
+                        f"path={self.health_path} pid={os.getpid()} "
+                        f"thread={threading.get_ident()} "
+                        "pipeline_execution=CONTINUES",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                return False
+            self.health_replace_retries_total += result.retries
+            self.last_heartbeat_success_at = attempt_at
+            self.health_write_failures_consecutive = 0
+            if previous_failures > 0:
+                print(
+                    "[SUPERVISOR] Health persistence restored after "
+                    f"{previous_failures} failed writes.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return True
 
     def _consume_output(self, stream: Any) -> None:
         analysis_pattern = re.compile(r"analysis(?:_id)?[=: ]+([0-9a-f-]{36})", re.IGNORECASE)
@@ -383,8 +588,13 @@ class PipelineSupervisor:
         return len(self.crashes) >= self.settings.crash_limit
 
     def run(self, *, skip_preflight: bool = False) -> int:
-        acquire_lock(self.lock_path)
+        acquire_lock(
+            self.lock_path,
+            instance_id=self.instance_id,
+            repository_root=REPOSITORY_ROOT,
+        )
         try:
+            cleanup_stale_temp_files(self.health_path)
             self.stop_request_path.unlink(missing_ok=True)
             if not skip_preflight:
                 load_dotenv(ENV_PATH, override=False)
@@ -436,7 +646,7 @@ class PipelineSupervisor:
         finally:
             self.stop_child()
             self.heartbeat(self.final_status, state=self.final_state)
-            release_lock(self.lock_path)
+            release_lock(self.lock_path, instance_id=self.instance_id)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-import { isLocalRequest, localWorkerControlAllowed } from "../../pipeline-health.ts";
+import { isLocalRequest, localWorkerControlAllowed, readRuntimeJsonWithRetry } from "../../pipeline-health.ts";
 
 
 test("worker process control is disabled in production and Vercel", { concurrency: false }, () => {
@@ -45,8 +45,33 @@ test("health route never returns environment credentials", async () => {
   assert.match(source, /profile\?\.role === "admin"/);
 });
 
+test("runtime health reader retries transient corrupt JSON and closes each read", async () => {
+  let reads = 0;
+  const value = await readRuntimeJsonWithRetry("health.json", {
+    delays: [0, 0],
+    wait: async () => undefined,
+    reader: async () => {
+      reads += 1;
+      return reads === 1 ? "{partial" : '{"status":"online"}';
+    },
+  });
+  assert.deepEqual(value, { status: "online" });
+  assert.equal(reads, 2);
+});
+
+test("runtime health reader returns only a complete old or new document under replacement", async () => {
+  const documents = ['{"generation":1}', '{"generation":2}'];
+  let index = 0;
+  for (let iteration = 0; iteration < 200; iteration += 1) {
+    const parsed = await readRuntimeJsonWithRetry("health.json", {
+      delays: [0],
+      reader: async () => documents[index++ % documents.length],
+    });
+    assert.ok(parsed.generation === 1 || parsed.generation === 2);
+  }
+});
+
 function restore(name, value) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
-

@@ -36,8 +36,22 @@ export function classifyPipelineWatchdog(
   if (health.status === "crash_loop") return "CRASH_LOOP";
   if (health.status === "degraded") return "DEGRADED";
   const heartbeatFresh = ageSeconds(health.last_heartbeat_at, now) <= 15;
-  if (!heartbeatFresh || health.status === "offline" || health.status === "unknown") return "WORKER_OFFLINE";
   const stage = analysis.processing_stage ?? analysis.status;
+  const activeAnalysisHeartbeat = activeStages.has(stage) && ageSeconds(analysis.heartbeat_at, now) <= 120;
+  if (
+    health.health_persistence === "degraded"
+    || health.health_read_status === "cached"
+  ) return "HEALTH_PERSISTENCE_DEGRADED";
+  if (health.status === "unknown") {
+    const failureIsNew = ageSeconds(health.health_unavailable_since, now) <= 15;
+    return failureIsNew || activeAnalysisHeartbeat
+      ? "HEALTH_PERSISTENCE_DEGRADED"
+      : "WORKER_OFFLINE";
+  }
+  if (!heartbeatFresh) {
+    return activeAnalysisHeartbeat ? "HEALTH_PERSISTENCE_DEGRADED" : "WORKER_OFFLINE";
+  }
+  if (health.status === "offline") return "WORKER_OFFLINE";
   if (activeStages.has(stage)) {
     if (ageSeconds(analysis.heartbeat_at, now) <= 120) return "PROCESSING";
     const pipelineOwnsAnalysis = health.pipeline_pid !== null && health.analysis_id === analysis.id;

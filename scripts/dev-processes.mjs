@@ -113,3 +113,27 @@ export function spawnManagedProcess({
     child.on("exit", (code, signal) => onExit?.(code, signal, child));
   });
 }
+
+export function runtimeSupervisorMatches({ health, lock, repoRoot, now = Date.now(), maximumAgeMs = 15_000 }) {
+  const heartbeat = Date.parse(health?.last_heartbeat_at);
+  return (
+    Number.isInteger(health?.supervisor_pid)
+    && lock?.pid === health.supervisor_pid
+    && typeof health?.supervisor_instance_id === "string"
+    && health.supervisor_instance_id.length > 0
+    && lock?.instance_id === health.supervisor_instance_id
+    && typeof lock?.repository_root === "string"
+    && win32.normalize(lock.repository_root).toLowerCase() === win32.normalize(repoRoot).toLowerCase()
+    && Number.isFinite(heartbeat)
+    && now - heartbeat >= 0
+    && now - heartbeat <= maximumAgeMs
+    && ["online", "degraded", "restarting"].includes(health?.status)
+  );
+}
+
+export function supervisorRestartDelay(attempt) {
+  const delays = [500, 1_500, 4_000];
+  return Number.isInteger(attempt) && attempt >= 1 && attempt <= delays.length
+    ? delays[attempt - 1]
+    : null;
+}

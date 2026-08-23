@@ -1,12 +1,14 @@
 import { createConnection, createServer } from "node:net";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
   ManagedProcessStartError,
   resolveNextProcess,
   resolvePythonProcess,
+  runtimeSupervisorMatches,
   spawnManagedProcess,
+  supervisorRestartDelay,
 } from "./dev-processes.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -18,6 +20,8 @@ const webPort = parseWebPort(process.env.PORT);
 const children = [];
 let shuttingDown = false;
 let runtimeSupervisorPid = null;
+let ownsPipelineSupervisor = false;
+let workerRestartAttempts = 0;
 
 function parseWebPort(value) {
   if (value === undefined || value.trim() === "") return 3000;
@@ -104,6 +108,33 @@ async function waitForWorkerHealth(startedAfterMs, timeoutMs = 15_000) {
   return null;
 }
 
+async function readJsonWithRetry(path, attempts = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return JSON.parse(await readFile(path, "utf8"));
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 20 + attempt * 30));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function existingRuntimeSupervisor() {
+  try {
+    const [health, lock] = await Promise.all([
+      readJsonWithRetry(healthPath),
+      readJsonWithRetry(supervisorLockPath),
+    ]);
+    return runtimeSupervisorMatches({ health, lock, repoRoot: root }) ? health : null;
+  } catch {
+    return null;
+  }
+}
+
 function requestShutdown(child, signal) {
   if (!processIsRunning(child)) return;
   try {
@@ -115,27 +146,14 @@ function requestShutdown(child, signal) {
   }
 }
 
-async function cleanupOwnedSupervisorLock() {
-  const supervisor = children.find(({ label }) => label === "Pipeline Supervisor")?.child;
-  if (!supervisor || processIsRunning(supervisor)) return;
-  try {
-    const lock = JSON.parse(await readFile(supervisorLockPath, "utf8"));
-    if (runtimeSupervisorPid !== null && lock?.pid === runtimeSupervisorPid) {
-      await unlink(supervisorLockPath);
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT" && !(error instanceof SyntaxError)) {
-      console.warn(`[WORKER] Nie udało się sprawdzić locka PID ${supervisor.pid}: ${processDetail(error)}`);
-    }
-  }
-}
-
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("\n[DEV] Zatrzymywanie środowiska...");
-  await mkdir(runtimeDirectory, { recursive: true }).catch(() => undefined);
-  await writeFile(stopRequestPath, `${Date.now()}\n`, "utf8").catch(() => undefined);
+  if (ownsPipelineSupervisor) {
+    await mkdir(runtimeDirectory, { recursive: true }).catch(() => undefined);
+    await writeFile(stopRequestPath, `${Date.now()}\n`, "utf8").catch(() => undefined);
+  }
 
   for (const { label, child } of children) {
     if (label !== "Pipeline Supervisor") requestShutdown(child, "SIGTERM");
@@ -149,7 +167,6 @@ async function shutdown(exitCode = 0) {
   while (children.some(({ child }) => processIsRunning(child)) && Date.now() < forceDeadline) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  await cleanupOwnedSupervisorLock();
   console.log("[DEV] Środowisko zatrzymane.");
   process.exit(exitCode);
 }
@@ -159,11 +176,46 @@ function childExitHandler(label) {
     if (shuttingDown) return;
     if (label === "Pipeline Supervisor") {
       console.error(`[WORKER] Pipeline Supervisor zakończył się (${signal ?? code ?? "unknown"}). Next.js pozostaje dostępny z diagnostyką.`);
+      ownsPipelineSupervisor = false;
+      void restartPipelineSupervisor();
       return;
     }
     console.error(`[WEB] Next.js zakończył się (${signal ?? code ?? "unknown"}). Zatrzymuję środowisko.`);
     void shutdown(code ?? 1);
   };
+}
+
+async function restartPipelineSupervisor() {
+  if (shuttingDown) return;
+  const delay = supervisorRestartDelay(workerRestartAttempts + 1);
+  if (delay === null) {
+    console.error("[WORKER] Osiągnięto limit restartów Pipeline Supervisora.");
+    return;
+  }
+  workerRestartAttempts += 1;
+  await new Promise((resolveWait) => setTimeout(resolveWait, delay));
+  if (shuttingDown) return;
+  const existing = await existingRuntimeSupervisor();
+  if (existing) {
+    runtimeSupervisorPid = existing.supervisor_pid;
+    workerRestartAttempts = 0;
+    console.log(`[WORKER] Reusing active Pipeline Supervisor (PID ${runtimeSupervisorPid}).`);
+    return;
+  }
+  try {
+    const pythonProcess = resolvePythonProcess({ repoRoot: root });
+    const worker = await startManaged(
+      "Pipeline Supervisor",
+      "WORKER",
+      "PIPELINE_SUPERVISOR_START_FAILED",
+      pythonProcess,
+    );
+    ownsPipelineSupervisor = true;
+    console.log(`[WORKER] Pipeline Supervisor restarted (PID ${worker.pid}).`);
+  } catch (error) {
+    logStartError("WORKER", error, "PIPELINE_SUPERVISOR_START_FAILED");
+    void restartPipelineSupervisor();
+  }
 }
 
 function childRuntimeErrorHandler(scope, fallbackCode) {
@@ -188,7 +240,7 @@ async function startManaged(label, scope, startupCode, specification) {
 }
 
 async function main() {
-  console.log(`[DEV] Ergonomia AI 0.14.0-beta.1`);
+  console.log(`[DEV] Ergonomia AI 0.23.0-beta.1`);
   console.log(`[DEV] Node: ${process.version}`);
   console.log(`[DEV] Platform: ${process.platform}`);
   console.log(`[DEV] Repository: ${root}\n`);
@@ -212,18 +264,24 @@ async function main() {
     return;
   }
 
-  let worker;
   const workerLaunchStartedAt = Date.now();
+  let initialWorkerHealth = await existingRuntimeSupervisor();
   try {
-    const pythonProcess = resolvePythonProcess({ repoRoot: root });
-    console.log("[WORKER] Starting Pipeline Supervisor...");
-    worker = await startManaged(
-      "Pipeline Supervisor",
-      "WORKER",
-      "PIPELINE_SUPERVISOR_START_FAILED",
-      pythonProcess,
-    );
-    console.log(`[WORKER] Pipeline Supervisor process running (PID ${worker.pid})`);
+    if (initialWorkerHealth) {
+      runtimeSupervisorPid = initialWorkerHealth.supervisor_pid;
+      console.log(`[WORKER] Reusing active Pipeline Supervisor (PID ${runtimeSupervisorPid}).`);
+    } else {
+      const pythonProcess = resolvePythonProcess({ repoRoot: root });
+      console.log("[WORKER] Starting Pipeline Supervisor...");
+      const worker = await startManaged(
+        "Pipeline Supervisor",
+        "WORKER",
+        "PIPELINE_SUPERVISOR_START_FAILED",
+        pythonProcess,
+      );
+      ownsPipelineSupervisor = true;
+      console.log(`[WORKER] Pipeline Supervisor process running (PID ${worker.pid})`);
+    }
   } catch (error) {
     logStartError("WORKER", error, "PIPELINE_SUPERVISOR_START_FAILED");
     await shutdown(1);
@@ -232,7 +290,9 @@ async function main() {
 
   const [webReady, workerHealth] = await Promise.all([
     waitForWeb(webPort),
-    waitForWorkerHealth(workerLaunchStartedAt),
+    initialWorkerHealth
+      ? Promise.resolve(initialWorkerHealth)
+      : waitForWorkerHealth(workerLaunchStartedAt),
   ]);
   if (!webReady) {
     logStartError("WEB", new Error(`Port ${webPort} nie zaczął odpowiadać w wyznaczonym czasie.`), "DEV_WEB_START_TIMEOUT");

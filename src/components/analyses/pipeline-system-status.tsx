@@ -61,7 +61,7 @@ export function PipelineSystemStatus({ initialAnalysis }: { initialAnalysis: Ana
     error: "border-red-300/20 bg-red-300/[0.045]",
     success: "border-emerald-300/15 bg-emerald-300/[0.035]",
   }[alert.tone];
-  const StatusIcon = watchdog === "PROCESSING" ? LoaderCircle : watchdog === "COMPLETED" ? CheckCircle2 : ["WORKER_OFFLINE", "CRASH_LOOP", "DEGRADED", "STALLED", "FAILED"].includes(watchdog) ? AlertTriangle : CircleDot;
+  const StatusIcon = watchdog === "PROCESSING" ? LoaderCircle : watchdog === "COMPLETED" ? CheckCircle2 : ["WORKER_OFFLINE", "CRASH_LOOP", "DEGRADED", "HEALTH_PERSISTENCE_DEGRADED", "STALLED", "FAILED"].includes(watchdog) ? AlertTriangle : CircleDot;
 
   async function control(action: "start" | "restart") {
     setPending(true); setControlError(null);
@@ -105,6 +105,7 @@ export function PipelineSystemStatus({ initialAnalysis }: { initialAnalysis: Ana
           <SystemDatum label="FFmpeg" value={ffmpeg?.status === "OK" ? "Dostępny" : "Niedostępny"} />
           <SystemDatum label="Kod" value={health.last_error?.code ?? analysis.error_code ?? watchdog} />
           <SystemDatum label="Restarty" value={String(health.restart_count)} />
+          <SystemDatum label="Diagnostyka runtime" value={health.health_persistence} />
         </dl>
         {health.preflight.some((item) => item.status === "ERROR") && <ul className="mt-3 space-y-1 rounded-lg bg-slate-950/25 p-3 text-slate-400">
           {health.preflight.filter((item) => item.status === "ERROR").map((item) => <li key={item.code}><span className="font-semibold text-slate-300">{item.code}:</span> {item.message}</li>)}
