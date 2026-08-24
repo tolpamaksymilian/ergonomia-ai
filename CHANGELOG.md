@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.23.0-beta.1] - 2026-08-24
+
+- Pose `pose-v6.0.1-beta.1` utwardza serializację wyników NumPy/OpenCV do ścisłego JSON bez zmiany schema 6.0.
+- Utwardzono lokalny runtime na Windows: przejściowa blokada `worker-health.json` nie zatrzymuje już supervisora, Pipeline Managera ani aktywnej analizy.
+- Atomowy heartbeat korzysta z unikalnego temp, `flush`, `fsync`, ograniczonego backoffu z jitterem i zachowuje ostatni poprawny dokument przy wyczerpaniu retry.
+- Dodano jawny stan `HEALTH_PERSISTENCE_DEGRADED`, liczniki awarii i recovery log, a frontend toleruje krótkie błędy odczytu bez fałszywego `OFFLINE`.
+- Wzmocniono blokadę pojedynczej instancji przez PID, UUID i katalog repozytorium oraz usunięto race restartu pomiędzy Node i Python Supervisor.
+- Pipeline Manager wykonuje kontrolowany cleanup procesów potomnych przed wymuszonym zakończeniem na Windows.
+- Pose Pipeline używa wersji `pose-v6.0.1-beta.1` i niezmienionej schema 6.0.
+
 ## [0.22.0-beta.1] - 2026-08-21
 
 - Pose Pipeline `pose-v6.0-beta.1` dodaje track-conditioned RTMW recovery po krótkim miss YOLOX oraz FPS-aware granice recovery, rekonstrukcji i HARD LOST.

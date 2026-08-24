@@ -41,6 +41,7 @@ RUNTIME_DIRECTORY = REPOSITORY_ROOT / ".runtime"
 LOCK_PATH = RUNTIME_DIRECTORY / "pipeline-supervisor.lock"
 HEALTH_PATH = RUNTIME_DIRECTORY / "worker-health.json"
 STOP_REQUEST_PATH = RUNTIME_DIRECTORY / "pipeline-supervisor.stop"
+PIPELINE_MANAGER_STOP_PATH = RUNTIME_DIRECTORY / "pipeline-manager.stop"
 PIPELINE_MANAGER_PATH = WORKER_ROOT / "src" / "pipeline_manager.py"
 READINESS_PATH = WORKER_ROOT / "src" / "check_database_readiness.py"
 REQUIRED_ENVIRONMENT = (
@@ -54,6 +55,29 @@ BACKOFF_SECONDS = (2.0, 5.0, 10.0, 20.0, 30.0)
 SECRET_MARKERS = ("secret", "token", "jwt", "authorization", "apikey", "password")
 HEALTH_WARNING_INTERVAL_SECONDS = 30.0
 LOCK_GUARD_STALE_SECONDS = 30.0
+
+
+def _configure_supervisor_stdio() -> None:
+    """Keep the supervisor-to-Node boundary deterministic on Windows."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def _utf8_child_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUNBUFFERED"] = "1"
+    return environment
+
+
+_configure_supervisor_stdio()
 
 
 @dataclass(frozen=True)
@@ -86,6 +110,30 @@ def utc_now() -> str:
 def is_process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        kernel32.CloseHandle.restype = ctypes.c_int
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5  # access denied still means the PID exists
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -111,14 +159,28 @@ def _read_lock_pid(path: Path) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _command_line_matches_supervisor(command_line: str, repository_root: Path) -> bool:
+    """Recognize both absolute and repository-relative supervisor launches.
+
+    A relative command line does not expose the process working directory on
+    every platform. In that ambiguous case we fail closed and keep the lock:
+    refusing one start is safer than creating duplicate worker trees.
+    """
+
+    normalized = command_line.casefold().replace("/", "\\")
+    expected = str(
+        (repository_root / "worker" / "src" / "pipeline_supervisor.py").resolve()
+    ).casefold().replace("/", "\\")
+    return expected in normalized or "pipeline_supervisor.py" in normalized
+
+
 def process_matches_supervisor(pid: int, repository_root: Path = REPOSITORY_ROOT) -> bool:
     """Best-effort protection against a stale lock whose PID was reused."""
 
-    if not is_process_alive(pid):
-        return False
     if pid == os.getpid():
         return True
-    expected_script = str((repository_root / "worker" / "src" / "pipeline_supervisor.py").resolve()).casefold()
+    if not is_process_alive(pid):
+        return False
     try:
         if os.name == "nt":
             command = (
@@ -145,7 +207,7 @@ def process_matches_supervisor(pid: int, repository_root: Path = REPOSITORY_ROOT
             command_line = command_path.read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").casefold()
     except (OSError, subprocess.SubprocessError):
         return True
-    return "pipeline_supervisor.py" in command_line and expected_script in command_line
+    return _command_line_matches_supervisor(command_line, repository_root)
 
 
 @contextmanager
@@ -386,12 +448,14 @@ class PipelineSupervisor:
         lock_path: Path = LOCK_PATH,
         process_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
         stop_request_path: Path = STOP_REQUEST_PATH,
+        manager_stop_path: Path = PIPELINE_MANAGER_STOP_PATH,
     ) -> None:
         self.settings = settings
         self.health_path = health_path
         self.lock_path = lock_path
         self.process_factory = process_factory
         self.stop_request_path = stop_request_path
+        self.manager_stop_path = manager_stop_path
         self.instance_id = str(uuid.uuid4())
         self.child: subprocess.Popen[str] | None = None
         self.stop_requested = False
@@ -407,6 +471,7 @@ class PipelineSupervisor:
         self.final_state = "stopped"
         self.runtime_status = "offline"
         self.runtime_state = "stopped"
+        self.health_persistence = "healthy"
         self.last_heartbeat_attempt_at: str | None = None
         self.last_heartbeat_success_at: str | None = None
         self.health_write_failures_total = 0
@@ -499,6 +564,7 @@ class PipelineSupervisor:
                     on_retry=retry_log,
                 )
             except OSError as error:
+                self.health_persistence = "degraded"
                 self.health_write_failures_total += 1
                 self.health_write_failures_consecutive += 1
                 self.health_write_last_error = self._filesystem_error_context(error)
@@ -517,6 +583,7 @@ class PipelineSupervisor:
                     )
                 return False
             self.health_replace_retries_total += result.retries
+            self.health_persistence = "healthy"
             self.last_heartbeat_success_at = attempt_at
             self.health_write_failures_consecutive = 0
             if previous_failures > 0:
@@ -546,6 +613,7 @@ class PipelineSupervisor:
         stream.close()
 
     def start_child(self) -> subprocess.Popen[str]:
+        self.manager_stop_path.unlink(missing_ok=True)
         child = self.process_factory(
             [sys.executable, "-u", str(PIPELINE_MANAGER_PATH)],
             cwd=REPOSITORY_ROOT,
@@ -554,6 +622,7 @@ class PipelineSupervisor:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=_utf8_child_environment(),
             bufsize=1,
         )
         self.child = child
@@ -566,12 +635,33 @@ class PipelineSupervisor:
         child = self.child
         if child is None or child.poll() is not None:
             return
-        child.terminate()
+        graceful_requested = False
+        try:
+            self.manager_stop_path.parent.mkdir(parents=True, exist_ok=True)
+            self.manager_stop_path.write_text(f"{utc_now()}\n", encoding="utf-8")
+            graceful_requested = True
+        except OSError as error:
+            print(
+                "[SUPERVISOR] Pipeline Manager graceful-stop marker unavailable; "
+                f"falling back to process termination ({self._filesystem_error_context(error)}).",
+                file=sys.stderr,
+                flush=True,
+            )
         try:
             child.wait(timeout=self.settings.graceful_shutdown_seconds)
         except subprocess.TimeoutExpired:
-            child.kill()
-            child.wait(timeout=5)
+            child.terminate()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
+        finally:
+            if graceful_requested:
+                try:
+                    self.manager_stop_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def register_crash(self, return_code: int, *, now: float | None = None) -> bool:
         current = time.monotonic() if now is None else now

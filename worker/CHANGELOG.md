@@ -1,5 +1,15 @@
 # Worker changelog
 
+## 0.8.1-beta.1
+
+- Pose `pose-v6.0.1-beta.1` naprawia końcowy zapis `pose-keypoints.json` i `pose-diagnostics.json`: normalizuje typy NumPy, blokuje niestandardowe `NaN`/`Infinity` i raportuje dokładną ścieżkę nieobsługiwanego pola.
+- Pipeline Supervisor `pipeline-supervisor-v1.1-beta.1` traktuje przejściowy `WinError 5` podczas zapisu heartbeat jako awarię diagnostyki, a nie błąd wykonania pipeline’u.
+- Atomowy zapis runtime używa unikalnego pliku tymczasowego, `flush`, `fsync`, ograniczonych ponowień z jitterem i bezpiecznego cleanupu bez kasowania ostatniego poprawnego health JSON.
+- Lock supervisora wiąże PID z UUID instancji i katalogiem repozytorium, obsługuje stale lock i nie pozwala drugiej instancji uruchomić duplikatów workerów.
+- Dev Supervisor ma kontrolowany restart z backoffem, a watchdog rozróżnia `HEALTH_PERSISTENCE_DEGRADED` od rzeczywistego `OFFLINE`.
+- Łagodne żądanie stopu pozwala Pipeline Managerowi posprzątać procesy potomne także na Windows.
+- Pose Pipeline działa w wersji `pose-v6.0.1-beta.1`; schema pozostaje 6.0.
+
 ## 0.8.0-beta.1
 
 - Pose `pose-v6.0-beta.1`, schema 6.0: przewidywany bbox, track-conditioned RTMW, motion modes i natychmiastowe bezpieczne podparcie krótkich missów detektora.

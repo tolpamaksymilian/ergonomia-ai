@@ -1154,4 +1154,7 @@ def _relative_depth_available(relative_depth: np.ndarray | None) -> bool:
     if relative_depth is None:
         return False
     values = np.asarray(relative_depth, dtype=float)
-    return values.size >= BODY_POINT_COUNT and np.isfinite(values[:BODY_POINT_COUNT]).any()
+    return bool(
+        values.size >= BODY_POINT_COUNT
+        and np.isfinite(values[:BODY_POINT_COUNT]).any()
+    )

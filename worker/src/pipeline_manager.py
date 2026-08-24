@@ -16,11 +16,13 @@ from typing import IO, Mapping, Sequence
 from dotenv import load_dotenv
 
 
-RELEASE_VERSION = "0.8.0-beta.1"
+RELEASE_VERSION = "0.8.1-beta.1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 WORKER_ROOT = REPOSITORY_ROOT / "worker"
 ENV_PATH = WORKER_ROOT / ".env"
 READINESS_SCRIPT = WORKER_ROOT / "src" / "check_database_readiness.py"
+RUNTIME_DIRECTORY = REPOSITORY_ROOT / ".runtime"
+STOP_REQUEST_PATH = RUNTIME_DIRECTORY / "pipeline-manager.stop"
 
 
 def _configure_manager_stdio() -> None:
@@ -566,14 +568,28 @@ def stop_processes(
                 )
 
 
+def consume_stop_request(path: Path) -> bool:
+    """Consume the supervisor-owned graceful stop marker, if present."""
+
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def run_continuous(
     selected: Sequence[WorkerSpec],
     settings: ManagerSettings,
     *,
     restart: bool,
+    stop_request_path: Path | None = None,
 ) -> int:
     if not check_environment(selected):
         return 2
+
+    if stop_request_path is not None:
+        stop_request_path.parent.mkdir(parents=True, exist_ok=True)
 
     processes = {
         worker.name: start_worker(worker)
@@ -591,6 +607,13 @@ def run_continuous(
     try:
         while processes:
             time.sleep(0.5)
+
+            if stop_request_path is not None and consume_stop_request(stop_request_path):
+                _safe_print(
+                    "Pipeline Manager: otrzymano łagodne żądanie zatrzymania.",
+                    flush=True,
+                )
+                return 0
 
             for name, process in tuple(
                 processes.items()
@@ -726,6 +749,7 @@ def main(
         selected,
         settings,
         restart=not arguments.no_restart,
+        stop_request_path=STOP_REQUEST_PATH,
     )
 
 

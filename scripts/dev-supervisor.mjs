@@ -158,7 +158,7 @@ async function shutdown(exitCode = 0) {
   for (const { label, child } of children) {
     if (label !== "Pipeline Supervisor") requestShutdown(child, "SIGTERM");
   }
-  const deadline = Date.now() + 12_000;
+  const deadline = Date.now() + 15_000;
   while (children.some(({ child }) => processIsRunning(child)) && Date.now() < deadline) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
@@ -226,12 +226,19 @@ function childRuntimeErrorHandler(scope, fallbackCode) {
 }
 
 async function startManaged(label, scope, startupCode, specification) {
+  const childEnvironment = {
+    ...process.env,
+    PYTHONUNBUFFERED: "1",
+    ...(scope === "WORKER"
+      ? { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" }
+      : {}),
+  };
   const child = await spawnManagedProcess({
     label,
     startupCode,
     ...specification,
     cwd: root,
-    env: { ...process.env, PYTHONUNBUFFERED: "1" },
+    env: childEnvironment,
     onExit: childExitHandler(label),
     onRuntimeError: childRuntimeErrorHandler(scope, startupCode),
   });

@@ -1,10 +1,10 @@
-# Pipeline Manager v0.8.0-beta.1
+# Pipeline Manager v0.8.1-beta.1
 
 `pipeline_manager.py` uruchamia istniejące workery jako oddzielne procesy. Nie importuje modeli GPU i nie kopiuje logiki etapów.
 
 Kolejność cyklu:
 
-`preprocessing → Pose V3.0 → ergonomics → risk → report`
+`preprocessing → Pose V6 → ergonomics → risk → report`
 
 ## Uruchomienie
 

@@ -46,9 +46,38 @@ def test_stale_lock_is_replaced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_live_lock_rejects_duplicate_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     lock = tmp_path / "pipeline-supervisor.lock"
     lock.write_text('{"pid": 42}', encoding="utf-8")
-    monkeypatch.setattr(pipeline_supervisor, "is_process_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        pipeline_supervisor,
+        "process_matches_supervisor",
+        lambda _pid, _repository_root: True,
+    )
     with pytest.raises(pipeline_supervisor.SupervisorLockError):
         pipeline_supervisor.acquire_lock(lock, pid=1234)
+
+
+def test_current_supervisor_identity_does_not_probe_itself_with_os_kill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        pipeline_supervisor,
+        "is_process_alive",
+        lambda _pid: (_ for _ in ()).throw(AssertionError("self PID must not be probed")),
+    )
+    assert pipeline_supervisor.process_matches_supervisor(
+        pipeline_supervisor.os.getpid(),
+        pipeline_supervisor.REPOSITORY_ROOT,
+    ) is True
+
+
+def test_relative_supervisor_command_line_is_treated_as_live_owner() -> None:
+    assert pipeline_supervisor._command_line_matches_supervisor(
+        r"python worker\src\pipeline_supervisor.py",
+        pipeline_supervisor.REPOSITORY_ROOT,
+    ) is True
+    assert pipeline_supervisor._command_line_matches_supervisor(
+        r"python worker\src\pipeline_manager.py",
+        pipeline_supervisor.REPOSITORY_ROOT,
+    ) is False
 
 
 def test_crash_window_enters_crash_loop_on_fifth_crash(tmp_path: Path) -> None:
@@ -107,6 +136,30 @@ def test_child_crash_restarts_then_preserves_crash_loop_heartbeat(tmp_path: Path
     assert not (tmp_path / "lock.json").exists()
 
 
+def test_pipeline_manager_child_uses_utf8_environment(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def factory(*_args, **kwargs):
+        captured.update(kwargs)
+        return _ImmediateExitProcess()
+
+    supervisor = pipeline_supervisor.PipelineSupervisor(
+        pipeline_supervisor.SupervisorSettings(),
+        health_path=tmp_path / "health",
+        lock_path=tmp_path / "lock",
+        manager_stop_path=tmp_path / "pipeline-manager.stop",
+        process_factory=factory,
+    )
+
+    supervisor.start_child()
+
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["PYTHONUTF8"] == "1"
+    assert environment["PYTHONIOENCODING"] == "utf-8"
+    assert environment["PYTHONUNBUFFERED"] == "1"
+
+
 def test_stop_child_uses_graceful_termination(tmp_path: Path) -> None:
     class RunningProcess(_ImmediateExitProcess):
         def __init__(self) -> None:
@@ -117,6 +170,11 @@ def test_stop_child_uses_graceful_termination(tmp_path: Path) -> None:
         def poll(self) -> int | None:
             return None if self.running else 0
 
+        def wait(self, timeout: float | None = None) -> int:
+            _ = timeout
+            self.running = False
+            return 0
+
         def terminate(self) -> None:
             self.terminated = True
             self.running = False
@@ -126,10 +184,12 @@ def test_stop_child_uses_graceful_termination(tmp_path: Path) -> None:
         pipeline_supervisor.SupervisorSettings(),
         health_path=tmp_path / "health",
         lock_path=tmp_path / "lock",
+        manager_stop_path=tmp_path / "pipeline-manager.stop",
     )
     supervisor.child = child
     supervisor.stop_child()
-    assert child.terminated is True
+    assert child.terminated is False
+    assert not (tmp_path / "pipeline-manager.stop").exists()
 
 
 def test_old_crashes_do_not_trigger_crash_loop(tmp_path: Path) -> None:

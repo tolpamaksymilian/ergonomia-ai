@@ -1,7 +1,12 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: aplikacja `0.22.0-beta.1`, worker `0.8.0-beta.1`, Pose
-`pose-v6.0-beta.1`, schema `6.0`.
+Wersje: aplikacja `0.23.0-beta.1`, worker `0.8.1-beta.1`, Pose
+`pose-v6.0.1-beta.1`, schema `6.0`.
+
+Patch `6.0.1` utwardza granicę serializacji artefaktów Pose: zatwierdzone
+skalary NumPy, tablice, enumy i ścieżki są jawnie normalizowane do typów JSON,
+a nieznany typ zatrzymuje zapis z dokładną ścieżką pola. Wartości `NaN`/`Inf`
+oznaczające brak pomiaru są zapisywane jako `null`; schema pozostaje `6.0`.
 
 ## Architektura
 

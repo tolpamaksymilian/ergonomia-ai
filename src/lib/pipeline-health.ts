@@ -261,7 +261,7 @@ export async function startPipelineSupervisor({ restart = false }: { restart?: b
     if (lock?.pid === current.supervisor_pid) {
       await mkdir(join(root, ".runtime"), { recursive: true });
       await writeFile(stopRequestPath, `${Date.now()}\n`, { encoding: "utf8" });
-      if (!await waitForSupervisorExit(current.supervisor_pid, 12_000)) {
+      if (!await waitForSupervisorExit(current.supervisor_pid, 15_000)) {
         try {
           process.kill(current.supervisor_pid, "SIGTERM");
         } catch (error) {

@@ -82,7 +82,7 @@ def bimanual_holding_v3(left:Sequence[HoldingFrameV3],right:Sequence[HoldingFram
     for a,b in zip(left,right):
         same=a.evidence.object_track_id is not None and a.evidence.object_track_id==b.evidence.object_track_id
         shared_unknown=a.evidence.contact_evidence>=0.65 and b.evidence.contact_evidence>=0.65 and min(a.evidence.common_motion,b.evidence.common_motion)>=0.65
-        output.append(a.state in likely and b.state in likely and (same or shared_unknown))
+        output.append(bool(a.state in likely and b.state in likely and (same or shared_unknown)))
     return output
 
 

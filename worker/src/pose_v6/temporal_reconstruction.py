@@ -165,7 +165,7 @@ def validate_analysis_bones(
 
     output: dict[str, dict[str, object]] = {}
     for name, (first, second) in bones.items():
-        valid_endpoints = (
+        valid_endpoints = bool(
             first < len(frame.analysis_usable)
             and second < len(frame.analysis_usable)
             and bool(frame.analysis_usable[first])

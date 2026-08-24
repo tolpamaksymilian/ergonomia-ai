@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-import json
 import logging
 import math
 import os
@@ -57,6 +56,7 @@ try:
     from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
     from worker.src.pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from worker.src.pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
@@ -67,6 +67,7 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from pose_v6.optical_flow import track_point_forward_backward
     from pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
 from pose_v5.camera_motion import CameraMotionEstimator
@@ -1171,7 +1172,9 @@ def mark_analysis_failed(
         {
             "p_analysis_id": analysis_id,
             "p_worker_id": worker_id,
-            "p_error_code": type(error).__name__.upper()[:100],
+            "p_error_code": str(
+                getattr(error, "error_code", type(error).__name__.upper())
+            )[:100],
             "p_error_message": str(error),
         },
     ).execute()
@@ -5050,14 +5053,22 @@ def process_pose_video(
         render_summary=render_v6_summary,
     )
 
-    output_json_path.write_text(
-        json.dumps(
+    try:
+        write_pose_document(
+            output_json_path,
             result_document,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
-        encoding="utf-8",
-    )
+            document_name="pose-keypoints",
+        )
+    except PoseOutputSerializationError as error:
+        logger.error(
+            "%s document=%s path=%s type=%s value=%s",
+            error.error_code,
+            error.document_name,
+            error.path,
+            error.python_type,
+            error.value_preview,
+        )
+        raise
 
     worst_tracking_frames = [
         index
@@ -5186,10 +5197,23 @@ def process_pose_video(
         "holding_transition_frames": holding_transition_frames[:10],
         "temporal_worst_frames": temporal_worst_frames,
     }
-    diagnostics_path.write_text(
-        json.dumps(diagnostics_document, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    try:
+        write_pose_document(
+            diagnostics_path,
+            diagnostics_document,
+            document_name="pose-diagnostics",
+            pretty=True,
+        )
+    except PoseOutputSerializationError as error:
+        logger.error(
+            "%s document=%s path=%s type=%s value=%s",
+            error.error_code,
+            error.document_name,
+            error.path,
+            error.python_type,
+            error.value_preview,
+        )
+        raise
 
     logger.info(
         "Pose V6 zakończone: frames_total=%d body_valid_ratio=%.3f "

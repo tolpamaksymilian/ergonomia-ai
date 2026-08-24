@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from worker.src import pipeline_supervisor
+from worker.src import runtime_state
 
 
 class _RunningWorker:
@@ -34,6 +35,7 @@ def test_heartbeat_permission_error_does_not_stop_supervisor(tmp_path: Path, mon
     )
     assert supervisor.heartbeat("online") is False
     assert supervisor.runtime_status == "online"
+    assert supervisor.health_persistence == "degraded"
     assert supervisor.health_write_failures_consecutive == 1
 
 
@@ -55,6 +57,51 @@ def test_health_write_failure_does_not_interrupt_running_worker(tmp_path: Path, 
     assert supervisor.heartbeat("online", state="busy") is False
     assert worker.terminated is False
     assert supervisor.runtime_state == "busy"
+    assert supervisor.health_persistence == "degraded"
+
+
+def test_os_replace_winerror_5_does_not_interrupt_worker_at_87_percent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "worker-health.json"
+    destination.write_text('{"status":"online","generation":1}\n', encoding="utf-8")
+
+    def blocked_replace(*_args, **_kwargs) -> None:
+        error = PermissionError(13, "Access denied")
+        error.winerror = 5
+        raise error
+
+    monkeypatch.setattr(runtime_state.os, "replace", blocked_replace)
+
+    def fast_atomic_write(path, payload, **kwargs):
+        return runtime_state.atomic_write_json(
+            path,
+            payload,
+            retry_delays=(0.0, 0.0, 0.0),
+            jitter=lambda _start, _end: 0.0,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(pipeline_supervisor, "atomic_write_json", fast_atomic_write)
+    supervisor = pipeline_supervisor.PipelineSupervisor(
+        pipeline_supervisor.SupervisorSettings(),
+        health_path=destination,
+        lock_path=tmp_path / "pipeline-supervisor.lock",
+    )
+    worker = _RunningWorker()
+    supervisor.child = worker
+    supervisor.analysis_id = "00000000-0000-0000-0000-000000000087"
+    supervisor.stage = "pose-processing-progress-87"
+
+    assert supervisor.heartbeat("online", state="busy") is False
+    assert supervisor.runtime_status == "online"
+    assert supervisor.runtime_state == "busy"
+    assert supervisor.health_write_failures_consecutive == 1
+    assert supervisor.health_persistence == "degraded"
+    assert worker.terminated is False
+    assert json.loads(destination.read_text(encoding="utf-8"))["generation"] == 1
+    assert list(tmp_path.glob("worker-health.json.*.tmp")) == []
 
 
 def test_heartbeat_recovery_resets_consecutive_failures_and_persists_healthy_state(
@@ -82,6 +129,7 @@ def test_heartbeat_recovery_resets_consecutive_failures_and_persists_healthy_sta
     assert supervisor.heartbeat("online") is True
     payload = json.loads(destination.read_text(encoding="utf-8"))
     assert supervisor.health_write_failures_consecutive == 0
+    assert supervisor.health_persistence == "healthy"
     assert payload["health_persistence"] == "healthy"
     assert payload["health_write_failures_total"] == 1
     assert payload["health_write_failures_consecutive"] == 0

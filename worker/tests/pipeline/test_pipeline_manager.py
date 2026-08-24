@@ -197,6 +197,36 @@ def test_keyboard_interrupt_calls_cleanup(monkeypatch: pytest.MonkeyPatch) -> No
     assert cleaned == ["preprocessing"]
 
 
+def test_stop_request_gracefully_cleans_worker_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = SimpleNamespace(pid=1, stdout=None, poll=lambda: None)
+    cleaned: list[str] = []
+    stop_request = tmp_path / "pipeline-manager.stop"
+    monkeypatch.setattr(pipeline_manager, "check_environment", lambda _selected: True)
+    monkeypatch.setattr(pipeline_manager, "start_worker", lambda _worker: process)
+
+    def request_stop(_delay: float) -> None:
+        stop_request.write_text("stop\n", encoding="utf-8")
+
+    monkeypatch.setattr(pipeline_manager.time, "sleep", request_stop)
+    monkeypatch.setattr(
+        pipeline_manager,
+        "stop_processes",
+        lambda processes: cleaned.extend(processes.keys()),
+    )
+    settings = pipeline_manager.ManagerSettings(1, 1, "test-manager")
+    assert pipeline_manager.run_continuous(
+        (pipeline_manager.WORKERS[0],),
+        settings,
+        restart=True,
+        stop_request_path=stop_request,
+    ) == 0
+    assert cleaned == ["preprocessing"]
+    assert not stop_request.exists()
+
+
 def test_worker_process_is_started_without_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

@@ -91,6 +91,8 @@ def test_startup_cleanup_removes_only_old_health_temp(tmp_path: Path) -> None:
 
 
 def test_concurrent_atomic_writers_and_readers_never_observe_partial_json(tmp_path: Path) -> None:
+    assert runtime_state._ATOMIC_REPLACE_LOCK.acquire(timeout=1.0)
+    runtime_state._ATOMIC_REPLACE_LOCK.release()
     destination = tmp_path / "worker-health.json"
     runtime_state.atomic_write_json(destination, {"writer": 0, "generation": 0})
     errors: list[BaseException] = []
@@ -115,7 +117,10 @@ def test_concurrent_atomic_writers_and_readers_never_observe_partial_json(tmp_pa
                     continue
                 assert isinstance(payload["writer"], int)
                 assert isinstance(payload["generation"], int)
-                time.sleep(0.0005)
+                # Readers in production poll every few seconds. A small pause
+                # still exercises hundreds of overlaps without permanently
+                # starving Windows ReplaceFile semantics with open handles.
+                time.sleep(0.005)
         except BaseException as error:  # captured and asserted in the main test thread
             errors.append(error)
 
