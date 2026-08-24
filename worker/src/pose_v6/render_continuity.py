@@ -15,6 +15,7 @@ class RenderSource(StrEnum):
     REFINED_MEASUREMENT = "REFINED_MEASUREMENT"
     INTERPOLATED = "INTERPOLATED"
     FLOW_TRACKED = "FLOW_TRACKED"
+    KINEMATIC_RECONSTRUCTED = "KINEMATIC_RECONSTRUCTED"
     KINEMATIC_PREDICTED = "KINEMATIC_PREDICTED"
     HELD = "HELD"
     HIDDEN = "HIDDEN"
@@ -34,6 +35,20 @@ class PersistentBone:
     @property
     def visible(self) -> bool:
         return self.first is not None and self.second is not None and self.alpha > 0.0
+
+    @property
+    def visibility_state(self) -> str:
+        if not self.visible:
+            return "LOST"
+        if self.source in {RenderSource.MEASURED, RenderSource.REFINED_MEASUREMENT}:
+            return "VISIBLE_MEASURED"
+        if self.source in {
+            RenderSource.INTERPOLATED,
+            RenderSource.FLOW_TRACKED,
+            RenderSource.KINEMATIC_RECONSTRUCTED,
+        }:
+            return "VISIBLE_RECONSTRUCTED"
+        return "VISIBLE_PREDICTED"
 
 
 @dataclass
@@ -110,6 +125,11 @@ class PersistentBoneRenderer:
         if current_bbox is not None and memory.bbox is not None:
             predicted_first = _transform_by_bbox(predicted_first, memory.bbox, current_bbox)
             predicted_second = _transform_by_bbox(predicted_second, memory.bbox, current_bbox)
+        predicted_first, predicted_second = _constrain_segment(
+            predicted_first,
+            predicted_second,
+            expected_length,
+        )
         safe = _safe_segment(predicted_first, predicted_second, expected_length, frame_width, frame_height)
         if not safe:
             return PersistentBone(name, None, None, 0.0, 0.0, RenderSource.HIDDEN, age, True)
@@ -121,11 +141,21 @@ class PersistentBoneRenderer:
         return PersistentBone(name, _point(predicted_first), _point(predicted_second), decay, memory.confidence * decay, RenderSource.HELD, age, False)
 
 
-def summarize_render_sources(frames: list[Mapping[str, PersistentBone]]) -> dict[str, object]:
+def summarize_render_sources(
+    frames: list[Mapping[str, PersistentBone]],
+    *,
+    eligible_frames: list[bool] | None = None,
+) -> dict[str, object]:
     counts = {source.value: 0 for source in RenderSource}
     visible = total = single_dropouts = full_dropouts = 0
     per_bone: dict[str, dict[str, object]] = {}
     midpoints: dict[str, list[np.ndarray]] = {}
+    main_names = {
+        "shoulders", "left_upper_arm", "left_forearm", "right_upper_arm",
+        "right_forearm", "hips", "left_thigh", "left_lower_leg",
+        "right_thigh", "right_lower_leg",
+    }
+    main_visible = main_total = 0
     for frame_index, frame in enumerate(frames):
         frame_visible = 0
         for name, bone in frame.items():
@@ -140,6 +170,9 @@ def summarize_render_sources(frames: list[Mapping[str, PersistentBone]]) -> dict
                 item["visible_frames"] = int(item["visible_frames"]) + 1
                 if bone.first is not None and bone.second is not None:
                     midpoints.setdefault(name, []).append((np.asarray(bone.first) + np.asarray(bone.second)) * 0.5)
+            if name in main_names and (eligible_frames is None or (frame_index < len(eligible_frames) and eligible_frames[frame_index])):
+                main_total += 1
+                main_visible += int(bone.visible)
         if frame_visible == 0 and frame:
             full_dropouts += 1
     for index in range(1, len(frames) - 1):
@@ -165,12 +198,14 @@ def summarize_render_sources(frames: list[Mapping[str, PersistentBone]]) -> dict
     return {
         "render_bone_coverage_ratio": render_coverage,
         "render_skeleton_coverage_ratio": render_coverage,
+        "main_skeleton_render_coverage_ratio": round(main_visible / main_total, 6) if main_total else 0.0,
         "render_only_support_ratio": round(
             (counts[RenderSource.HELD.value] + counts[RenderSource.KINEMATIC_PREDICTED.value]) / total,
             6,
         ) if total else 0.0,
         "render_source_counts": counts,
         "single_frame_bone_dropout_count": single_dropouts,
+        "single_frame_bone_flicker_count": single_dropouts,
         "single_frame_full_skeleton_dropout_count": single_full_dropouts,
         "full_skeleton_dropout_frame_count": full_dropouts,
         "per_bone": per_bone,
@@ -180,7 +215,8 @@ def summarize_render_sources(frames: list[Mapping[str, PersistentBone]]) -> dict
 def _combined_source(first: str, second: str) -> RenderSource:
     order = {
         "MEASURED": 0, "REFINED_MEASUREMENT": 1, "INTERPOLATED": 2,
-        "FLOW_TRACKED": 3, "KINEMATIC_PREDICTED": 4,
+        "FLOW_TRACKED": 3, "KINEMATIC_RECONSTRUCTED": 4,
+        "KINEMATIC_PREDICTED": 5,
     }
     selected = max((first, second), key=lambda value: order.get(value, 5))
     try:
@@ -215,6 +251,21 @@ def _transform_by_bbox(point: np.ndarray, previous: np.ndarray, current: np.ndar
     previous_size = np.maximum(previous[2:] - previous[:2], 1.0); current_size = np.maximum(current[2:] - current[:2], 1.0)
     scale = np.clip(current_size / previous_size, 0.78, 1.28)
     return current_center + (point - previous_center) * scale
+
+
+def _constrain_segment(first: np.ndarray, second: np.ndarray, expected: float | None) -> tuple[np.ndarray, np.ndarray]:
+    if expected is None or expected <= 1e-6:
+        return first, second
+    vector = second - first
+    length = float(np.linalg.norm(vector))
+    if length <= 1e-8 or not math.isfinite(length):
+        return first, second
+    # Preserve the moving midpoint and orientation; only remove rubber-body
+    # scaling accumulated by endpoint velocity/bbox prediction.
+    target = float(np.clip(length, expected * 0.92, expected * 1.08))
+    midpoint = (first + second) * 0.5
+    half = vector / length * target * 0.5
+    return midpoint - half, midpoint + half
 
 
 def _point(value: np.ndarray) -> tuple[float, float]:

@@ -8,7 +8,8 @@ short detector/keypoint gaps while keeping analytical provenance explicit.
 ## Quality contract
 
 Each body point is labelled `MEASURED`, `REFINED_MEASUREMENT`, `INTERPOLATED`,
-`FLOW_TRACKED`, `KINEMATIC_PREDICTED`, `REJECTED` or `MISSING`.
+`FLOW_TRACKED`, `KINEMATIC_RECONSTRUCTED`, `KINEMATIC_PREDICTED`, `REJECTED`
+or `MISSING`.
 `KINEMATIC_PREDICTED` and render `HELD` geometry are visualization-only.
 Ergonomic calculations may only consume points whose `analysis_usable` flag is
 true. Render coverage is therefore not accuracy and does not increase raw
@@ -19,12 +20,30 @@ A fallback joint replaces the primary one only when it is materially better
 and spatially consistent with body scale. Layer-level timeline states and
 coverage KPIs are documented in `TIMELINE_CONTRACT.md`.
 
+Pose 6.2 runs a precision pass after temporal reconstruction. A
+`CanonicalBodyProfile` learns median/MAD bone proportions divided by current
+body scale from strong model observations only. A dt-aware, velocity-adaptive
+state estimator stabilizes the torso first, then constrained two-bone chains.
+An isolated elbow or knee can be recovered from the two circle intersections;
+the temporally consistent branch is labelled `KINEMATIC_RECONSTRUCTED`, never
+`MEASURED`. `SkeletonGeometryValidator` reports bone, jump, side-identity,
+crossing, body-region and torso-scale anomalies.
+
+Angle Engine V2 computes provenance/quality for 2D projected angles and only
+reconstructs an isolated temporal excursion whose neighbouring samples agree;
+a sustained fast turn is retained. Grip V4 keeps MediaPipe geometry normalized
+to the palm, exposes per-finger and thumb features, checks RTMW/MediaPipe wrist
+alignment and confirms grip/release transitions with time-based hysteresis.
+Object proximity contributes evidence but does not prove a grip.
+
 ## Continuity
 
 After lock-on, a short YOLOX miss may trigger RTMW on an FPS-aware predicted
 ROI. Offline reconstruction uses bounded velocity-aware Hermite interpolation;
 validated pyramidal LK flow can fill remaining short gaps. Missing elbow/knee
-geometry can be reconstructed for rendering with stable bone lengths. Scene
+geometry can be reconstructed analytically only when both endpoints, canonical
+lengths and the geometry validator make it safe; it remains explicitly marked
+as reconstructed. Less certain prediction stays render-only. Scene
 cuts, identity conflicts, prediction uncertainty and the hard-lost time limit
 reset continuity.
 
@@ -44,4 +63,5 @@ worker\.venv\Scripts\python.exe -m pytest worker\tests\pose_v6 -q
 
 Synthetic tests validate detector gaps, bbox prediction, scene-cut/hard-lost
 boundaries, interpolation, optical-flow validation, kinematic reconstruction,
-fast motion and persistent per-bone rendering. They do not require GPU models.
+fast motion, persistent per-bone rendering, geometry jumps, angle glitches and
+grip hysteresis/occlusion. They do not require GPU models.

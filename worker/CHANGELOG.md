@@ -1,5 +1,11 @@
 # Worker changelog
 
+## 0.10.0-beta.1
+
+- Pose `pose-v6.2.0-beta.1`: canonical proportions normalized by body scale,
+  dt-aware joint state, anatomical chain projection and geometry validation.
+- Angle Engine V2 and temporal Grip V4 remain additive to pose schema `6.0`.
+
 ## 0.9.0-beta.1
 
 - Pose `pose-v6.1.0-beta.1` scala wyniki primary/hard-frame RTMW per joint z bramką jakości i przestrzennej zgodności.

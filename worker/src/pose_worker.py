@@ -50,10 +50,13 @@ from pose_v3.tracking import (
 from ergonomics.processor import compute_overlay_metrics_from_frame
 try:
     from worker.src.pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
+    from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
     from worker.src.pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
     from worker.src.pose_v6.fusion import fuse_pose_candidates
+    from worker.src.pose_v6.grip_v4 import analyze_grip_v4
     from worker.src.pose_v6.integration import augment_pose_document_v6
     from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
@@ -63,10 +66,13 @@ try:
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
     from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from pose_v6.anatomical_stability import project_anatomical_sequence
+    from pose_v6.angle_engine import stabilize_angle_sequence
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
     from pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
     from pose_v6.fusion import fuse_pose_candidates
+    from pose_v6.grip_v4 import analyze_grip_v4
     from pose_v6.integration import augment_pose_document_v6
     from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from pose_v6.optical_flow import track_point_forward_backward
@@ -4045,17 +4051,36 @@ def process_pose_video(
             analysis_id,
             type(error).__name__,
         )
+    anatomical_result = project_anatomical_sequence(
+        temporal_frames,
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [
+            bool(record["camera_motion"] is not None and record["camera_motion"].scene_cut)
+            for record in body_records
+        ],
+        maximum_prediction_seconds=pose_v6_config.temporal.render_persistence_seconds,
+    )
+    temporal_frames = anatomical_result.frames
     for index, record in enumerate(body_records):
         temporal = temporal_frames[index]
         graph = record["pose_graph"]
-        expected_bone_lengths = {
-            name: (
+        canonical_names = {
+            "left_lower_leg": "left_shin",
+            "right_lower_leg": "right_shin",
+        }
+        expected_bone_lengths = {}
+        for name, bone in graph.bones.items():
+            canonical = anatomical_result.profile.expected_pixels(
+                canonical_names.get(name, name),
+                float(graph.body_scale),
+            )
+            expected_bone_lengths[name] = canonical if canonical is not None else (
                 bone.reference_length * float(graph.body_scale)
                 if bone.reference_length is not None
                 else None
             )
-            for name, bone in graph.bones.items()
-        }
         temporal_bones = validate_analysis_bones(
             temporal,
             BODY_BONES,
@@ -4068,7 +4093,11 @@ def process_pose_video(
             if diagnostic["valid"] is False
             for endpoint in BODY_BONES[name]
             if temporal.sources[endpoint]
-            in {PointSource.INTERPOLATED, PointSource.FLOW_TRACKED}
+            in {
+                PointSource.INTERPOLATED,
+                PointSource.FLOW_TRACKED,
+                PointSource.KINEMATIC_RECONSTRUCTED,
+            }
         }
         if unsafe_reconstructed_joints:
             temporal = reject_reconstructed_analysis_joints(
@@ -4091,6 +4120,7 @@ def process_pose_video(
         record["temporal_v6"] = temporal
         record["temporal_joints_v6"] = temporal.joint_metadata(JOINT_NAMES)
         record["temporal_bones_v6"] = temporal_bones
+        record["anatomical_v62"] = anatomical_result.frame_diagnostics[index]
     smoothing_seconds = time.perf_counter() - smoothing_started_at
 
     if processed_frames <= 0:
@@ -4216,6 +4246,26 @@ def process_pose_video(
         hand_rois["right"],
         config=hand_graph_config,
     )
+    left_grip_v4 = analyze_grip_v4(
+        "left",
+        left_hand_graph,
+        output_timestamps,
+        temporal_frames,
+        confirmation_seconds=0.12,
+        release_seconds=0.12,
+        maximum_unknown_gap_seconds=0.25,
+        fallback_fps=fps,
+    )
+    right_grip_v4 = analyze_grip_v4(
+        "right",
+        right_hand_graph,
+        output_timestamps,
+        temporal_frames,
+        confirmation_seconds=0.12,
+        release_seconds=0.12,
+        maximum_unknown_gap_seconds=0.25,
+        fallback_fps=fps,
+    )
     holding_config = HoldingV2Config(
         enabled=settings.holding_enabled,
         minimum_confirmation_seconds=settings.holding_min_confirmation_seconds,
@@ -4290,6 +4340,34 @@ def process_pose_video(
         frame_quality_objects.append(quality)
         frame_quality_records.append(quality.to_dict())
 
+    raw_overlay_metric_frames: list[dict[str, dict[str, object]]] = []
+    for index, body_record in enumerate(body_records):
+        metric_input_frame = {
+            "detected": body_record["detected"],
+            "smoothed_keypoints": serialize_coordinates(
+                body_record["smoothed_points"],
+                body_record["smoothed_scores"],
+            ),
+            "scores": serialize_scores(body_record["smoothed_scores"]),
+            "body_quality": body_record["pose_graph"].to_dict(),
+            "temporal_v6": {
+                "joints": body_record["temporal_joints_v6"],
+                "analysis_bones": body_record["temporal_bones_v6"],
+            },
+            "left_hand": serialize_hand_frame(left_hand_result.frames[index]),
+            "right_hand": serialize_hand_frame(right_hand_result.frames[index]),
+        }
+        raw_overlay_metric_frames.append(compute_overlay_metrics_from_frame(
+            metric_input_frame,
+            quality_threshold=settings.keypoint_threshold,
+        ))
+    angle_v2 = stabilize_angle_sequence(
+        raw_overlay_metric_frames,
+        temporal_frames,
+        output_timestamps,
+        [str(record["motion_v6"]["state"]) for record in body_records],
+    )
+
     writer = create_video_writer(
         raw_output_video_path,
         fps,
@@ -4327,7 +4405,7 @@ def process_pose_video(
     color_hysteresis = MetricColorHysteresis()
     overlay_palette = OverlayPalette()
     overlay_diagnostics_records: list[dict[str, object]] = []
-    overlay_metric_frames: list[dict[str, dict[str, object]]] = []
+    overlay_metric_frames = angle_v2.metric_frames
     render_v6_frames: list[dict[str, PersistentBone]] = []
 
     try:
@@ -4342,26 +4420,7 @@ def process_pose_video(
             drawing_started_at = time.perf_counter()
             left_frame = left_hand_result.frames[frame_offset]
             right_frame = right_hand_result.frames[frame_offset]
-            metric_input_frame = {
-                "detected": body_record["detected"],
-                "smoothed_keypoints": serialize_coordinates(
-                    body_record["smoothed_points"],
-                    body_record["smoothed_scores"],
-                ),
-                "scores": serialize_scores(body_record["smoothed_scores"]),
-                "body_quality": body_record["pose_graph"].to_dict(),
-                "temporal_v6": {
-                    "joints": body_record["temporal_joints_v6"],
-                    "analysis_bones": body_record["temporal_bones_v6"],
-                },
-                "left_hand": serialize_hand_frame(left_frame),
-                "right_hand": serialize_hand_frame(right_frame),
-            }
-            overlay_metrics = compute_overlay_metrics_from_frame(
-                metric_input_frame,
-                quality_threshold=settings.keypoint_threshold,
-            )
-            overlay_metric_frames.append(overlay_metrics)
+            overlay_metrics = overlay_metric_frames[frame_offset]
             bbox_value = body_record.get("bbox_xyxy")
             bbox_array = (
                 np.asarray(bbox_value, dtype=np.float32)
@@ -4394,10 +4453,19 @@ def process_pose_video(
                     else None
                 )
                 expected_length = (
-                    graph_bone.reference_length
-                    * float(body_record["pose_graph"].body_scale)
-                    if graph_bone.reference_length is not None
-                    else None
+                    anatomical_result.profile.expected_pixels(
+                        {
+                            "left_lower_leg": "left_shin",
+                            "right_lower_leg": "right_shin",
+                        }.get(bone_name, bone_name),
+                        float(body_record["pose_graph"].body_scale),
+                    )
+                    or (
+                        graph_bone.reference_length
+                        * float(body_record["pose_graph"].body_scale)
+                        if graph_bone.reference_length is not None
+                        else None
+                    )
                 )
                 bone_overrides[bone_name] = persistent_renderer.update(
                     bone_name,
@@ -4466,6 +4534,20 @@ def process_pose_video(
                     1,
                     cv2.LINE_AA,
                 )
+                cv2.putText(
+                    rendered_frame,
+                    (
+                        f"angles={sum(item.get('analysis_usable') is True for item in angle_v2.diagnostics[frame_offset].values())} "
+                        f"grip L={left_grip_v4.frames[frame_offset].state.value} "
+                        f"R={right_grip_v4.frames[frame_offset].state.value}"
+                    ),
+                    (18, 78),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.42,
+                    (170, 225, 245),
+                    1,
+                    cv2.LINE_AA,
+                )
             overlay_diagnostics_records.append(
                 {
                     "rendered_bones": overlay_diagnostics.rendered_bones,
@@ -4476,6 +4558,9 @@ def process_pose_video(
                     "render_sources": overlay_diagnostics.render_sources,
                     "bone_sources": {
                         name: item.source.value for name, item in bone_overrides.items()
+                    },
+                    "bone_visibility_states": {
+                        name: item.visibility_state for name, item in bone_overrides.items()
                     },
                     "bone_prediction_age_seconds": {
                         name: round(item.age_seconds, 6)
@@ -4569,6 +4654,8 @@ def process_pose_video(
                             )
                         ),
                     },
+                    "anatomical_v62": body_record["anatomical_v62"],
+                    "angles_v2": angle_v2.diagnostics[frame_offset],
                     "timeline_v6": {
                         "contract_version": "pose-timeline-coverage-v1",
                         "layers": layer_contract,
@@ -4615,6 +4702,7 @@ def process_pose_video(
                         "grip": serialize_holding_frame_v2(
                             left_holding_frames[frame_offset]
                         ),
+                        "grip_v4": left_grip_v4.frames[frame_offset].to_dict(),
                     },
                     "right_hand": {
                         **serialize_hand_frame(right_frame),
@@ -4623,6 +4711,7 @@ def process_pose_video(
                         "grip": serialize_holding_frame_v2(
                             right_holding_frames[frame_offset]
                         ),
+                        "grip_v4": right_grip_v4.frames[frame_offset].to_dict(),
                     },
                     "holding": {
                         "left": {
@@ -4793,7 +4882,27 @@ def process_pose_video(
             6,
         ),
     }
-    render_v6_summary = summarize_render_sources(render_v6_frames)
+    render_v6_summary = summarize_render_sources(
+        render_v6_frames,
+        eligible_frames=[
+            str(record["tracking_state"]) not in {
+                TrackingState.LOST.value,
+                TrackingState.REACQUIRING.value,
+            }
+            and not bool(
+                record["camera_motion"] is not None
+                and record["camera_motion"].scene_cut
+            )
+            for record in body_records
+        ],
+    )
+    grip_valid_coverage_ratio = round(
+        (
+            sum(frame.state.value != "UNKNOWN" for frame in left_grip_v4.frames)
+            + sum(frame.state.value != "UNKNOWN" for frame in right_grip_v4.frames)
+        ) / max(1, 2 * processed_frames),
+        6,
+    )
     coalesced_layer_contracts = coalesce_short_timeline_gaps([
         frame["timeline_v6"]["layers"]
         for frame in frames_data
@@ -4833,7 +4942,7 @@ def process_pose_video(
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
-        "generated_by": "Ergonomia AI Worker V0.9",
+        "generated_by": "Ergonomia AI Worker V0.10",
         "worker_version": WORKER_VERSION,
         "pipeline_version": QUALITY_VERSION,
         "pose_version": POSE_VERSION,
@@ -4925,6 +5034,19 @@ def process_pose_video(
             ],
             "render_skeleton_coverage_ratio": render_v6_summary[
                 "render_skeleton_coverage_ratio"
+            ],
+            "main_skeleton_render_coverage_ratio": render_v6_summary[
+                "main_skeleton_render_coverage_ratio"
+            ],
+            "angle_usable_coverage_ratio": angle_v2.summary[
+                "angle_usable_coverage_ratio"
+            ],
+            "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
+            "left_hand_grip_coverage_ratio": left_grip_v4.summary[
+                "valid_coverage_ratio"
+            ],
+            "right_hand_grip_coverage_ratio": right_grip_v4.summary[
+                "valid_coverage_ratio"
             ],
             "timeline_v6": timeline_v6_summary,
             "first_processed_source_timestamp_seconds": round(
@@ -5028,6 +5150,9 @@ def process_pose_video(
                 "recovery_roi_scale": pose_v6_config.recovery_roi_scale,
                 "hard_frame_fusion": "per-joint-confidence-and-disagreement-gated",
                 "timeline_contract": "pose-timeline-coverage-v1",
+                "anatomical_projection": "canonical-normalized-constrained-chain-v1",
+                "angle_engine": "angle-engine-v2.0",
+                "grip_engine": "grip-v4.0",
             },
             "draw_hands": settings.draw_hands,
             "draw_face": settings.draw_face,
@@ -5083,6 +5208,11 @@ def process_pose_video(
                 "assignment_switches": hand_assignment_memory.assignment_switches,
                 "finger_rejections": finger_rejections,
                 "rescue": hand_rescue_summary,
+                "grip_v4": {
+                    "left": left_grip_v4.summary,
+                    "right": right_grip_v4.summary,
+                    "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
+                },
             },
             "regional_quality": region_quality_coverage(frames_data, fps=fps),
             "quality": quality_summary,
@@ -5113,6 +5243,23 @@ def process_pose_video(
                 "external_load_known": False,
             },
             "movement": movement_summary,
+            "precision_v62": {
+                **anatomical_result.summary,
+                **angle_v2.summary,
+                "main_skeleton_render_coverage_ratio": render_v6_summary[
+                    "main_skeleton_render_coverage_ratio"
+                ],
+                "single_frame_bone_flicker_count": render_v6_summary[
+                    "single_frame_bone_flicker_count"
+                ],
+                "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
+                "left_hand_grip_coverage_ratio": left_grip_v4.summary[
+                    "valid_coverage_ratio"
+                ],
+                "right_hand_grip_coverage_ratio": right_grip_v4.summary[
+                    "valid_coverage_ratio"
+                ],
+            },
             "temporal_v6": temporal_v6_summary,
             "render_v6": render_v6_summary,
             "timeline_v6": timeline_v6_summary,
@@ -5659,7 +5806,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ergonomia AI Worker V0.9 — Pose Pipeline V6"
+        description="Ergonomia AI Worker V0.10 — Pose Pipeline V6"
     )
     parser.add_argument(
         "--once",

@@ -1,7 +1,12 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: aplikacja `0.24.0-beta.1`, worker `0.9.0-beta.1`, Pose
-`pose-v6.1.0-beta.1`, schema `6.0`.
+Wersje: aplikacja `0.25.0-beta.1`, worker `0.10.0-beta.1`, Pose
+`pose-v6.2.0-beta.1`, schema `6.0`.
+
+Minor `6.2` dodaje precision pass: znormalizowany profil kanoniczny osoby,
+root-first state estimator, constrained limb-chain projection, walidator
+geometrii, Angle Engine V2 i temporalny Grip V4. Schema `6.0` pozostaje
+kompatybilna; nowe pola diagnostyczne są addytywne.
 
 Minor `6.1` dodaje per-joint fusion trudnego przebiegu RTMW oraz kontrakt
 `pose-timeline-coverage-v1`. Pełny format stanów i KPI opisuje
@@ -30,12 +35,15 @@ luki otrzymują ograniczoną interpolację Hermite z malejącą jakością. Pozo
 krótkie luki mogą przejść pyramidal Lucas–Kanade z forward-backward check,
 kontrolą bboxa i maksymalnego przemieszczenia. Brakujący środkowy joint
 shoulder–elbow–wrist lub hip–knee–ankle może zostać odtworzony z przecięcia
-okręgów o stabilnych długościach, ale wyłącznie jako render-only.
+okręgów o stabilnych długościach. W V6.2 bezpieczne rozwiązanie z dwoma
+analitycznymi końcami łańcucha może być `analysis_usable`, ale zawsze zachowuje
+provenance `KINEMATIC_RECONSTRUCTED`; pozostałe predykcje są render-only.
 
 ## Kontrakt jakości
 
 - `MEASURED` i `REFINED_MEASUREMENT`: obserwacje modelu po walidacji.
-- `INTERPOLATED` i `FLOW_TRACKED`: jawna rekonstrukcja; do ergonomii trafia
+- `INTERPOLATED`, `FLOW_TRACKED` i `KINEMATIC_RECONSTRUCTED`: jawna
+  rekonstrukcja; do ergonomii trafia
   tylko przy `analysis_usable=true`, poprawnej kości i wymaganej jakości.
 - `KINEMATIC_PREDICTED`: wsparcie wizualne, nigdy pomiar ergonomiczny.
 - `HELD`: motion-aware per-bone fallback renderera, nigdy pomiar.

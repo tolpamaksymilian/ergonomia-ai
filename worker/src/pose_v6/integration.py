@@ -21,7 +21,7 @@ def augment_pose_document_v6(
     document["worker_version"] = WORKER_VERSION
     document["pipeline_version"] = POSE_VERSION
     document["quality_version"] = POSE_VERSION
-    document["generated_by"] = "Ergonomia AI Worker V0.9"
+    document["generated_by"] = "Ergonomia AI Worker V0.10"
     configuration = document.setdefault("configuration", {})
     if isinstance(configuration, dict):
         configuration["pose_v6"] = {
@@ -36,6 +36,9 @@ def augment_pose_document_v6(
             "recovery_roi_scale": config.recovery_roi_scale,
             "hard_frame_fusion": "per-joint-confidence-and-disagreement-gated",
             "timeline_contract": "pose-timeline-coverage-v1",
+            "anatomical_projection": "canonical-normalized-constrained-chain-v1",
+            "angle_engine": "angle-engine-v2.0",
+            "grip_engine": "grip-v4.0",
         }
     summary = document.setdefault("summary", {})
     if isinstance(summary, dict):
@@ -48,6 +51,8 @@ def augment_pose_document_v6(
         *existing_limitations,
         "render_coverage_is_not_measurement_accuracy",
         "kinematic_prediction_and_render_hold_are_visualization_only",
+        "kinematic_reconstruction_is_not_a_model_measurement",
+        "angles_are_2d_video_plane_projections_not_full_3d_anatomical_angles",
         "short_reconstructed_samples_are_explicitly_labelled",
         "timeline_only_continuity_is_not_an_ergonomic_measurement",
     ]))

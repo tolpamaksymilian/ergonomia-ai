@@ -66,6 +66,21 @@ def test_safe_reconstruction_uses_reconstruction_floor_not_measurement_threshold
     assert result["frames"][0]["metrics"]["left_elbow_flexion_deg"]["valid"] is True
 
 
+def test_anatomically_validated_kinematic_reconstruction_keeps_explicit_contract() -> None:
+    frame = _frame()
+    frame["scores"][7] = 0.55
+    frame["body_quality"]["joints"][7] = {"name": "left_elbow", "valid": False, "rejection_reasons": ["LOW_CONFIDENCE"]}
+    frame["body_quality"]["bones"] = {"left_upper_arm": {"valid": False}, "left_forearm": {"valid": False}}
+    frame["temporal_v6"] = {
+        "joints": {"left_elbow": {"source": "KINEMATIC_RECONSTRUCTED", "analysis_usable": True, "quality": 0.55}},
+        "analysis_bones": {"left_upper_arm": {"valid": True}, "left_forearm": {"valid": True}},
+    }
+    result = process_pose_document({"schema_version": "6.0", "analysis_id": "a", "source": {"fps": 30}, "frames": [frame]})
+    metric = result["frames"][0]["metrics"]["left_elbow_flexion_deg"]
+    assert metric["valid"] is True
+    assert metric["source_provenance"] == "KINEMATIC_RECONSTRUCTED"
+
+
 def test_timeline_provenance_is_forwarded_to_metric_without_changing_formula() -> None:
     frame = _frame()
     frame["timeline_v6"] = {"layers": {"torso": {"state": "FLOW_TRACKED", "usability": "usable_with_reconstruction"}}}

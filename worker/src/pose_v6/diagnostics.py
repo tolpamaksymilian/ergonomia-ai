@@ -26,7 +26,11 @@ def summarize_temporal_frames(
             possible += 1; source_counts[source.value] += 1; per_joint[joint_names[index]][source.value] += 1
             if source in {PointSource.MEASURED, PointSource.REFINED_MEASUREMENT}:
                 measured += 1
-            elif source in {PointSource.INTERPOLATED, PointSource.FLOW_TRACKED} and bool(frame.analysis_usable[index]):
+            elif source in {
+                PointSource.INTERPOLATED,
+                PointSource.FLOW_TRACKED,
+                PointSource.KINEMATIC_RECONSTRUCTED,
+            } and bool(frame.analysis_usable[index]):
                 reconstructed += 1
             if bool(frame.analysis_usable[index]):
                 usable += 1

@@ -242,7 +242,11 @@ def _body_layer(
     quality = min((float(frame.render_scores[index]) for index in joints), default=0.0)
     if analysis_usable:
         state = _dominant_state(sources)
-        reconstructed = any(source in {PointSource.INTERPOLATED, PointSource.FLOW_TRACKED} for source in sources)
+        reconstructed = any(source in {
+            PointSource.INTERPOLATED,
+            PointSource.FLOW_TRACKED,
+            PointSource.KINEMATIC_RECONSTRUCTED,
+        } for source in sources)
         usability = UsabilityLevel.USABLE_WITH_RECONSTRUCTION if reconstructed else UsabilityLevel.FULLY_USABLE
     elif _bones_visible(rendered_bones, bones):
         state = (
@@ -282,6 +286,8 @@ def _dominant_state(sources: Sequence[PointSource]) -> TimelineState:
     if PointSource.FLOW_TRACKED in sources:
         return TimelineState.FLOW_TRACKED
     if PointSource.INTERPOLATED in sources:
+        return TimelineState.TEMPORALLY_RECONSTRUCTED
+    if PointSource.KINEMATIC_RECONSTRUCTED in sources:
         return TimelineState.TEMPORALLY_RECONSTRUCTED
     if PointSource.REFINED_MEASUREMENT in sources:
         return TimelineState.REFINED_MODEL

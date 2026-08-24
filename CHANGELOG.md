@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.0-beta.1] - 2026-08-24
+
+- Pose `pose-v6.2.0-beta.1` dodaje Canonical Body Profile, root-first state
+  estimator i constrained anatomical projection bez zmiany modeli YOLOX/RTMW.
+- Angle Engine V2 raportuje provenance i usuwa izolowane glitche bez tłumienia
+  ciągłego szybkiego ruchu; Grip V4 dodaje pełniejszą geometrię dłoni oraz
+  czasową histerezę chwytu i zwolnienia.
+- Renderer raportuje jawne stany trwałych kości oraz KPI ciągłości, flickeru,
+  skoków jointów, stabilności długości kości, kątów i chwytu.
+
 ## [0.24.0-beta.1] - 2026-08-24
 
 - Pose `pose-v6.1.0-beta.1` dodaje per-joint fusion podstawowego i trudnego przebiegu RTMW bez wymiany poprawnych stawów całej klatki.

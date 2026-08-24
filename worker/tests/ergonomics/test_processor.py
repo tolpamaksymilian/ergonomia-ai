@@ -61,7 +61,10 @@ def test_every_metric_has_quality_contract() -> None:
     metrics = result["frames"][0]["metrics"]  # type: ignore[index]
     assert set(metrics) == set(METRIC_NAMES)
     for metric in metrics.values():
-        assert set(metric) == {"value", "valid", "quality", "source_points", "rejection_reason"}
+        assert set(metric) == {
+            "value", "valid", "quality", "source_points",
+            "rejection_reason", "source_provenance",
+        }
 
 
 def test_unsupported_schema_is_rejected() -> None:

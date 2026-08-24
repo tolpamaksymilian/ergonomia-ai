@@ -15,6 +15,7 @@ class PointSource(StrEnum):
     REFINED_MEASUREMENT = "REFINED_MEASUREMENT"
     INTERPOLATED = "INTERPOLATED"
     FLOW_TRACKED = "FLOW_TRACKED"
+    KINEMATIC_RECONSTRUCTED = "KINEMATIC_RECONSTRUCTED"
     KINEMATIC_PREDICTED = "KINEMATIC_PREDICTED"
     REJECTED = "REJECTED"
     MISSING = "MISSING"
@@ -225,7 +226,11 @@ def reject_reconstructed_analysis_joints(
     for index in joint_indexes:
         if not 0 <= index < len(analysis_scores):
             continue
-        if frame.sources[index] not in {PointSource.INTERPOLATED, PointSource.FLOW_TRACKED}:
+        if frame.sources[index] not in {
+            PointSource.INTERPOLATED,
+            PointSource.FLOW_TRACKED,
+            PointSource.KINEMATIC_RECONSTRUCTED,
+        }:
             continue
         analysis_points[index] = 0.0
         analysis_scores[index] = 0.0

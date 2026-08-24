@@ -84,3 +84,8 @@ Schemat Pose `6.0` dodaje `frames[].temporal_v6.joints`. Silnik respektuje
 `analysis_usable`: bezpieczne próbki `INTERPOLATED`/`FLOW_TRACKED` nadal muszą
 spełnić próg jakości, natomiast `KINEMATIC_PREDICTED` i render `HELD` nie są
 traktowane jako pomiar ergonomiczny.
+
+Pose V6.2 może dodatkowo przekazać `KINEMATIC_RECONSTRUCTED`. Taka próbka jest
+dopuszczana tylko z `analysis_usable=true`, po walidacji zależnych kości i z
+konserwatywnym progiem jakości. Pole `source_provenance` wyniku zachowuje tę
+różnicę, więc rekonstrukcja nie jest przedstawiana jak pomiar modelu.

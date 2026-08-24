@@ -18,7 +18,11 @@ from .temporal import frame_durations, movement_features, reject_isolated_metric
 SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0", "5.1", "6.0"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
 RECONSTRUCTED_KEYPOINT_QUALITY_FLOOR = 0.35
-ANALYTICAL_RECONSTRUCTION_SOURCES = frozenset({"INTERPOLATED", "FLOW_TRACKED"})
+ANALYTICAL_RECONSTRUCTION_SOURCES = frozenset({
+    "INTERPOLATED",
+    "FLOW_TRACKED",
+    "KINEMATIC_RECONSTRUCTED",
+})
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
     "left_shoulder": 5,
@@ -485,6 +489,10 @@ def _metric_payload(
     metric_name: str,
 ) -> dict[str, object]:
     payload = result.to_dict()
+    payload["source_provenance"] = _metric_source_provenance(
+        source_frame,
+        result,
+    )
     timeline_v6 = source_frame.get("timeline_v6")
     layers = timeline_v6.get("layers") if isinstance(timeline_v6, dict) else None
     layer_name = _metric_layer(metric_name)
@@ -497,6 +505,30 @@ def _metric_payload(
             else layer.get("usability")
         )
     return payload
+
+
+def _metric_source_provenance(
+    source_frame: dict[str, Any],
+    result: MetricResult,
+) -> str:
+    if not result.valid:
+        return "INSUFFICIENT"
+    temporal = source_frame.get("temporal_v6")
+    joints = temporal.get("joints") if isinstance(temporal, dict) else None
+    reconstructed: list[str] = []
+    if isinstance(joints, dict):
+        for source_name in result.source_points:
+            if source_name not in BODY_KEYPOINT_INDICES:
+                continue
+            diagnostic = joints.get(source_name)
+            source = diagnostic.get("source") if isinstance(diagnostic, dict) else None
+            if isinstance(source, str) and source in ANALYTICAL_RECONSTRUCTION_SOURCES:
+                reconstructed.append(source)
+    if "KINEMATIC_RECONSTRUCTED" in reconstructed:
+        return "KINEMATIC_RECONSTRUCTED"
+    if reconstructed:
+        return "TEMPORALLY_RECONSTRUCTED"
+    return "MEASURED"
 
 
 def _metric_layer(metric_name: str) -> str:
