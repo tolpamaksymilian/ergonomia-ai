@@ -161,8 +161,10 @@ def summarize_render_sources(frames: list[Mapping[str, PersistentBone]]) -> dict
         item["coverage_ratio"] = round(bone_visible / bone_total, 6) if bone_total else 0.0
         item["mean_midpoint_step_pixels"] = round(float(np.mean(steps)), 6) if steps else 0.0
         item["percentile_95_midpoint_step_pixels"] = round(float(np.percentile(steps, 95)), 6) if steps else 0.0
+    render_coverage = round(visible / total, 6) if total else 0.0
     return {
-        "render_bone_coverage_ratio": round(visible / total, 6) if total else 0.0,
+        "render_bone_coverage_ratio": render_coverage,
+        "render_skeleton_coverage_ratio": render_coverage,
         "render_only_support_ratio": round(
             (counts[RenderSource.HELD.value] + counts[RenderSource.KINEMATIC_PREDICTED.value]) / total,
             6,

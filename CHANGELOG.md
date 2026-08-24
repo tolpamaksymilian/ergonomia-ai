@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.0-beta.1] - 2026-08-24
+
+- Pose `pose-v6.1.0-beta.1` dodaje per-joint fusion podstawowego i trudnego przebiegu RTMW bez wymiany poprawnych stawów całej klatki.
+- Dodano jawny kontrakt timeline `pose-timeline-coverage-v1`, rozdzielający pomiar, bezpieczną rekonstrukcję, wsparcie wyłącznie wizualne, niewidoczność i brak danych.
+- Metrics Engine respektuje zatwierdzoną biomechanicznie rekonstrukcję przy osobnym konserwatywnym floor jakości; predykcja kinematyczna i render hold nadal nie trafiają do obliczeń.
+- Timeline pokazuje pochodzenie rekonstrukcji i ciągłość techniczną oddzielnie od geometrycznych pasm odchylenia.
+- Dodano KPI analitycznego i wizualnego pokrycia tułowia, szyi, ramion, nadgarstków i dłoni oraz diagnostykę długości luk.
+
 ## [0.23.0-beta.1] - 2026-08-24
 
 - Pose `pose-v6.0.1-beta.1` utwardza serializację wyników NumPy/OpenCV do ścisłego JSON bez zmiany schema 6.0.

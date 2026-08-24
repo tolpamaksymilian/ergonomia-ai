@@ -45,6 +45,21 @@ def test_invalid_tracking_cannot_win(metrics_document, pose_document):
     assert all(item.frame_position != 10 for item in selected)
 
 
+def test_safe_reconstructed_pose_can_enter_candidate_timeline(metrics_document, pose_document):
+    pose_document["schema_version"] = "6.0"
+    for frame in pose_document["frames"]:
+        frame["frame_quality"]["score"] = 0.2
+    for frame in metrics_document["frames"]:
+        for metric in frame["metrics"].values():
+            if metric.get("valid") is True:
+                metric["quality"] = 0.4
+                metric["timeline_state"] = "INTERPOLATED"
+                metric["usability"] = "usable_with_reconstruction"
+    selected = select_candidate_postures(metrics_document, pose_document)
+    assert selected
+    assert min(item.quality for item in selected) >= 0.35
+
+
 def test_pose_evidence_is_joined_by_source_frame_index(metrics_document, pose_document):
     for index, frame in enumerate(pose_document["frames"]):
         frame["source_frame_index"] = index

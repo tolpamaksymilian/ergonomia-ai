@@ -129,6 +129,8 @@ function normalizeMetrics(document: UnknownRecord | null): Record<ReviewMetricNa
         band: valid ? classifyDeviation(name, value) : "unknown",
         sourceFrameIndex: integer(rawFrame.source_frame_index),
         outputFrameIndex: integer(rawFrame.output_frame_index) ?? fallbackIndex,
+        provenance: poseTimelineState(rawMetric?.timeline_state),
+        usability: poseUsability(rawMetric?.usability),
       });
     }
     const rawSummary = child(summary, name);
@@ -430,6 +432,19 @@ function riskLevel(value: unknown): RiskReview["level"] {
   return typeof value === "string" && ["low", "moderate", "high", "critical", "insufficient_data"].includes(value)
     ? value as RiskReview["level"]
     : null;
+}
+
+function poseTimelineState(value: unknown): MetricPoint["provenance"] {
+  return typeof value === "string" && [
+    "MEASURED", "REFINED_MODEL", "TEMPORALLY_RECONSTRUCTED", "FLOW_TRACKED",
+    "KINEMATICALLY_INFERRED", "LOW_CONFIDENCE_BUT_USABLE", "NOT_VISIBLE", "NO_DATA",
+  ].includes(value) ? value as MetricPoint["provenance"] : null;
+}
+
+function poseUsability(value: unknown): MetricPoint["usability"] {
+  return typeof value === "string" && [
+    "fully_usable", "usable_with_reconstruction", "usable_for_timeline_only", "insufficient",
+  ].includes(value) ? value as MetricPoint["usability"] : null;
 }
 
 function recordOrNull(value: unknown): UnknownRecord | null { return isRecord(value) ? value : null; }

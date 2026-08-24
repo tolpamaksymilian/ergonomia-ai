@@ -17,6 +17,8 @@ from .temporal import frame_durations, movement_features, reject_isolated_metric
 
 SUPPORTED_POSE_SCHEMAS = frozenset({"3.0", "3.1", "4.0", "5.0", "5.1", "6.0"})
 DEFAULT_KEYPOINT_QUALITY_THRESHOLD = 0.78
+RECONSTRUCTED_KEYPOINT_QUALITY_FLOOR = 0.35
+ANALYTICAL_RECONSTRUCTION_SOURCES = frozenset({"INTERPOLATED", "FLOW_TRACKED"})
 BODY_KEYPOINT_INDICES: dict[str, int] = {
     "nose": 0,
     "left_shoulder": 5,
@@ -91,6 +93,11 @@ def _body_point(
         isinstance(temporal_diagnostic, dict)
         and temporal_diagnostic.get("analysis_usable") is True
     )
+    temporal_source = (
+        temporal_diagnostic.get("source")
+        if isinstance(temporal_diagnostic, dict)
+        else None
+    )
     if (
         isinstance(temporal_diagnostic, dict)
         and temporal_diagnostic.get("analysis_usable") is False
@@ -123,7 +130,13 @@ def _body_point(
             else "geometry_validation_failed"
         )
         return PointSample(name, coordinates, 0.0, reason)
-    if score is None or not 0.0 <= score <= 1.0 or score < threshold:
+    effective_threshold = (
+        min(threshold, RECONSTRUCTED_KEYPOINT_QUALITY_FLOOR)
+        if temporal_allows_analysis
+        and temporal_source in ANALYTICAL_RECONSTRUCTION_SOURCES
+        else threshold
+    )
+    if score is None or not 0.0 <= score <= 1.0 or score < effective_threshold:
         return PointSample(name, coordinates, 0.0, "low_keypoint_quality")
     return PointSample(name, coordinates, min(1.0, max(0.0, score)))
 
@@ -358,6 +371,10 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
         output_timestamp = _timestamp(raw_frame_dict.get("output_timestamp_seconds"))
         timestamp = source_timestamp if source_timestamp is not None else output_timestamp
         timestamps.append(timestamp)
+        metric_payloads = {
+            name: _metric_payload(metrics[name], raw_frame_dict, name)
+            for name in METRIC_NAMES
+        }
         output_frames.append(
             {
                 "source_frame_index": _metadata_number(raw_frame_dict.get("source_frame_index")),
@@ -371,7 +388,7 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
                 "source_timestamp_seconds": source_timestamp,
                 "output_timestamp_seconds": output_timestamp,
                 "person_detected": frame_pose.person_detected,
-                "metrics": {name: metrics[name].to_dict() for name in METRIC_NAMES},
+                "metrics": metric_payloads,
                 "hand_activity": raw_frame_dict.get("holding")
                 if isinstance(raw_frame_dict.get("holding"), dict)
                 else None,
@@ -383,7 +400,11 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
             name, metric_series[name], timestamps
         )
         for index, result in enumerate(metric_series[name]):
-            output_frames[index]["metrics"][name] = result.to_dict()
+            output_frames[index]["metrics"][name] = _metric_payload(
+                result,
+                frames_value[index] if isinstance(frames_value[index], dict) else {},
+                name,
+            )
 
     holding_metric_exposure = _holding_metric_exposure(
         output_frames,
@@ -417,6 +438,7 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
             "threshold_scoring_enabled": False,
             "body_keypoint_quality_threshold": threshold,
             "quality_aggregation": "minimum_required_point_quality",
+            "reconstructed_keypoint_quality_floor": RECONSTRUCTED_KEYPOINT_QUALITY_FLOOR,
             "dependency_graph": METRIC_DEPENDENCIES,
             "temporal_validation": "metric_specific_dt_aware_outlier_rejection-v2",
             "movement_features": "prominence-and-duration-v2",
@@ -455,6 +477,46 @@ def process_pose_document(document: dict[str, Any]) -> dict[str, Any]:
         "quality_limitations": _quality_limitations(source_summary),
         "frames": output_frames,
     }
+
+
+def _metric_payload(
+    result: MetricResult,
+    source_frame: dict[str, Any],
+    metric_name: str,
+) -> dict[str, object]:
+    payload = result.to_dict()
+    timeline_v6 = source_frame.get("timeline_v6")
+    layers = timeline_v6.get("layers") if isinstance(timeline_v6, dict) else None
+    layer_name = _metric_layer(metric_name)
+    layer = layers.get(layer_name) if isinstance(layers, dict) else None
+    if isinstance(layer, dict):
+        payload["timeline_state"] = layer.get("state")
+        payload["usability"] = (
+            "usable_for_timeline_only"
+            if not result.valid and layer.get("timeline_usable") is True
+            else layer.get("usability")
+        )
+    return payload
+
+
+def _metric_layer(metric_name: str) -> str:
+    if metric_name == "trunk_inclination_deg":
+        return "torso"
+    if metric_name == "neck_flexion_deg":
+        return "neck"
+    if metric_name.startswith("left_hand") or metric_name.startswith("left_pinch"):
+        return "left_hand"
+    if metric_name.startswith("right_hand") or metric_name.startswith("right_pinch"):
+        return "right_hand"
+    if metric_name.startswith("left_wrist"):
+        return "left_wrist"
+    if metric_name.startswith("right_wrist"):
+        return "right_wrist"
+    if metric_name.startswith("left_"):
+        return "left_arm"
+    if metric_name.startswith("right_"):
+        return "right_arm"
+    return "torso"
 
 
 def _quality_limitations(summary: dict[str, Any] | None) -> list[str]:

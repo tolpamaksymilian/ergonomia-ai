@@ -56,7 +56,7 @@ export function AnalysisTimeline({ segments, duration, currentTime, onSeek }: An
         <div>
           <p className="review-eyebrow"><Layers3 className="size-4" /> Oś analizy</p>
           <h2 id="timeline-title" className="mt-2 text-xl font-semibold">Timeline zsynchronizowany z filmem</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Kolory postawy pokazują wyłącznie geometryczne pasma odchylenia, nie poziom ryzyka.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Kolory postawy pokazują wyłącznie geometryczne pasma odchylenia, nie poziom ryzyka. Turkus oznacza jawną rekonstrukcję lub ciągłość wyłącznie techniczną.</p>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Widoczne warstwy osi czasu">
           {LAYERS.map(([layer, label]) => (
@@ -115,6 +115,8 @@ export function AnalysisTimeline({ segments, duration, currentTime, onSeek }: An
 
       <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-slate-500">
         {(["neutral", "mild", "elevated", "strong", "unknown"] as const).map((band) => <span key={band} className="flex items-center gap-2"><i className={`size-2.5 rounded-sm ${segmentClass({ band } as TimelineSegment)}`} />{DEVIATION_LABELS[band]}</span>)}
+        <span className="flex items-center gap-2"><i className="size-2.5 rounded-sm bg-cyan-500" />Rekonstrukcja jawna</span>
+        <span className="flex items-center gap-2"><i className="size-2.5 rounded-sm bg-sky-700" />Tylko ciągłość timeline’u</span>
       </div>
     </section>
   );
@@ -131,6 +133,7 @@ function trackLabel(segment: TimelineSegment | undefined) {
 }
 
 function segmentLabel(segment: TimelineSegment) {
+  if (segment.description) return `${segment.label}: ${segment.description}`;
   if (segment.layer === "posture" && segment.band) return `${segment.label}: ${DEVIATION_LABELS[segment.band]}`;
   return QUALITY_WARNING_LABELS[segment.label] ?? segment.label;
 }
@@ -141,6 +144,8 @@ function segmentClass(segment: TimelineSegment) {
   if (segment.layer === "quality") return "bg-slate-400";
   if (segment.layer === "events") return "bg-neutral-500";
   if (segment.layer === "assessment") return "bg-orange-300";
+  if (segment.usability === "usable_for_timeline_only") return "bg-sky-700";
+  if (segment.provenance === "TEMPORALLY_RECONSTRUCTED" || segment.provenance === "FLOW_TRACKED") return "bg-cyan-500";
   return {
     neutral: "bg-lime-400",
     mild: "bg-amber-300",

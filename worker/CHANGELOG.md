@@ -1,5 +1,13 @@
 # Worker changelog
 
+## 0.9.0-beta.1
+
+- Pose `pose-v6.1.0-beta.1` scala wyniki primary/hard-frame RTMW per joint z bramką jakości i przestrzennej zgodności.
+- Kontrakt `pose-timeline-coverage-v1` raportuje osiem jawnych stanów i cztery poziomy użyteczności osobno dla analizy oraz render/timeline.
+- Dodano per-layer coverage, source ratios, single-frame dropout, long gaps i techniczną dostępność geometrii RULA/REBA.
+- Bezpieczna rekonstrukcja po walidacji kości używa jawnego floor jakości 0.35; render-only nadal nie jest pomiarem.
+- Krótka luka timeline może zostać scalona wyłącznie wizualnie, bez ustawiania `analysis_usable`.
+
 ## 0.8.1-beta.1
 
 - Pose `pose-v6.0.1-beta.1` naprawia końcowy zapis `pose-keypoints.json` i `pose-diagnostics.json`: normalizuje typy NumPy, blokuje niestandardowe `NaN`/`Infinity` i raportuje dokładną ścieżkę nieobsługiwanego pola.

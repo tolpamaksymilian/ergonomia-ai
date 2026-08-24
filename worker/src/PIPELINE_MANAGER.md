@@ -1,4 +1,4 @@
-# Pipeline Manager v0.8.1-beta.1
+# Pipeline Manager v0.9.0-beta.1
 
 `pipeline_manager.py` uruchamia istniejące workery jako oddzielne procesy. Nie importuje modeli GPU i nie kopiuje logiki etapów.
 

@@ -22,6 +22,15 @@ test("timeline rejects invalid timestamps", () => {
   assert.deepEqual(result, []);
 });
 
+test("timeline preserves provenance boundaries", () => {
+  const result = mergeTimelineSegments([
+    { layer: "posture", track: "left_wrist", label: "Nadgarstek", start: 0, end: 0.1, band: "unknown", provenance: "TEMPORALLY_RECONSTRUCTED", usability: "usable_for_timeline_only" },
+    { layer: "posture", track: "left_wrist", label: "Nadgarstek", start: 0.1, end: 0.2, band: "unknown", provenance: "NO_DATA", usability: "insufficient" },
+  ]);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].provenance, "TEMPORALLY_RECONSTRUCTED");
+});
+
 test("downsampling preserves extrema and invalid gaps", () => {
   const points = Array.from({ length: 2000 }, (_, index) => ({
     time: index / 10,
@@ -31,6 +40,8 @@ test("downsampling preserves extrema and invalid gaps", () => {
     band: index === 1000 ? "unknown" : "neutral",
     sourceFrameIndex: index,
     outputFrameIndex: index,
+    provenance: null,
+    usability: null,
   }));
   const result = downsampleMetricPoints(points, 200);
   assert.ok(result.length <= 200);

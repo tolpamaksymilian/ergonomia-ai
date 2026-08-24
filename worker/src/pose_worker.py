@@ -51,7 +51,9 @@ from ergonomics.processor import compute_overlay_metrics_from_frame
 try:
     from worker.src.pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from worker.src.pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from worker.src.pose_v6.fusion import fuse_pose_candidates
     from worker.src.pose_v6.integration import augment_pose_document_v6
     from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
@@ -62,7 +64,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
     from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from pose_v6.fusion import fuse_pose_candidates
     from pose_v6.integration import augment_pose_document_v6
     from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from pose_v6.optical_flow import track_point_forward_backward
@@ -3603,6 +3607,7 @@ def process_pose_video(
                     "bbox_source": bbox_source.value,
                     "motion_v6": current_motion.to_dict(),
                     "refined_measurement": False,
+                    "refined_joint_indexes": frozenset(),
                     "recovery_attempted": recovery_attempted,
                     "track_started": track_started,
                     "track_ended": tracking.state == TrackingState.LOST,
@@ -3927,15 +3932,29 @@ def process_pose_video(
                 if not isinstance(replacement, dict):
                     continue
                 record = body_records[item.frame_index]
-                record["raw_points"] = replacement["raw_points"]
-                record["raw_scores"] = replacement["raw_scores"]
-                record["bbox_array"] = replacement["bbox"]
-                record["render_bbox_array"] = replacement["bbox"].copy()
-                record["bbox_xyxy"] = [
-                    round(float(value), 2) for value in replacement["bbox"]
-                ]
-                record["bbox_source"] = BBoxSource.TEMPORAL_REFINED.value
-                record["refined_measurement"] = True
+                fused = fuse_pose_candidates(
+                    record["raw_points"],
+                    record["raw_scores"],
+                    replacement["raw_points"],
+                    replacement["raw_scores"],
+                )
+                record["raw_points"] = fused.points
+                record["raw_scores"] = fused.scores
+                record["refined_measurement"] = bool(fused.refined_joint_indexes)
+                record["refined_joint_indexes"] = fused.refined_joint_indexes
+                if fused.refined_joint_indexes:
+                    record["bbox_array"] = replacement["bbox"]
+                    record["render_bbox_array"] = replacement["bbox"].copy()
+                    record["bbox_xyxy"] = [
+                        round(float(value), 2) for value in replacement["bbox"]
+                    ]
+                    record["bbox_source"] = BBoxSource.TEMPORAL_REFINED.value
+                record["refinement_fusion"] = {
+                    "accepted_joint_count": len(fused.refined_joint_indexes),
+                    "accepted_joint_indexes": sorted(fused.refined_joint_indexes),
+                    "rejected_disagreement_count": len(fused.rejected_fallback_indexes),
+                    "rejected_disagreement_indexes": sorted(fused.rejected_fallback_indexes),
+                }
                 refined_hands = replacement.get("raw_hands")
                 if isinstance(refined_hands, dict):
                     for side in ("left", "right"):
@@ -4003,10 +4022,10 @@ def process_pose_video(
         maximum_prediction_seconds=(
             pose_v6_config.temporal.render_persistence_seconds
         ),
-        refined_frames={
-            index
+        refined_joints={
+            index: record["refined_joint_indexes"]
             for index, record in enumerate(body_records)
-            if bool(record["refined_measurement"])
+            if record["refined_joint_indexes"]
         },
         body_joint_count=BODY_POINT_COUNT,
     )
@@ -4399,6 +4418,16 @@ def process_pose_video(
                     scene_cut=False,
                 )
             render_v6_frames.append(bone_overrides)
+            layer_contract = build_frame_layer_contract(
+                temporal,
+                raw_scores=body_record["raw_scores"],
+                rendered_bones=bone_overrides,
+                left_hand_visible=left_frame.visible,
+                left_hand_quality=left_frame.quality,
+                right_hand_visible=right_frame.visible,
+                right_hand_quality=right_frame.quality,
+                tracking_state=str(body_record["tracking_state"]),
+            )
             rendered_frame, overlay_diagnostics = draw_pose_overlay_v4(
                 frame,
                 body_record["pose_graph"],
@@ -4498,6 +4527,7 @@ def process_pose_video(
                     "detected": body_record["detected"],
                     "raw_person_detected": body_record["raw_person_detected"],
                     "bbox_source": body_record["bbox_source"],
+                    "refinement_fusion": body_record.get("refinement_fusion"),
                     "motion_v6": body_record["motion_v6"],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
@@ -4538,6 +4568,10 @@ def process_pose_video(
                                 for source in body_record["temporal_v6"].sources[:BODY_POINT_COUNT]
                             )
                         ),
+                    },
+                    "timeline_v6": {
+                        "contract_version": "pose-timeline-coverage-v1",
+                        "layers": layer_contract,
                     },
                     "camera_motion": (
                         body_record["camera_motion"].to_dict()
@@ -4736,7 +4770,41 @@ def process_pose_video(
         joint_names=JOINT_NAMES,
         fps=fps,
     )
+    fusion_records = [
+        record["refinement_fusion"]
+        for record in body_records
+        if isinstance(record.get("refinement_fusion"), dict)
+    ]
+    temporal_v6_summary["hard_frame_fusion"] = {
+        "candidate_frame_count": len(fusion_records),
+        "frames_with_refined_joints": sum(
+            int(record.get("accepted_joint_count", 0)) > 0
+            for record in fusion_records
+        ),
+        "accepted_joint_count": sum(
+            int(record.get("accepted_joint_count", 0)) for record in fusion_records
+        ),
+        "rejected_disagreement_count": sum(
+            int(record.get("rejected_disagreement_count", 0)) for record in fusion_records
+        ),
+        "accepted_frame_ratio": round(
+            sum(int(record.get("accepted_joint_count", 0)) > 0 for record in fusion_records)
+            / max(1, len(fusion_records)),
+            6,
+        ),
+    }
     render_v6_summary = summarize_render_sources(render_v6_frames)
+    coalesced_layer_contracts = coalesce_short_timeline_gaps([
+        frame["timeline_v6"]["layers"]
+        for frame in frames_data
+        if isinstance(frame.get("timeline_v6"), dict)
+    ])
+    for frame, layers in zip(frames_data, coalesced_layer_contracts):
+        frame["timeline_v6"]["layers"] = layers
+    timeline_v6_summary = summarize_layer_coverage(
+        coalesced_layer_contracts,
+        fps=fps,
+    )
     temporal_worst_frames = rank_temporal_worst_frames(body_records)
     runtime_breakdown = {
         "person_detection_ms": round(1000.0 * sum(
@@ -4765,7 +4833,7 @@ def process_pose_video(
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
-        "generated_by": "Ergonomia AI Worker V0.8",
+        "generated_by": "Ergonomia AI Worker V0.9",
         "worker_version": WORKER_VERSION,
         "pipeline_version": QUALITY_VERSION,
         "pose_version": POSE_VERSION,
@@ -4799,6 +4867,11 @@ def process_pose_video(
             "missing_values_are_carried_forward": False,
             "render_only_is_analysis_usable": False,
             "point_sources": [source.value for source in PointSource],
+            "timeline_states": [
+                "MEASURED", "REFINED_MODEL", "TEMPORALLY_RECONSTRUCTED",
+                "FLOW_TRACKED", "KINEMATICALLY_INFERRED",
+                "LOW_CONFIDENCE_BUT_USABLE", "NOT_VISIBLE", "NO_DATA",
+            ],
         },
         "source": {
             "width": width,
@@ -4850,6 +4923,10 @@ def process_pose_video(
             "render_bone_coverage_ratio": render_v6_summary[
                 "render_bone_coverage_ratio"
             ],
+            "render_skeleton_coverage_ratio": render_v6_summary[
+                "render_skeleton_coverage_ratio"
+            ],
+            "timeline_v6": timeline_v6_summary,
             "first_processed_source_timestamp_seconds": round(
                 float(body_records[0]["source_timestamp_seconds"]), 6
             ),
@@ -4949,6 +5026,8 @@ def process_pose_video(
                 "flow_enabled": pose_v6_config.optical_flow.enabled,
                 "flow_max_error": pose_v6_config.optical_flow.maximum_forward_backward_error,
                 "recovery_roi_scale": pose_v6_config.recovery_roi_scale,
+                "hard_frame_fusion": "per-joint-confidence-and-disagreement-gated",
+                "timeline_contract": "pose-timeline-coverage-v1",
             },
             "draw_hands": settings.draw_hands,
             "draw_face": settings.draw_face,
@@ -5036,6 +5115,7 @@ def process_pose_video(
             "movement": movement_summary,
             "temporal_v6": temporal_v6_summary,
             "render_v6": render_v6_summary,
+            "timeline_v6": timeline_v6_summary,
             "runtime_breakdown": runtime_breakdown,
         },
         "frames": frames_data,
@@ -5579,7 +5659,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ergonomia AI Worker V0.8 — Pose Pipeline V6"
+        description="Ergonomia AI Worker V0.9 — Pose Pipeline V6"
     )
     parser.add_argument(
         "--once",

@@ -20,6 +20,7 @@ def test_visibility_111011_becomes_continuous_with_explicit_hold() -> None:
     summary = summarize_render_sources(frames)
     assert summary["single_frame_bone_dropout_count"] == 0
     assert summary["render_bone_coverage_ratio"] == 1.0
+    assert summary["render_skeleton_coverage_ratio"] == 1.0
 
 
 def test_hold_moves_with_bbox_instead_of_freezing() -> None:

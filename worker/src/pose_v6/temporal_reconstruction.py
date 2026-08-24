@@ -58,6 +58,7 @@ def reconstruct_temporal_sequence(
     maximum_interpolation_seconds: float,
     maximum_prediction_seconds: float = 0.55,
     refined_frames: set[int] | None = None,
+    refined_joints: Mapping[int, set[int] | frozenset[int]] | None = None,
     body_joint_count: int = 23,
 ) -> list[TemporalFrame]:
     """Reconstruct bounded gaps without changing rejected data into raw data."""
@@ -79,6 +80,12 @@ def reconstruct_temporal_sequence(
     for index in refined_frames or set():
         if 0 <= index < count:
             sources[index, usable[index]] = PointSource.REFINED_MEASUREMENT.value
+    for frame_index, joint_indexes in (refined_joints or {}).items():
+        if not 0 <= frame_index < count:
+            continue
+        for joint_index in joint_indexes:
+            if 0 <= joint_index < joint_count and usable[frame_index, joint_index]:
+                sources[frame_index, joint_index] = PointSource.REFINED_MEASUREMENT.value
     ages = np.zeros((count, joint_count), dtype=np.float32)
     flow_errors = np.full((count, joint_count), np.nan, dtype=np.float32)
 

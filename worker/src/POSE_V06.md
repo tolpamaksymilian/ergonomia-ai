@@ -1,7 +1,11 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: aplikacja `0.23.0-beta.1`, worker `0.8.1-beta.1`, Pose
-`pose-v6.0.1-beta.1`, schema `6.0`.
+Wersje: aplikacja `0.24.0-beta.1`, worker `0.9.0-beta.1`, Pose
+`pose-v6.1.0-beta.1`, schema `6.0`.
+
+Minor `6.1` dodaje per-joint fusion trudnego przebiegu RTMW oraz kontrakt
+`pose-timeline-coverage-v1`. Pełny format stanów i KPI opisuje
+`pose_v6/TIMELINE_CONTRACT.md`. Jest to rozszerzenie addytywne schema 6.0.
 
 Patch `6.0.1` utwardza granicę serializacji artefaktów Pose: zatwierdzone
 skalary NumPy, tablice, enumy i ścieżki są jawnie normalizowane do typów JSON,

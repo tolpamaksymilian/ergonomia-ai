@@ -28,11 +28,19 @@ def metric_evidence(
     if raw.get("valid") is not True or value is None:
         reason = raw.get("rejection_reason")
         return unknown(component_name, (metric_name,), str(reason or "metric_invalid"))
-    if quality < minimum_quality:
+    reconstructed = raw.get("usability") == "usable_with_reconstruction"
+    effective_minimum = min(minimum_quality, 0.35) if reconstructed else minimum_quality
+    if quality < effective_minimum:
         return unknown(component_name, (metric_name,), "component_quality_below_threshold", quality)
     category, score = categorizer(value)
     points = raw.get("source_points")
     evidence = tuple(str(point) for point in points) if isinstance(points, list) else ()
+    temporal_source = raw.get("timeline_state")
+    temporal_evidence = (
+        (str(temporal_source),)
+        if reconstructed and isinstance(temporal_source, str)
+        else ()
+    )
     return EvidenceValue(
         name=component_name,
         raw_input=value,
@@ -40,7 +48,7 @@ def metric_evidence(
         score=score,
         quality=quality,
         source=EvidenceSource.DERIVED,
-        evidence=(metric_name, *evidence),
+        evidence=(metric_name, *temporal_evidence, *evidence),
     )
 
 

@@ -18,6 +18,8 @@ export function mergeTimelineSegments(
       previous.layer === segment.layer &&
       previous.track === segment.track &&
       previous.band === segment.band &&
+      previous.provenance === segment.provenance &&
+      previous.usability === segment.usability &&
       previous.label === segment.label &&
       segment.start <= previous.end + maximumGapSeconds
     ) {
@@ -48,6 +50,13 @@ export function metricPointsToSegments(
       end: point.time + durations[index],
       band: point.valid ? point.band : ("unknown" as DeviationBand),
       quality: point.quality,
+      provenance: point.provenance,
+      usability: point.usability,
+      description: point.valid
+        ? undefined
+        : point.usability === "usable_for_timeline_only"
+          ? "Ciągłość techniczna bez wartości użytej do obliczeń."
+          : undefined,
     })),
   );
 }

@@ -247,7 +247,7 @@ async function startManaged(label, scope, startupCode, specification) {
 }
 
 async function main() {
-  console.log(`[DEV] Ergonomia AI 0.23.0-beta.1`);
+  console.log(`[DEV] Ergonomia AI 0.24.0-beta.1`);
   console.log(`[DEV] Node: ${process.version}`);
   console.log(`[DEV] Platform: ${process.platform}`);
   console.log(`[DEV] Repository: ${root}\n`);

@@ -14,6 +14,11 @@ Ergonomic calculations may only consume points whose `analysis_usable` flag is
 true. Render coverage is therefore not accuracy and does not increase raw
 measurement coverage.
 
+Pose 6.1 additionally fuses the normal and hard-frame RTMW results per joint.
+A fallback joint replaces the primary one only when it is materially better
+and spatially consistent with body scale. Layer-level timeline states and
+coverage KPIs are documented in `TIMELINE_CONTRACT.md`.
+
 ## Continuity
 
 After lock-on, a short YOLOX miss may trigger RTMW on an FPS-aware predicted

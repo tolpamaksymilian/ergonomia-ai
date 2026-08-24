@@ -23,7 +23,8 @@ def frame_quality(frame: Mapping[str, Any], pose_frame: Mapping[str, Any] | None
         if isinstance(quality, Mapping):
             score = finite_number(quality.get("score"))
             if score is not None:
-                return min(1.0, max(0.0, score))
+                reconstructed_quality = _safe_reconstructed_metric_quality(frame)
+                return min(1.0, max(0.0, max(score, reconstructed_quality or 0.0)))
     metrics = frame.get("metrics")
     if not isinstance(metrics, Mapping):
         return 0.0
@@ -34,6 +35,21 @@ def frame_quality(frame: Mapping[str, Any], pose_frame: Mapping[str, Any] | None
     ]
     valid = [value for value in values if value is not None]
     return min(valid) if valid else 0.0
+
+
+def _safe_reconstructed_metric_quality(frame: Mapping[str, Any]) -> float | None:
+    metrics = frame.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    values = [
+        finite_number(metric.get("quality"))
+        for metric in metrics.values()
+        if isinstance(metric, Mapping)
+        and metric.get("valid") is True
+        and metric.get("usability") == "usable_with_reconstruction"
+    ]
+    finite = [value for value in values if value is not None]
+    return min(finite) if finite else None
 
 
 def evidence_coverage(components: Sequence[EvidenceValue]) -> float:

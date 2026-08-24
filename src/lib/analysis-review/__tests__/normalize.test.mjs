@@ -44,3 +44,13 @@ test("normalizer extracts Holding V2 without inventing object classes", () => {
   assert.equal(model.hands.left.episodes[0].objectClass, null);
   assert.equal(model.hands.left.holdingRatio, 0.5);
 });
+
+test("normalizer forwards explicit Pose V6 metric provenance", () => {
+  const source = structuredClone(ergonomics);
+  source.frames[0].metrics.trunk_inclination_deg.timeline_state = "FLOW_TRACKED";
+  source.frames[0].metrics.trunk_inclination_deg.usability = "usable_with_reconstruction";
+  const model = normalizeAnalysisReview({ analysisId: "analysis-v6", pose: { schema_version: "6.0", frames: [] }, ergonomics: source, risk: null, report: null });
+  const point = model.metrics.trunk_inclination_deg.points[0];
+  assert.equal(point.provenance, "FLOW_TRACKED");
+  assert.equal(point.usability, "usable_with_reconstruction");
+});

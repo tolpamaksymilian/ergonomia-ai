@@ -7,6 +7,22 @@ export type DeviationBand =
   | "strong"
   | "unknown";
 
+export type PoseTimelineState =
+  | "MEASURED"
+  | "REFINED_MODEL"
+  | "TEMPORALLY_RECONSTRUCTED"
+  | "FLOW_TRACKED"
+  | "KINEMATICALLY_INFERRED"
+  | "LOW_CONFIDENCE_BUT_USABLE"
+  | "NOT_VISIBLE"
+  | "NO_DATA";
+
+export type PoseUsability =
+  | "fully_usable"
+  | "usable_with_reconstruction"
+  | "usable_for_timeline_only"
+  | "insufficient";
+
 export type ReviewMetricName =
   | "trunk_inclination_deg"
   | "neck_flexion_deg"
@@ -31,6 +47,8 @@ export type MetricPoint = {
   band: DeviationBand;
   sourceFrameIndex: number | null;
   outputFrameIndex: number | null;
+  provenance: PoseTimelineState | null;
+  usability: PoseUsability | null;
 };
 
 export type MetricStatistics = {
@@ -70,6 +88,8 @@ export type TimelineSegment = {
   band?: DeviationBand;
   quality?: number | null;
   description?: string;
+  provenance?: PoseTimelineState | null;
+  usability?: PoseUsability | null;
 };
 
 export type HoldingEpisode = {

@@ -47,7 +47,7 @@ def select_candidate_postures(
         if pose_frame is None:
             pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
         quality=frame_quality(frame,pose_frame)
-        if quality<minimum_quality: continue
+        if quality<_candidate_minimum_quality(frame, minimum_quality): continue
         previous=severities[index-1] if index else -1.0; following=severities[index+1] if index+1<len(frames) else -1.0
         holding=_holding(frame)
         if severities[index] < previous or severities[index] < following:
@@ -69,7 +69,7 @@ def select_candidate_postures(
             if pose_frame is None:
                 pose_frame=pose_frames[index] if index<len(pose_frames) and isinstance(pose_frames[index],Mapping) else None
             quality=frame_quality(frame,pose_frame)
-            if quality>=minimum_quality:
+            if quality>=_candidate_minimum_quality(frame, minimum_quality):
                 raw.append(CandidatePosture(f"posture-{index:06d}",index,integer_or_none(frame.get("source_frame_index")),integer_or_none(frame.get("output_frame_index")),_timestamp(frame,index,ergonomics),0.0,("representative_valid_frame",),"bilateral",quality,severities[index]))
     selected: list[CandidatePosture]=[]
     for candidate in rank_candidates(raw):
@@ -89,6 +89,17 @@ def _severity(frame: object)->float:
         value=finite_number(metric.get("value")) if isinstance(metric,Mapping) and metric.get("valid") is True else None
         if value is not None: values.append(min(abs(value)/NORMALIZERS[name],1.5)/1.5)
     return max(values,default=0.0)
+
+
+def _candidate_minimum_quality(frame: Mapping[str, Any], default: float) -> float:
+    metrics = frame.get("metrics")
+    has_safe_reconstruction = isinstance(metrics, Mapping) and any(
+        isinstance(metric, Mapping)
+        and metric.get("valid") is True
+        and metric.get("usability") == "usable_with_reconstruction"
+        for metric in metrics.values()
+    )
+    return min(default, 0.35) if has_safe_reconstruction else default
 
 
 def _holding(frame:Mapping[str,Any])->bool:
