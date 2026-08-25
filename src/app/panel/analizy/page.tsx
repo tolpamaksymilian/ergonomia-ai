@@ -1,9 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, FileImage, FileVideo, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { CalendarDays, FileImage, FileVideo, Plus, Search, SlidersHorizontal } from "lucide-react";
 
 import { getAnalysisStatusDefinition } from "@/config/analysis-status";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
@@ -79,27 +78,26 @@ export default async function AnalysesPage({ searchParams }: { searchParams: Pro
   const pages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const active = Boolean(q || analysisType || status || workstation || categoryIds.length || raw.from || raw.to || raw.group);
 
-  return <main className="ui-page px-4 py-6 sm:px-8">
-    <div className="mx-auto max-w-7xl space-y-6">
-      <header className="ui-surface flex flex-wrap items-center justify-between gap-4 p-5"><div><Link href="/panel" className="inline-flex items-center gap-2 text-sm text-muted-foreground"><ArrowLeft className="size-4" />Panel</Link><h1 className="mt-3 text-3xl font-bold tracking-tight">Historia analiz</h1><p className="mt-1 text-sm text-muted-foreground">Wyszukuj analizy według stanowiska, procesu, kategorii i daty.</p></div><div className="flex flex-wrap items-center gap-2"><ThemeToggle /><Link href="/panel/ustawienia/kategorie" className="ui-button-secondary text-sm">Kategorie</Link><Link href="/panel/analizy/nowa" className="ui-button-primary text-sm"><Plus className="size-4" />Nowa analiza</Link></div></header>
-      <form className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+  return <div className="dashboard-page">
+      <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="dashboard-eyebrow">Historia i wyszukiwanie</p><h1 className="dashboard-title mt-2">Analizy</h1><p className="dashboard-muted mt-2">Wyszukuj analizy według stanowiska, procesu, kategorii i daty.</p></div><div className="flex flex-wrap items-center gap-2"><Link href="/panel/ustawienia/kategorie" className="ui-button-secondary text-sm">Kategorie</Link><Link href="/panel/analizy/nowa" className="ui-button-primary text-sm"><Plus className="size-4" />Nowa analiza</Link></div></header>
+      <form className="dashboard-card p-5">
         <div className="grid gap-4 lg:grid-cols-4">
-          <label className="lg:col-span-2 text-sm font-medium">Szukaj analiz…<span className="relative mt-1 block"><Search className="absolute left-3 top-3.5 size-4 text-slate-400" /><input name="q" defaultValue={q} className="min-h-11 w-full rounded-xl border border-slate-300 pl-10 pr-3" placeholder="Nazwa, plik lub proces" /></span></label>
+          <label className="lg:col-span-2 text-sm font-medium">Szukaj analiz…<span className="relative mt-1 block"><Search className="absolute left-3 top-3.5 size-4 text-muted-foreground" /><input name="q" defaultValue={q} className="ui-input pl-10" placeholder="Nazwa, plik lub proces" /></span></label>
           <Select name="type" label="Typ" value={analysisType} options={[["","Wszystkie"],["VIDEO","Film"],["PHOTO_SCENE","Projekt ze zdjęcia"]]} />
           <Select name="status" label="Status" value={status} options={[["", "Wszystkie"], ...statuses.map((item) => [item, getAnalysisStatusDefinition(item, null).shortLabel] as const)]} />
           <Select name="workstation" label="Stanowisko" value={workstation} options={[["", "Wszystkie"], ...(workstations ?? []).map((item) => [item.id, item.name] as const)]} />
-          <label className="text-sm font-medium">Data od<input type="date" name="from" defaultValue={raw.from ?? ""} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
-          <label className="text-sm font-medium">Data do<input type="date" name="to" defaultValue={raw.to ?? ""} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3" /></label>
+          <label className="text-sm font-medium">Data od<input type="date" name="from" defaultValue={raw.from ?? ""} className="ui-input mt-1" /></label>
+          <label className="text-sm font-medium">Data do<input type="date" name="to" defaultValue={raw.to ?? ""} className="ui-input mt-1" /></label>
           <Select name="sort" label="Sortowanie" value={sort} options={[["newest","Najnowsze"],["oldest","Najstarsze"],["name-asc","Nazwa A–Z"],["name-desc","Nazwa Z–A"]]} />
           <Select name="group" label="Grupa kategorii" value={group} options={[["","Wszystkie"], ...[...new Set((categories ?? []).map((item) => item.group_name))].map((item) => [item,item] as const)]} />
           <Select name="category_mode" label="Dopasuj kategorie" value={mode} options={[["and","Wszystkie (AND)"],["or","Dowolną (OR)"]]} />
         </div>
         <details className="mt-4"><summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="size-4" />Kategorie</summary><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{(categories ?? []).map((item) => <label key={item.id} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm"><input type="checkbox" name="category" value={item.id} defaultChecked={categoryIds.includes(item.id)} />{item.group_name}: {item.name}</label>)}</div></details>
-        <div className="mt-5 flex flex-wrap gap-2"><button className="min-h-11 rounded-xl bg-slate-900 px-5 font-semibold text-white">Zastosuj filtry</button>{active && <Link href="/panel/analizy" className="min-h-11 rounded-xl border border-slate-300 px-5 py-3 font-semibold">Wyczyść filtry</Link>}</div>
+        <div className="mt-5 flex flex-wrap gap-2"><button className="ui-button-primary">Zastosuj filtry</button>{active && <Link href="/panel/analizy" className="ui-button-secondary">Wyczyść filtry</Link>}</div>
       </form>
       {active && <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-500">Aktywne filtry:</span>{q && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Szukaj: {q}</span>}{analysisType && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Typ: {analysisType === "VIDEO" ? "Film" : "Projekt ze zdjęcia"}</span>}{status && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Status: {getAnalysisStatusDefinition(status,null).shortLabel}</span>}{workstation && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Stanowisko: {(workstations??[]).find((item)=>item.id===workstation)?.name}</span>}{group && <span className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Grupa: {group}</span>}{categoryIds.map((id)=><span key={id} className="rounded-full bg-white px-3 py-1 text-xs shadow-sm">Kategoria: {(categories??[]).find((item)=>item.id===id)?.name}</span>)}</div>}
       {error && <p className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">Nie udało się pobrać historii analiz.</p>}
-      {!error && !analyses.length && <section className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center"><FileVideo className="mx-auto size-9 text-slate-400" /><h2 className="mt-4 text-xl font-bold">Nie znaleziono analiz spełniających wybrane kryteria.</h2>{active && <Link href="/panel/analizy" className="mt-4 inline-block font-semibold text-emerald-700">Pokaż wszystkie</Link>}</section>}
+      {!error && !analyses.length && <section className="dashboard-card border-dashed p-12 text-center"><FileVideo className="mx-auto size-9 text-muted-foreground" /><h2 className="mt-4 text-xl font-bold">Nie znaleziono analiz spełniających wybrane kryteria.</h2>{active && <Link href="/panel/analizy" className="mt-4 inline-block font-semibold text-violet-600">Pokaż wszystkie</Link>}</section>}
       {!!analyses.length && <>
         <div className="flex justify-between text-sm text-slate-500"><span>Znaleziono {count ?? analyses.length} analiz</span><span>Strona {page} z {pages}</span></div>
         <section className="grid gap-4 lg:grid-cols-2">{analyses.map((analysis) => {
@@ -108,7 +106,7 @@ export default async function AnalysesPage({ searchParams }: { searchParams: Pro
           const statusDef = getAnalysisStatusDefinition(analysis.status, analysis.processing_stage);
           const chips = analysis.analysis_category_links.map((link) => link.category).filter((item): item is NonNullable<typeof item> => Boolean(item));
           const preview = previews.get(analysis.id);
-          return <article key={analysis.id} className="min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          return <article key={analysis.id} className="dashboard-card min-w-0 overflow-hidden">
             {photo && <div className="relative aspect-[16/7] bg-slate-100">{preview ? <Image src={preview} alt="Prywatny podgląd projektu" fill unoptimized className="object-cover" /> : <FileImage className="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2 text-slate-400" />}</div>}
             <div className="p-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="mb-2 flex flex-wrap gap-2"><span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${photo ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600"}`}>{photo ? "Projekt ze zdjęcia" : "Film"}</span>{photo&&assessmentAvailable.has(analysis.id)&&<span className="inline-flex rounded-full bg-cyan-100 px-2.5 py-1 text-[10px] font-bold uppercase text-cyan-800">Ocena projektu dostępna</span>}</div><h2 className="truncate text-lg font-bold"><Link href={href}>{analysis.title}</Link></h2><p className="mt-1 text-sm text-slate-500">{analysis.workstation?.name ?? "Bez stanowiska"}{analysis.workstation?.code ? ` · ${analysis.workstation.code}` : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">{photo ? sceneStatus(analysis.processing_stage) : statusDef.shortLabel}</span></div>
             <div className="mt-4 flex flex-wrap gap-2">{chips.slice(0,3).map((item) => <span key={item.id} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">{item.name}</span>)}{chips.length > 3 && <span className="rounded-full bg-slate-100 px-3 py-1 text-xs">+{chips.length - 3}</span>}</div>
@@ -117,11 +115,10 @@ export default async function AnalysesPage({ searchParams }: { searchParams: Pro
         })}</section>
         <nav className="flex justify-center gap-3">{page > 1 && <Link href={pageHref(raw, page - 1)} className="rounded-xl border border-slate-300 bg-white px-4 py-2">Poprzednia</Link>}{page < pages && <Link href={pageHref(raw, page + 1)} className="rounded-xl border border-slate-300 bg-white px-4 py-2">Następna</Link>}</nav>
       </>}
-    </div>
-  </main>;
+  </div>;
 }
 
-function Select({ name, label, value, options }: { name: string; label: string; value: string; options: ReadonlyArray<readonly [string,string]> }) { return <label className="text-sm font-medium">{label}<select name={name} defaultValue={value} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3">{options.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>; }
+function Select({ name, label, value, options }: { name: string; label: string; value: string; options: ReadonlyArray<readonly [string,string]> }) { return <label className="text-sm font-medium">{label}<select name={name} defaultValue={value} className="ui-input mt-1">{options.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>; }
 function values(value: string | string[] | undefined) { return Array.isArray(value) ? value : value ? [value] : []; }
 function uuid(value: string | undefined): value is string { return Boolean(value && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)); }
 function clean(value: string | undefined, max: number) { return (value ?? "").trim().slice(0,max).replace(/[,%()]/g, " "); }

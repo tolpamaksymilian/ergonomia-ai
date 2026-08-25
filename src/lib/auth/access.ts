@@ -18,7 +18,7 @@ export async function getCurrentAccount() {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id, full_name, role, created_at, updated_at")
+    .select("id, full_name, role, company_id, company_role, position_id, account_status, created_at, updated_at")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -49,6 +49,20 @@ export async function requireAdmin() {
   const account = await requireUser();
 
   if (account.profile?.role !== "admin") {
+    redirect("/panel");
+  }
+
+  return account;
+}
+
+export async function requireCompanyManager(companyId: string) {
+  const account = await requireUser();
+  const isSystemAdmin = account.profile?.role === "admin";
+  const isCompanyAdmin = account.profile?.company_id === companyId
+    && account.profile?.company_role === "admin"
+    && account.profile?.account_status === "active";
+
+  if (!isSystemAdmin && !isCompanyAdmin) {
     redirect("/panel");
   }
 

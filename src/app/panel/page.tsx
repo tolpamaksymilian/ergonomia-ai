@@ -1,190 +1,50 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import {
-  Activity,
-  FileVideo,
-  LayoutDashboard,
-  LogOut,
-  Plus,
-  UserRound,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, CheckCircle2, Clock3, FileText, Plus, Video } from "lucide-react";
 
-import { signOutAction } from "@/actions/auth";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { createClient } from "@/lib/supabase/server";
+import { getAnalysisStatusDefinition } from "@/config/analysis-status";
+import { requireUser } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function UserPanelPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/logowanie");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, role, created_at")
-    .eq("id", user.id)
-    .single();
-
-  return (
-    <main className="ui-page p-5 sm:p-8">
-      <div className="mx-auto max-w-7xl">
-        <header className="ui-surface flex flex-wrap items-center justify-between gap-5 px-6 py-5 backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <span className="flex size-11 items-center justify-center rounded-2xl bg-emerald-400/10">
-              <Activity className="size-6 text-emerald-300" />
-            </span>
-
-            <div>
-              <p className="font-bold">Ergonomia AI</p>
-
-              <p className="text-xs text-slate-500">
-                Panel użytkownika
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2"><ThemeToggle /><form action={signOutAction}>
-            <button
-              type="submit"
-              className="ui-button-secondary text-sm"
-            >
-              <LogOut className="size-4" />
-              Wyloguj się
-            </button>
-          </form></div>
-        </header>
-
-        <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.36fr]">
-          <div className="ui-card bg-gradient-to-br from-brand-soft via-card to-card p-8 sm:p-10">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-400">
-              Witaj w systemie
-            </p>
-
-            <h1 className="mt-5 text-4xl font-bold tracking-[-0.035em] sm:text-5xl">
-              {profile?.full_name || "Użytkowniku"}
-            </h1>
-
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Prześlij film i sprawdź uporządkowane wyniki analizy ruchu.
-            </p>
-
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link
-                href="/panel/analizy/nowa"
-                className="ui-button-primary"
-              >
-                <Plus className="size-5" />
-                Utwórz nową analizę
-              </Link>
-
-              <Link
-                href="/panel/analizy"
-                className="ui-button-secondary"
-              >
-                <FileVideo className="size-5 text-primary" />
-                Historia analiz
-              </Link>
-            </div>
-
-          </div>
-
-          <div className="ui-card p-7">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/10">
-              <UserRound className="size-6 text-primary" />
-            </div>
-
-            <p className="mt-6 text-xs uppercase tracking-[0.18em] text-slate-500">
-              Zalogowane konto
-            </p>
-
-            <p className="mt-2 break-all font-semibold">
-              {user.email}
-            </p>
-
-            <p className="mt-5 text-sm text-slate-500">
-              Rola
-            </p>
-
-            <p className="mt-1 font-semibold text-emerald-300">
-              {profile?.role ?? "user"}
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-6 grid gap-5 md:grid-cols-2">
-          <DashboardCard
-            icon={LayoutDashboard}
-            title="Ocena i raport"
-            description="Po zakończeniu pipeline’u otworzysz techniczną ocenę i raport analizy."
-            status="Dostępne w wersji testowej"
-            available
-          />
-
-          <DashboardCard
-            icon={FileVideo}
-            title="Analizy wideo"
-            description="Przesyłaj filmy i przeglądaj wyniki pozy oraz metryk."
-            status="Dostępne"
-            available
-          />
-        </section>
+  const { supabase, profile } = await requireUser();
+  const [{ count: analysesCount }, { count: completedCount }, { count: workstationCount }, { data: latest }] = await Promise.all([
+    supabase.from("analyses").select("id", { count: "exact", head: true }),
+    supabase.from("analyses").select("id", { count: "exact", head: true }).eq("status", "completed"),
+    supabase.from("workstations").select("id", { count: "exact", head: true }).eq("is_active", true),
+    supabase.from("analyses").select("id,title,status,processing_stage,progress,analysis_type,created_at,report_path").order("created_at", { ascending: false }).limit(5),
+  ]);
+  const inProgress = (latest ?? []).filter((item) => !["completed", "failed", "cancelled"].includes(item.status)).length;
+  return <div className="dashboard-page">
+    <section className="flex flex-col justify-between gap-5 rounded-3xl bg-gradient-to-br from-[#171a31] via-[#1d2040] to-violet-950 p-6 text-white shadow-xl sm:p-8 lg:flex-row lg:items-end">
+      <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-violet-300">Centrum pracy</p><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Dzień dobry, {firstName(profile?.full_name)}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Zarządzaj analizami stanowisk, śledź przetwarzanie i otwieraj gotowe raporty w jednym miejscu.</p></div>
+      <Link href="/panel/analizy/nowa" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-500 px-5 font-bold text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-400"><Plus className="size-5" />Nowa analiza</Link>
+    </section>
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard icon={Video} label="Wszystkie analizy" value={analysesCount ?? 0} hint="Wideo i projekty zdjęciowe" color="violet" />
+      <MetricCard icon={CheckCircle2} label="Gotowe" value={completedCount ?? 0} hint="Zakończony pełny pipeline" color="emerald" />
+      <MetricCard icon={Clock3} label="Ostatnio aktywne" value={inProgress} hint="Wśród ostatnich pięciu" color="amber" />
+      <MetricCard icon={BriefcaseBusiness} label="Stanowiska" value={workstationCount ?? 0} hint="Aktywne stanowiska pracy" color="sky" />
+    </section>
+    <section className="grid gap-6 xl:grid-cols-[1.5fr_0.7fr]">
+      <div className="dashboard-card overflow-hidden">
+        <div className="flex items-center justify-between gap-4 border-b border-border p-5"><div><p className="dashboard-eyebrow">Ostatnia aktywność</p><h2 className="mt-1 text-xl font-bold">Najnowsze analizy</h2></div><Link href="/panel/analizy" className="text-sm font-bold text-violet-600 hover:text-violet-500">Pokaż wszystkie</Link></div>
+        <div className="divide-y divide-border">{latest?.length ? latest.map((item) => { const definition = getAnalysisStatusDefinition(item.status, item.processing_stage); return <Link key={item.id} href={(item.analysis_type ?? "VIDEO") === "PHOTO_SCENE" ? `/panel/analizy/${item.id}/scena` : `/panel/analizy/${item.id}`} className="flex items-center gap-4 p-4 transition hover:bg-surface-muted">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-600">{item.report_path ? <FileText className="size-5" /> : <Video className="size-5" />}</span><span className="min-w-0 flex-1"><span className="block truncate font-bold">{item.title}</span><span className="mt-1 block text-xs text-muted-foreground">{formatDate(item.created_at)} · {item.progress}%</span></span><span className="dashboard-status border-border bg-surface-muted text-muted-foreground">{definition.shortLabel}</span><ArrowRight className="size-4 text-muted-foreground" />
+        </Link>; }) : <EmptyState text="Nie masz jeszcze żadnych analiz." />}</div>
       </div>
-    </main>
-  );
+      <aside className="dashboard-card p-5"><p className="dashboard-eyebrow">Szybkie akcje</p><h2 className="mt-1 text-xl font-bold">Co chcesz zrobić?</h2><div className="mt-5 grid gap-3">
+        <QuickLink href="/panel/analizy/nowa" title="Rozpocznij analizę" description="Film lub projekt ze zdjęcia" />
+        <QuickLink href="/panel/raporty" title="Przejrzyj raporty" description="Gotowe wyniki i podsumowania" />
+        <QuickLink href="/panel/stanowiska" title="Uporządkuj stanowiska" description="Nazwy, kody i obszary pracy" />
+        <QuickLink href="/panel/profil" title="Sprawdź profil" description="Firma, rola i preferencje" />
+      </div></aside>
+    </section>
+  </div>;
 }
 
-function DashboardCard({
-  icon: Icon,
-  title,
-  description,
-  status,
-  available = false,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  status: string;
-  available?: boolean;
-}) {
-  return (
-    <article
-      className={`ui-card p-7 ${
-        available
-          ? "border-emerald-400/20"
-          : "border-white/10 opacity-60"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-white/[0.05]">
-          <Icon className="size-6 text-slate-400" />
-        </div>
-
-        <span
-          className={`rounded-full px-3 py-1 text-xs ${
-            available
-              ? "bg-emerald-400/10 text-emerald-300"
-              : "bg-white/[0.05] text-slate-500"
-          }`}
-        >
-          {status}
-        </span>
-      </div>
-
-      <h2 className="mt-6 text-xl font-semibold">
-        {title}
-      </h2>
-
-      <p className="mt-3 leading-7 text-slate-500">
-        {description}
-      </p>
-    </article>
-  );
-}
+function MetricCard({ icon: Icon, label, value, hint, color }: { icon: typeof Video; label: string; value: number; hint: string; color: "violet" | "emerald" | "amber" | "sky" }) { const styles = { violet: "bg-violet-500/10 text-violet-600", emerald: "bg-emerald-500/10 text-emerald-600", amber: "bg-amber-500/10 text-amber-600", sky: "bg-sky-500/10 text-sky-600" }; return <article className="dashboard-card p-5"><div className="flex items-start justify-between"><span className={`grid size-11 place-items-center rounded-xl ${styles[color]}`}><Icon className="size-5" /></span><span className="text-3xl font-bold">{value}</span></div><p className="mt-5 font-bold">{label}</p><p className="mt-1 text-xs text-muted-foreground">{hint}</p></article>; }
+function QuickLink({ href, title, description }: { href: string; title: string; description: string }) { return <Link href={href} className="group flex items-center justify-between rounded-xl border border-border p-4 transition hover:border-violet-400 hover:bg-violet-500/5"><span><span className="block text-sm font-bold">{title}</span><span className="mt-1 block text-xs text-muted-foreground">{description}</span></span><ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-violet-600" /></Link>; }
+function EmptyState({ text }: { text: string }) { return <div className="p-10 text-center text-sm text-muted-foreground">{text}</div>; }
+function firstName(value: string | null | undefined) { return value?.trim().split(/\s+/)[0] || "Użytkowniku"; }
+function formatDate(value: string) { return new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }

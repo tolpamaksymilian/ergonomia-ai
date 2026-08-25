@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.27.0-beta.1] - 2026-08-25
+
+### Dashboard Workspace Redesign
+
+- Dodano wspólny, responsywny shell panelu z lewym sidebarem, topbarem, breadcrumbs i spójnym systemem kart, tabel, filtrów oraz statusów.
+- Dodano bezpieczny model firm, stanowisk organizacyjnych, członkostwa oraz zaproszeń e-mail z politykami RLS.
+- Dodano centra zarządzania dla superadministratora i administratora firmy, a także nowe widoki raportów, profilu i ustawień.
+- Zachowano istniejące trasy analiz, modele workera i pipeline przetwarzania.
+
 ## [0.26.0-beta.1] - 2026-08-25
 
 - Pose `pose-v6.3.0-beta.1` wykorzystuje offline fixed-lag refinement dla

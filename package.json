@@ -1,6 +1,6 @@
 {
   "name": "ergonomia-ai",
-  "version": "0.26.0-beta.1",
+  "version": "0.27.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "node scripts/dev-supervisor.mjs",
@@ -13,6 +13,7 @@
     "test:photo-scene": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --experimental-strip-types src/lib/photo-scene/__tests__/*.test.mjs",
     "test:scene-ergonomics": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --experimental-strip-types src/lib/scene-ergonomics/__tests__/*.test.mjs",
     "test:dev-supervisor": "node --test scripts/dev-processes.test.mjs",
+    "test:dashboard": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --experimental-strip-types src/lib/dashboard/__tests__/*.test.mjs",
     "check:release": "node scripts/check-release-version.mjs"
   },
   "dependencies": {

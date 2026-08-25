@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  await supabase.rpc("accept_my_company_invitation");
+
   const destinationUrl = request.nextUrl.clone();
 
   destinationUrl.pathname = next;

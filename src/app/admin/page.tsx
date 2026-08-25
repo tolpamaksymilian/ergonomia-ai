@@ -1,222 +1,26 @@
 import Link from "next/link";
-import {
-  Activity,
-  ArrowLeft,
-  ListChecks,
-  LogOut,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
+import { Activity, ArrowRight, Building2, MailPlus, ShieldCheck, UsersRound, Video } from "lucide-react";
 
-import { signOutAction } from "@/actions/auth";
-import { ProjectRoadmap } from "@/components/project/project-roadmap";
-import { ProjectVersionCards } from "@/components/project/project-version-cards";
-import { projectStatus } from "@/config/project-status";
 import { requireAdmin } from "@/lib/auth/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const { supabase, user, profile } = await requireAdmin();
-
-  const [
-    { count: usersCount, error: usersCountError },
-    { data: latestProfiles, error: latestProfilesError },
-  ] = await Promise.all([
-    supabase.from("profiles").select("id", {
-      count: "exact",
-      head: true,
-    }),
-    supabase
-      .from("profiles")
-      .select("id, full_name, role, created_at")
-      .order("created_at", { ascending: false })
-      .limit(5),
+  const { supabase } = await requireAdmin();
+  const [{ count: companies }, { count: users }, { count: invitations }, { count: analyses }, { data: recent }] = await Promise.all([
+    supabase.from("companies").select("id", { count: "exact", head: true }),
+    supabase.from("profiles").select("id", { count: "exact", head: true }),
+    supabase.from("company_invitations").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("analyses").select("id", { count: "exact", head: true }),
+    supabase.from("profiles").select("id,full_name,role,account_status,created_at,company:companies(name)").order("created_at", { ascending: false }).limit(6),
   ]);
-
-  const hasDatabaseError =
-    Boolean(usersCountError) || Boolean(latestProfilesError);
-
-  return (
-    <main className="ui-page relative p-5 sm:p-8">
-      <Background />
-
-      <div className="relative mx-auto max-w-7xl">
-        <header className="flex flex-wrap items-center justify-between gap-5 rounded-[26px] border border-white/10 bg-slate-950/65 px-6 py-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex size-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10">
-              <Activity className="size-6 text-emerald-300" />
-            </span>
-            <span>
-              <span className="block font-bold">Ergonomia AI</span>
-              <span className="block text-xs text-slate-500">
-                Panel administratora
-              </span>
-            </span>
-          </Link>
-
-          <nav className="flex flex-wrap items-center gap-3" aria-label="Nawigacja panelu administratora">
-            <Link
-              href="#rozwoj-systemu"
-              className="ui-button-secondary text-sm hover:border-orange-200 hover:bg-brand-soft"
-            >
-              <ListChecks className="size-4" />
-              Rozwój systemu
-            </Link>
-            <Link
-              href="/panel"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:bg-white/[0.08]"
-            >
-              <ArrowLeft className="size-4" />
-              Panel użytkownika
-            </Link>
-            <form action={signOutAction}>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold transition hover:border-red-400/30 hover:bg-red-400/10 hover:text-red-200"
-              >
-                <LogOut className="size-4" />
-                Wyloguj się
-              </button>
-            </form>
-          </nav>
-        </header>
-
-        <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.38fr]">
-          <div className="ui-card overflow-hidden bg-gradient-to-br from-brand-soft via-card to-card p-8 sm:p-10">
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">
-              <ShieldCheck className="size-4" />
-              Dostęp administratora
-            </div>
-            <h1 className="mt-7 text-4xl font-bold tracking-[-0.04em] sm:text-5xl">
-              Stan i rozwój systemu
-            </h1>
-            <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">
-              Tu sprawdzisz gotowe moduły i najbliższe etapy rozwoju.
-            </p>
-          </div>
-
-          <aside className="rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex size-12 items-center justify-center rounded-xl border border-orange-200 bg-brand-soft dark:border-orange-800">
-                <Users className="size-6 text-primary" />
-              </div>
-              <p className="text-3xl font-bold">
-                {hasDatabaseError ? "—" : usersCount ?? 0}
-              </p>
-            </div>
-            <p className="mt-6 text-xs uppercase tracking-[0.18em] text-slate-500">
-              Administrator
-            </p>
-            <p className="mt-2 text-xl font-semibold">
-              {profile?.full_name || "Administrator"}
-            </p>
-            <p className="mt-2 break-all text-sm text-slate-400">
-              {user.email}
-            </p>
-            <p className="mt-5 text-sm text-slate-500">
-              Konta w tabeli profili: {hasDatabaseError ? "brak danych" : usersCount ?? 0}
-            </p>
-          </aside>
-        </section>
-
-        <section className="mt-6">
-          <ProjectVersionCards />
-        </section>
-
-        <section
-          id="rozwoj-systemu"
-          className="mt-10 scroll-mt-6 rounded-[32px] border border-white/10 bg-white/[0.025] p-5 sm:p-8"
-        >
-          <div className="max-w-4xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-accent-foreground">
-              Rozwój systemu
-            </p>
-            <h2 className="mt-4 text-3xl font-bold tracking-[-0.03em] sm:text-4xl">
-              Roadmapa projektu
-            </h2>
-            <p className="mt-4 text-slate-400">
-              Procent wynika automatycznie ze statusów etapów.
-            </p>
-          </div>
-          <div className="mt-8">
-            <ProjectRoadmap stages={projectStatus.stages} showProgress />
-          </div>
-        </section>
-
-        <section className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.035] p-7">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Ostatnie konta
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold">
-                Użytkownicy systemu
-              </h2>
-            </div>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-400">
-              Ostatnie 5 profili
-            </span>
-          </div>
-
-          <div className="mt-6 grid gap-3 lg:grid-cols-2">
-            {latestProfiles?.length ? (
-              latestProfiles.map((item) => (
-                <article
-                  key={item.id}
-                  className="flex min-w-0 flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.07] bg-slate-950/35 p-4"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">
-                      {item.full_name || "Użytkownik bez nazwy"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Utworzono: {formatDate(item.created_at)}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                      item.role === "admin"
-                        ? "bg-emerald-400/10 text-emerald-300"
-                        : "bg-brand-soft text-accent-foreground"
-                    }`}
-                  >
-                    {item.role === "admin" ? "Administrator" : "Użytkownik"}
-                  </span>
-                </article>
-              ))
-            ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-slate-500 lg:col-span-2">
-                Brak profili do wyświetlenia.
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-    </main>
-  );
+  return <div className="dashboard-page">
+    <section className="flex flex-col justify-between gap-5 rounded-3xl bg-gradient-to-br from-[#171a31] via-[#1d2040] to-violet-950 p-7 text-white shadow-xl lg:flex-row lg:items-center"><div><span className="inline-flex items-center gap-2 rounded-full bg-white/8 px-3 py-1.5 text-xs font-bold text-violet-200"><ShieldCheck className="size-4" />Centrum administracyjne</span><h1 className="mt-4 text-3xl font-bold sm:text-4xl">Kontrola organizacji i dostępu</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Firmy, konta, zaproszenia i stan systemu są dostępne z jednej, uporządkowanej przestrzeni.</p></div><Link href="/admin/zaproszenia" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-500 px-5 font-bold hover:bg-violet-400"><MailPlus className="size-5" />Zaproś użytkownika</Link></section>
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><AdminMetric icon={Building2} label="Firmy" value={companies} href="/admin/firmy" /><AdminMetric icon={UsersRound} label="Użytkownicy" value={users} href="/admin/uzytkownicy" /><AdminMetric icon={MailPlus} label="Oczekujące zaproszenia" value={invitations} href="/admin/zaproszenia" /><AdminMetric icon={Video} label="Analizy" value={analyses} href="/panel/analizy" /></section>
+    <section className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]"><div className="dashboard-card overflow-hidden"><div className="border-b border-border p-5"><p className="dashboard-eyebrow">Ostatnio dodani</p><h2 className="mt-1 text-xl font-bold">Nowe konta</h2></div><div className="divide-y divide-border">{recent?.map((item) => <div key={item.id} className="flex items-center gap-4 p-4"><span className="grid size-10 place-items-center rounded-xl bg-violet-500/10 font-bold text-violet-600">{(item.full_name || "U")[0]}</span><span className="min-w-0 flex-1"><span className="block truncate font-bold">{item.full_name || "Użytkownik bez nazwy"}</span><span className="block truncate text-xs text-muted-foreground">{companyName(item.company)}</span></span><span className="dashboard-status border-border bg-surface-muted text-muted-foreground">{item.role === "admin" ? "Super admin" : item.account_status ?? "Aktywny"}</span></div>)}</div></div>
+      <aside className="dashboard-card p-5"><p className="dashboard-eyebrow">System</p><h2 className="mt-1 text-xl font-bold">Skróty administratora</h2><div className="mt-5 space-y-3"><AdminLink href="/admin/firmy" icon={Building2} title="Dodaj firmę" /><AdminLink href="/admin/uzytkownicy" icon={UsersRound} title="Zarządzaj rolami" /><AdminLink href="/admin/rozwoj" icon={Activity} title="Stan i roadmapa" /></div></aside></section>
+  </div>;
 }
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("pl-PL", {
-    dateStyle: "medium",
-    timeZone: "Europe/Warsaw",
-  }).format(new Date(value));
-}
-
-function Background() {
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      <div className="absolute -left-48 -top-40 size-[620px] rounded-full bg-emerald-500/[0.07] blur-[160px]" />
-      <div className="absolute -right-48 top-[420px] size-[620px] rounded-full bg-orange-200/20 blur-[170px] dark:bg-orange-950/10" />
-      <div
-        className="absolute inset-0 opacity-[0.025]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.8) 1px, transparent 1px)",
-          backgroundSize: "54px 54px",
-        }}
-      />
-    </div>
-  );
-}
+function AdminMetric({ icon: Icon, label, value, href }: { icon: typeof Building2; label: string; value: number | null; href: string }) { return <Link href={href} className="dashboard-card group p-5 transition hover:-translate-y-0.5 hover:border-violet-400"><div className="flex items-center justify-between"><span className="grid size-11 place-items-center rounded-xl bg-violet-500/10 text-violet-600"><Icon className="size-5" /></span><ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-1" /></div><p className="mt-5 text-3xl font-bold">{value ?? "—"}</p><p className="mt-1 text-sm text-muted-foreground">{label}</p></Link>; }
+function AdminLink({ href, icon: Icon, title }: { href: string; icon: typeof Building2; title: string }) { return <Link href={href} className="flex items-center gap-3 rounded-xl border border-border p-3 font-semibold transition hover:border-violet-400 hover:bg-violet-500/5"><Icon className="size-4 text-violet-600" /><span className="flex-1">{title}</span><ArrowRight className="size-4 text-muted-foreground" /></Link>; }
+function companyName(value: unknown) { if (Array.isArray(value)) return (value[0] as { name?: string } | undefined)?.name ?? "Bez firmy"; return (value as { name?: string } | null)?.name ?? "Bez firmy"; }
