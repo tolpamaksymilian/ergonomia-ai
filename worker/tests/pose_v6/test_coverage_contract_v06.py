@@ -91,6 +91,21 @@ def test_hard_fallback_does_not_replace_good_primary() -> None:
     assert np.allclose(result.points[9], primary[9])
 
 
+def test_joint_source_hysteresis_rejects_temporally_detached_fallback() -> None:
+    primary = np.asarray([[100.0 + i, 100.0 + i] for i in range(23)], dtype=np.float32)
+    fallback = primary.copy(); fallback[9] += [22.0, 0.0]
+    primary_scores = np.full(23, 0.88, dtype=np.float32); primary_scores[9] = 0.72
+    fallback_scores = np.full(23, 0.88, dtype=np.float32); fallback_scores[9] = 0.79
+    previous = primary.copy(); following = primary.copy(); following[:, 0] += 1.0
+    result = fuse_pose_candidates(
+        primary, primary_scores, fallback, fallback_scores,
+        previous_points=previous, previous_scores=primary_scores,
+        following_points=following, following_scores=primary_scores,
+    )
+    assert 9 not in result.refined_joint_indexes
+    assert result.joint_trust[9]["decision"] == "primary_hysteresis"
+
+
 def test_overlay_and_timeline_share_visibility_contract() -> None:
     frame, scores = _pose_frame(missing={7, 9})
     rendered = {"left_upper_arm": {"visible": True}, "left_forearm": {"visible": True}}

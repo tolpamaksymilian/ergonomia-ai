@@ -36,6 +36,21 @@ to the palm, exposes per-finger and thumb features, checks RTMW/MediaPipe wrist
 alignment and confirms grip/release transitions with time-based hysteresis.
 Object proximity contributes evidence but does not prove a grip.
 
+Pose 6.3 adds a conservative offline fixed-lag pass before anatomical
+projection. It uses two future/previous frames to repair only isolated joint
+drift when the bracketing trajectory agrees; sustained fast motion, scene cuts
+and hard loss are protected. Hard-frame fusion now ranks every candidate joint
+by confidence, temporal continuity, local topology and primary-source
+hysteresis rather than raw confidence alone.
+
+The presentation and grip contracts are documented in `OVERLAY_CONTRACT.md`
+and `GRIP_CONTRACT.md`. A local KPI comparison can be run with:
+
+```powershell
+worker\.venv\Scripts\python.exe -m worker.src.pose_v6.quality_benchmark `
+  after-pose-keypoints.json before-pose-keypoints.json
+```
+
 ## Continuity
 
 After lock-on, a short YOLOX miss may trigger RTMW on an FPS-aware predicted

@@ -1,7 +1,11 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: aplikacja `0.25.0-beta.1`, worker `0.10.0-beta.1`, Pose
-`pose-v6.2.0-beta.1`, schema `6.0`.
+Wersje: aplikacja `0.26.0-beta.1`, worker `0.11.0-beta.1`, Pose
+`pose-v6.3.0-beta.1`, schema `6.0`.
+
+Minor `6.3` dodaje fixed-lag offline trajectory refinement, kompozytowy per-joint
+trust w hard-frame fusion, stabilność confidence Angle Engine oraz mierzalny,
+antykolizyjny overlay. Modele bazowe i schema `6.0` pozostają bez zmian.
 
 Minor `6.2` dodaje precision pass: znormalizowany profil kanoniczny osoby,
 root-first state estimator, constrained limb-chain projection, walidator

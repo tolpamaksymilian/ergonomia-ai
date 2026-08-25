@@ -1,6 +1,6 @@
 export type ProjectStageStatus = "completed" | "in_progress" | "planned";
 
-export const POSE_PIPELINE_VERSION = "pose-v6.2.0-beta.1";
+export const POSE_PIPELINE_VERSION = "pose-v6.3.0-beta.1";
 
 export type ProjectStageGroup =
   | "foundation"
@@ -85,7 +85,7 @@ const stages = [
   { id: "pipeline-supervisor", title: "Pipeline Supervisor", description: "Odporny na blokady Windows heartbeat, pojedyncza instancja, preflight i kontrolowany restart lokalnego pipeline’u.", status: "completed", group: "infrastructure" },
   { id: "live-status", title: "Automatyczne statusy", description: "Lekki polling aktywnych analiz i pojawienie się raportu bez ręcznego odświeżania.", status: "completed", group: "infrastructure" },
   { id: "history-v2", title: "Historia analiz 2.0", description: "Wyszukiwanie, filtry URL, kategorie AND/OR i paginacja serwerowa.", status: "completed", group: "infrastructure" },
-  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu Pose V6 oraz Photo Scene Builder w v0.25.0-beta.1.", status: "completed", group: "infrastructure" },
+  { id: "beta-release", title: "Wersja testowa", description: "Dwa niezależne tryby: analiza filmu Pose V6 oraz Photo Scene Builder w v0.26.0-beta.1.", status: "completed", group: "infrastructure" },
   { id: "worker-hosting", title: "Hosting workera", description: "Przygotowanie uruchomienia workerów poza komputerem lokalnym.", status: "in_progress", group: "infrastructure" },
   { id: "automatic-cleanup", title: "Czyszczenie filmów", description: "Automatyczna polityka retencji danych.", status: "planned", group: "infrastructure" },
   { id: "validation-tests", title: "Testy walidacyjne", description: "Walidacja dokładności na większym zestawie zróżnicowanych nagrań.", status: "in_progress", group: "infrastructure" },
@@ -111,7 +111,7 @@ export const projectStageGroups: ReadonlyArray<{
 export const projectStatus = {
   projectName: "Ergonomia AI",
   versions: {
-    application: "v0.25.0-beta.1",
+    application: "v0.26.0-beta.1",
     sceneBuilder: "photo-scene-builder-v0.10-beta.1",
     guidedSceneSetup: "guided-scene-setup-v1.0-beta.1",
     sceneGeometry: "scene-geometry-v2.0-beta.1",
@@ -119,7 +119,7 @@ export const projectStatus = {
     sceneErgonomics: "scene-ergonomics-v1.0-beta.1",
     sceneDesignReport: "scene-design-report-v1.0-beta.1",
     sceneDetection: "scene-detection-v0.3-beta.1",
-    worker: "v0.10.0-beta.1",
+    worker: "v0.11.0-beta.1",
     supervisor: "pipeline-supervisor-v1.1-beta.1",
     posePipeline: POSE_PIPELINE_VERSION,
     ergonomicsMetricsEngine: "v1.0",

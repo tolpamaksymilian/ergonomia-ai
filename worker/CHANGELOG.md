@@ -1,5 +1,13 @@
 # Worker changelog
 
+## 0.11.0-beta.1
+
+- Pose `pose-v6.3.0-beta.1`: conservative fixed-lag trajectory correction,
+  temporal/topological joint trust and explicit hard-frame fusion decisions.
+- Angle confidence includes temporal stability; Grip V4 exposes alignment and
+  flicker diagnostics; the premium overlay reports collision/visibility KPIs.
+- YOLOX-X, RTMW WholeBody and pose schema `6.0` remain unchanged.
+
 ## 0.10.0-beta.1
 
 - Pose `pose-v6.2.0-beta.1`: canonical proportions normalized by body scale,

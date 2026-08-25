@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.26.0-beta.1] - 2026-08-25
+
+- Pose `pose-v6.3.0-beta.1` wykorzystuje offline fixed-lag refinement dla
+  izolowanych odjazdów stawów i kompozytowy trust podczas per-joint fusion.
+- Angle Engine uwzględnia stabilność czasową confidence, a Grip V4 raportuje
+  flicker i bezpiecznie wyrównuje warstwę dłoni do zatwierdzonego wrista.
+- Overlay ma grubsze linie z obrysem, większe etykiety kątów w antykolizyjnych
+  bąblach oraz KPI widoczności i czytelności. Schema Pose pozostaje `6.0`.
+
 ## [0.25.0-beta.1] - 2026-08-24
 
 - Pose `pose-v6.2.0-beta.1` dodaje Canonical Body Profile, root-first state

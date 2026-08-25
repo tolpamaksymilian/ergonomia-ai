@@ -46,4 +46,14 @@ def test_reconstructed_source_has_mixed_provenance() -> None:
     assert result.diagnostics[0]["left_elbow_flexion_deg"]["provenance"] == "MIXED_RECONSTRUCTED"
 
 
+def test_angle_confidence_exposes_temporal_stability_without_hiding_motion() -> None:
+    frames = [_metrics(value) for value in (20, 22, 80)]
+    result = stabilize_angle_sequence(frames, [_temporal()] * 3, [0, .1, .2], ["FAST_MOTION"] * 3)
+    stable = result.diagnostics[0]["trunk_inclination_deg"]
+    transition = result.diagnostics[1]["trunk_inclination_deg"]
+    assert 0.0 <= transition["temporal_stability"] < stable["temporal_stability"] <= 1.0
+    assert transition["confidence"] < stable["confidence"]
+    assert result.metric_frames[1]["trunk_inclination_deg"]["value"] == 22
+
+
 import pytest

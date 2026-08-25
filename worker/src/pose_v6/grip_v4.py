@@ -163,12 +163,22 @@ def wrist_alignment_diagnostic(side: str, hand: HandGraphFrame, body: TemporalFr
         return {"available": False, "accepted": False, "distance_ratio": None, "mode": "invalid_coordinate"}
     ratio = float(np.linalg.norm(hand_wrist - body_wrist) / palm_scale)
     accepted = ratio <= 0.65
+    hand_quality = float(np.clip(hand.quality, 0.0, 1.0))
+    body_quality = float(np.clip(body.render_scores[body_index], 0.0, 1.0))
+    alignment_weight = min(hand_quality, body_quality) * 0.65 if accepted else 0.0
+    fused_wrist = hand_wrist + (body_wrist - hand_wrist) * alignment_weight
     return {
         "available": True,
         "accepted": accepted,
         "distance_ratio": round(ratio, 6),
         "mode": "quality_weighted_alignment_candidate" if accepted else "assignment_rejected_large_disagreement",
         "hand_wrist_is_body_measurement": False,
+        "alignment_weight": round(alignment_weight, 6),
+        "overlay_translation_px": [
+            round(float(fused_wrist[0] - hand_wrist[0]), 6),
+            round(float(fused_wrist[1] - hand_wrist[1]), 6),
+        ] if accepted else None,
+        "fused_wrist_px": [round(float(value), 6) for value in fused_wrist] if accepted else None,
     }
 
 
@@ -176,7 +186,10 @@ def summarize_grip_v4(frames: Sequence[GripFrameV4], durations: Sequence[float])
     seconds = {state: 0.0 for state in GripStateV4}
     episodes = 0; longest = current = 0.0
     valid = 0
-    for frame, duration in zip(frames, durations):
+    transition_count = 0
+    single_frame_flicker_count = 0
+    previous_state = GripStateV4.UNKNOWN
+    for index, (frame, duration) in enumerate(zip(frames, durations)):
         seconds[frame.state] += duration
         valid += int(frame.state != GripStateV4.UNKNOWN)
         if frame.state in _ACTIVE_GRIPS:
@@ -186,6 +199,15 @@ def summarize_grip_v4(frames: Sequence[GripFrameV4], durations: Sequence[float])
             longest = max(longest, current)
         else:
             current = 0.0
+        if index > 0 and frame.state != previous_state:
+            transition_count += 1
+        if (
+            0 < index < len(frames) - 1
+            and frames[index - 1].state == frames[index + 1].state
+            and frame.state != frames[index - 1].state
+        ):
+            single_frame_flicker_count += 1
+        previous_state = frame.state
     return {
         "open_seconds": round(seconds[GripStateV4.OPEN], 6),
         "relaxed_seconds": round(seconds[GripStateV4.RELAXED], 6),
@@ -197,6 +219,11 @@ def summarize_grip_v4(frames: Sequence[GripFrameV4], durations: Sequence[float])
         "grip_episode_count": episodes,
         "longest_grip_episode_seconds": round(longest, 6),
         "valid_coverage_ratio": round(valid / len(frames), 6) if frames else 0.0,
+        "state_transition_count": transition_count,
+        "single_frame_grip_flicker_count": single_frame_flicker_count,
+        "grip_temporal_stability_score": round(
+            max(0.0, 1.0 - single_frame_flicker_count / max(1, len(frames) - 2)), 6
+        ) if frames else 0.0,
     }
 
 

@@ -58,3 +58,19 @@ def test_large_body_hand_wrist_disagreement_is_rejected() -> None:
     result = analyze_grip_v4("left", [graph], [0], [_temporal()])
     assert result.frames[0].wrist_alignment["accepted"] is False
     assert result.frames[0].wrist_alignment["mode"] == "assignment_rejected_large_disagreement"
+
+
+def test_accepted_wrist_alignment_exposes_bounded_overlay_translation() -> None:
+    graph = _graph(GripStateV2.OPEN)
+    graph.source_frame.points_px[0] = (14, 10)
+    result = analyze_grip_v4("left", [graph], [0], [_temporal()])
+    alignment = result.frames[0].wrist_alignment
+    assert alignment["accepted"] is True
+    assert alignment["hand_wrist_is_body_measurement"] is False
+    assert alignment["overlay_translation_px"] is not None
+
+
+def test_grip_summary_reports_no_single_frame_flicker_after_hysteresis() -> None:
+    result = _run([(GripStateV2.OPEN, True)] * 3 + [(GripStateV2.CLOSED, True)] + [(GripStateV2.OPEN, True)] * 3)
+    assert result.summary["single_frame_grip_flicker_count"] == 0
+    assert result.summary["grip_temporal_stability_score"] == 1.0

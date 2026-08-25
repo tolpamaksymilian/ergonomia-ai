@@ -64,6 +64,7 @@ try:
     from worker.src.pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from worker.src.pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
     from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
     from pose_v6.anatomical_stability import project_anatomical_sequence
@@ -80,6 +81,7 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 from pose_v5.camera_motion import CameraMotionEstimator
 from pose_v5.config import CameraMotionConfig, PoseV5Config, RefinementConfig
 from pose_v5.integration import augment_pose_document_v5
@@ -3720,6 +3722,28 @@ def process_pose_video(
                 if hand.observation is not None
             ]
             hand_assignment_failed = any(hand.detector_found and hand.observation is None for hand in raw_hands)
+            critical_joint_indexes = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+            weak_limb_joint_count = sum(
+                float(record["raw_scores"][joint]) < settings.body_presence_threshold
+                for joint in critical_joint_indexes
+            )
+            temporal_joint_discontinuity = False
+            if 0 < index < len(body_records) - 1:
+                previous_record = body_records[index - 1]
+                following_record = body_records[index + 1]
+                scale = max(float(record["pose_graph"].body_scale), 1.0)
+                for joint in critical_joint_indexes:
+                    if all(
+                        float(candidate["raw_scores"][joint]) > 0.0
+                        for candidate in (previous_record, record, following_record)
+                    ):
+                        expected = (
+                            previous_record["raw_points"][joint]
+                            + following_record["raw_points"][joint]
+                        ) * 0.5
+                        if float(np.linalg.norm(record["raw_points"][joint] - expected) / scale) > 0.18:
+                            temporal_joint_discontinuity = True
+                            break
             refinement_source.append({
                 "timestamp_seconds": record["output_timestamp_seconds"],
                 "quality": min(
@@ -3760,6 +3784,16 @@ def process_pose_video(
                             not bone.valid
                             for bone in record["pose_graph"].bones.values()
                         )
+                        else []
+                    ),
+                    *(
+                        ["LIMB_DROPOUT"]
+                        if weak_limb_joint_count >= 2
+                        else []
+                    ),
+                    *(
+                        ["TEMPORAL_DISCONTINUITY"]
+                        if temporal_joint_discontinuity
                         else []
                     ),
                     *(
@@ -3943,6 +3977,29 @@ def process_pose_video(
                     record["raw_scores"],
                     replacement["raw_points"],
                     replacement["raw_scores"],
+                    previous_points=(
+                        body_records[item.frame_index - 1]["raw_points"]
+                        if item.frame_index > 0
+                        else None
+                    ),
+                    previous_scores=(
+                        body_records[item.frame_index - 1]["raw_scores"]
+                        if item.frame_index > 0
+                        else None
+                    ),
+                    following_points=(
+                        body_records[item.frame_index + 1]["raw_points"]
+                        if item.frame_index + 1 < len(body_records)
+                        else None
+                    ),
+                    following_scores=(
+                        body_records[item.frame_index + 1]["raw_scores"]
+                        if item.frame_index + 1 < len(body_records)
+                        else None
+                    ),
+                    motion_gate_multiplier=float(
+                        record["motion_v6"].get("gate_multiplier", 1.0)
+                    ),
                 )
                 record["raw_points"] = fused.points
                 record["raw_scores"] = fused.scores
@@ -3960,6 +4017,11 @@ def process_pose_video(
                     "accepted_joint_indexes": sorted(fused.refined_joint_indexes),
                     "rejected_disagreement_count": len(fused.rejected_fallback_indexes),
                     "rejected_disagreement_indexes": sorted(fused.rejected_fallback_indexes),
+                    "joint_trust": {
+                        str(index): value
+                        for index, value in fused.joint_trust.items()
+                    },
+                    "fusion_policy": "confidence-temporal-spatial-anatomical-hysteresis-v2",
                 }
                 refined_hands = replacement.get("raw_hands")
                 if isinstance(refined_hands, dict):
@@ -4051,6 +4113,19 @@ def process_pose_video(
             analysis_id,
             type(error).__name__,
         )
+    trajectory_result = refine_fixed_lag_sequence(
+        temporal_frames,
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [
+            bool(record["camera_motion"] is not None and record["camera_motion"].scene_cut)
+            for record in body_records
+        ],
+        lag_frames=2,
+    )
+    temporal_frames = trajectory_result.frames
     anatomical_result = project_anatomical_sequence(
         temporal_frames,
         [float(record["pose_graph"].body_scale) for record in body_records],
@@ -4064,6 +4139,7 @@ def process_pose_video(
     )
     temporal_frames = anatomical_result.frames
     for index, record in enumerate(body_records):
+        record["trajectory_refinement"] = trajectory_result.frame_diagnostics[index]
         temporal = temporal_frames[index]
         graph = record["pose_graph"]
         canonical_names = {
@@ -4496,6 +4572,20 @@ def process_pose_video(
                 right_hand_quality=right_frame.quality,
                 tracking_state=str(body_record["tracking_state"]),
             )
+            left_grip_frame = left_grip_v4.frames[frame_offset]
+            right_grip_frame = right_grip_v4.frames[frame_offset]
+            left_offset_value = left_grip_frame.wrist_alignment.get("overlay_translation_px")
+            right_offset_value = right_grip_frame.wrist_alignment.get("overlay_translation_px")
+            left_hand_offset = (
+                tuple(float(value) for value in left_offset_value)
+                if isinstance(left_offset_value, list) and len(left_offset_value) == 2
+                else None
+            )
+            right_hand_offset = (
+                tuple(float(value) for value in right_offset_value)
+                if isinstance(right_offset_value, list) and len(right_offset_value) == 2
+                else None
+            )
             rendered_frame, overlay_diagnostics = draw_pose_overlay_v4(
                 frame,
                 body_record["pose_graph"],
@@ -4514,6 +4604,10 @@ def process_pose_video(
                 render_joint_points=temporal.render_points,
                 render_joint_scores=temporal.render_scores,
                 render_joint_sources=[source.value for source in temporal.sources],
+                left_hand_offset=left_hand_offset,
+                right_hand_offset=right_hand_offset,
+                left_grip_state=left_grip_frame.state.value,
+                right_grip_state=right_grip_frame.state.value,
             )
             if settings.debug_overlay:
                 render_source_counts = Counter(
@@ -4556,6 +4650,10 @@ def process_pose_video(
                     "maximum_rendered_length": round(overlay_diagnostics.maximum_rendered_length, 3),
                     "severities": overlay_diagnostics.severities,
                     "render_sources": overlay_diagnostics.render_sources,
+                    "overlay_label_overlap_count": overlay_diagnostics.overlay_label_overlap_count,
+                    "overlay_label_readability_score": overlay_diagnostics.overlay_label_readability_score,
+                    "overlay_main_metric_visibility_ratio": overlay_diagnostics.overlay_main_metric_visibility_ratio,
+                    "overlay_label_count": overlay_diagnostics.label_count,
                     "bone_sources": {
                         name: item.source.value for name, item in bone_overrides.items()
                     },
@@ -4613,6 +4711,7 @@ def process_pose_video(
                     "raw_person_detected": body_record["raw_person_detected"],
                     "bbox_source": body_record["bbox_source"],
                     "refinement_fusion": body_record.get("refinement_fusion"),
+                    "trajectory_refinement": body_record.get("trajectory_refinement"),
                     "motion_v6": body_record["motion_v6"],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
@@ -4882,6 +4981,7 @@ def process_pose_video(
             6,
         ),
     }
+    temporal_v6_summary["offline_trajectory_refinement"] = trajectory_result.summary
     render_v6_summary = summarize_render_sources(
         render_v6_frames,
         eligible_frames=[
@@ -4901,6 +5001,24 @@ def process_pose_video(
             sum(frame.state.value != "UNKNOWN" for frame in left_grip_v4.frames)
             + sum(frame.state.value != "UNKNOWN" for frame in right_grip_v4.frames)
         ) / max(1, 2 * processed_frames),
+        6,
+    )
+    overlay_label_count = sum(int(item.get("overlay_label_count", 0)) for item in overlay_diagnostics_records)
+    overlay_label_overlap_count = sum(
+        int(item.get("overlay_label_overlap_count", 0)) for item in overlay_diagnostics_records
+    )
+    overlay_readability_score = round(
+        float(np.mean([
+            float(item.get("overlay_label_readability_score", 1.0))
+            for item in overlay_diagnostics_records
+        ])) if overlay_diagnostics_records else 1.0,
+        6,
+    )
+    overlay_main_metric_visibility_ratio = round(
+        float(np.mean([
+            float(item.get("overlay_main_metric_visibility_ratio", 1.0))
+            for item in overlay_diagnostics_records
+        ])) if overlay_diagnostics_records else 1.0,
         6,
     )
     coalesced_layer_contracts = coalesce_short_timeline_gaps([
@@ -5042,6 +5160,10 @@ def process_pose_video(
                 "angle_usable_coverage_ratio"
             ],
             "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
+            "overlay_label_count": overlay_label_count,
+            "overlay_label_overlap_count": overlay_label_overlap_count,
+            "overlay_label_readability_score": overlay_readability_score,
+            "overlay_main_metric_visibility_ratio": overlay_main_metric_visibility_ratio,
             "left_hand_grip_coverage_ratio": left_grip_v4.summary[
                 "valid_coverage_ratio"
             ],

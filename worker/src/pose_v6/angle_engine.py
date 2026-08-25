@@ -46,6 +46,7 @@ class AngleDiagnostic:
     analysis_usable: bool
     provenance: AngleProvenance
     temporal_outlier_corrected: bool = False
+    temporal_stability: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +56,7 @@ class AngleDiagnostic:
             "analysis_usable": self.analysis_usable,
             "provenance": self.provenance.value,
             "temporal_outlier_corrected": self.temporal_outlier_corrected,
+            "temporal_stability": round(self.temporal_stability, 6),
         }
 
 
@@ -106,6 +108,7 @@ def stabilize_angle_sequence(
 
     diagnostics: list[dict[str, dict[str, object]]] = []
     usable = possible = 0
+    stability_values: list[float] = []
     for frame_index, (metrics, temporal) in enumerate(zip(output, temporal_frames)):
         frame_diagnostics: dict[str, dict[str, object]] = {}
         for name, dependencies in ANGLE_DEPENDENCIES.items():
@@ -117,7 +120,8 @@ def stabilize_angle_sequence(
             if analysis_usable:
                 usable += 1
             metric_quality = _quality(payload) if value is not None else 0.0
-            confidence = min(metric_quality, source_quality) if analysis_usable else 0.0
+            temporal_stability = _temporal_angle_stability(output, frame_index, name, value, timestamps)
+            confidence = min(metric_quality, source_quality) * (0.72 + 0.28 * temporal_stability) if analysis_usable else 0.0
             corrected_here = (frame_index, name) in corrected
             if corrected_here:
                 provenance = AngleProvenance.MIXED_RECONSTRUCTED
@@ -126,7 +130,10 @@ def stabilize_angle_sequence(
                 value, confidence, source_quality, analysis_usable,
                 provenance if analysis_usable else AngleProvenance.INSUFFICIENT,
                 corrected_here,
+                temporal_stability,
             ).to_dict()
+            if analysis_usable:
+                stability_values.append(temporal_stability)
         diagnostics.append(frame_diagnostics)
     summary = {
         "angle_engine_version": "angle-engine-v2.0",
@@ -135,6 +142,8 @@ def stabilize_angle_sequence(
         "angles_evaluated_per_frame": len(ANGLE_DEPENDENCIES),
         "projection": "2d_video_plane",
         "full_3d_anatomical_angle_claimed": False,
+        "angle_temporal_stability_score": round(float(np.mean(stability_values)), 6) if stability_values else 0.0,
+        "confidence_contract": "minimum_metric_and_source_quality_times_temporal_stability",
     }
     return AngleEngineResult(output, diagnostics, summary)
 
@@ -177,3 +186,25 @@ def _valid_value(payload: Mapping[str, object] | None) -> float | None:
 def _quality(payload: Mapping[str, object]) -> float:
     value = payload.get("quality")
     return float(np.clip(value, 0.0, 1.0)) if isinstance(value, (int, float)) and math.isfinite(float(value)) else 0.0
+
+
+def _temporal_angle_stability(
+    frames: Sequence[Mapping[str, Mapping[str, object]]],
+    index: int,
+    name: str,
+    value: float | None,
+    timestamps: Sequence[float],
+) -> float:
+    if value is None:
+        return 0.0
+    rates: list[float] = []
+    for neighbor in (index - 1, index + 1):
+        if not 0 <= neighbor < len(frames):
+            continue
+        neighbor_value = _valid_value(frames[neighbor].get(name))
+        delta = abs(float(timestamps[neighbor]) - float(timestamps[index]))
+        if neighbor_value is not None and math.isfinite(delta) and delta > 1e-6:
+            rates.append(abs(value - neighbor_value) / delta)
+    if not rates:
+        return 0.7
+    return float(np.clip(1.0 - float(np.median(rates)) / 540.0, 0.0, 1.0))

@@ -22,6 +22,8 @@ from .hand_graph import HandGraphFrame
 from .holding import HoldingFrameV2, HoldingStateV2
 from .object_tracking import TrackedObject
 
+from .overlay_layout import LabelLayout, LabelRequest, place_overlay_labels
+
 
 class VisualSeverity(StrEnum):
     NEUTRAL = "neutral"
@@ -161,6 +163,10 @@ class OverlayDiagnostics:
     maximum_rendered_length: float
     severities: dict[str, str]
     render_sources: dict[str, int] = field(default_factory=dict)
+    overlay_label_overlap_count: int = 0
+    overlay_label_readability_score: float = 1.0
+    overlay_main_metric_visibility_ratio: float = 1.0
+    label_count: int = 0
 
 
 class BoneRenderOverride(Protocol):
@@ -362,11 +368,14 @@ def draw_pose_overlay_v4(
     render_joint_points: np.ndarray | None = None,
     render_joint_scores: np.ndarray | None = None,
     render_joint_sources: Sequence[str] | None = None,
+    left_hand_offset: tuple[float, float] | None = None,
+    right_hand_offset: tuple[float, float] | None = None,
+    left_grip_state: str | None = None,
+    right_grip_state: str | None = None,
 ) -> tuple[np.ndarray, OverlayDiagnostics]:
     output = image.copy()
     height, width = output.shape[:2]
-    line_width = int(np.clip(round(height / 260.0), 2, 8))
-    joint_radius = int(np.clip(round(height / 210.0), 2, 9))
+    line_width, joint_radius = overlay_dimensions(height)
     if config.debug and bbox is not None and np.asarray(bbox).size == 4 and np.isfinite(bbox).all():
         x1, y1, x2, y2 = (int(round(float(value))) for value in bbox)
         cv2.rectangle(output, (x1, y1), (x2, y2), palette.unknown, max(1, line_width // 2), cv2.LINE_AA)
@@ -463,8 +472,8 @@ def draw_pose_overlay_v4(
         cv2.circle(output, _integer_point(coordinates), joint_radius + 1, halo, 1, cv2.LINE_AA)
         cv2.circle(output, _integer_point(coordinates), max(1, joint_radius - 1), color, -1, cv2.LINE_AA)
 
-    _draw_hand(output, left_hand, severities.get("left_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius)
-    _draw_hand(output, right_hand, severities.get("right_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius)
+    _draw_hand(output, left_hand, severities.get("left_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius, offset=left_hand_offset)
+    _draw_hand(output, right_hand, severities.get("right_wrist_flexion_deg", VisualSeverity.UNKNOWN), palette, max(1, line_width - 1), joint_radius, offset=right_hand_offset)
 
     if config.draw_objects or config.debug:
         for item in objects:
@@ -475,14 +484,26 @@ def draw_pose_overlay_v4(
 
     _draw_holding_marker(output, left_hand, left_holding, "HOLD L", palette)
     _draw_holding_marker(output, right_hand, right_holding, "HOLD R", palette)
+    _draw_grip_state(output, left_hand, left_grip_state, "L", palette, offset=left_hand_offset)
+    _draw_grip_state(output, right_hand, right_grip_state, "P", palette, offset=right_hand_offset)
     if left_holding.bimanual_candidate and right_holding.bimanual_candidate:
         centers = [value.palm.center for value in (left_hand, right_hand) if value.palm.center]
         if len(centers) == 2:
             center = tuple(np.mean(np.asarray(centers), axis=0))
             _draw_label(output, "BIMANUAL", _integer_point(center), palette.holding, palette)
 
+    label_layout = None
     if config.draw_angles:
-        _draw_angle_labels(output, graph, metrics, severities, palette, config.metric_quality_threshold)
+        label_layout = _draw_angle_labels(
+            output,
+            graph,
+            metrics,
+            severities,
+            palette,
+            config.metric_quality_threshold,
+            render_joint_points=render_joint_points,
+            render_joint_scores=render_joint_scores,
+        )
     if config.debug:
         _draw_debug_status(output, graph, palette)
 
@@ -498,8 +519,23 @@ def draw_pose_overlay_v4(
         maximum_rendered_length=max(lengths, default=0.0),
         severities={name: value.value for name, value in severities.items()},
         render_sources=source_counts,
+        overlay_label_overlap_count=label_layout.overlap_count if label_layout else 0,
+        overlay_label_readability_score=label_layout.readability_score if label_layout else 1.0,
+        overlay_main_metric_visibility_ratio=label_layout.visibility_ratio if label_layout else 1.0,
+        label_count=len(label_layout.labels) if label_layout else 0,
     )
     return output, diagnostics
+
+
+def overlay_dimensions(frame_height: int) -> tuple[int, int]:
+    """Return premium standard-mode bone width and joint radius."""
+
+    if frame_height <= 0:
+        raise ValueError("frame_height must be positive")
+    return (
+        int(np.clip(round(frame_height / 190.0), 3, 10)),
+        int(np.clip(round(frame_height / 170.0), 3, 11)),
+    )
 
 
 def _metric_severities(
@@ -529,20 +565,41 @@ def _draw_hand(
     palette: OverlayPalette,
     thickness: int,
     radius: int,
+    *,
+    offset: tuple[float, float] | None = None,
 ) -> None:
     if not hand.visible:
         return
     source = hand.source_frame
+    translation = np.asarray(offset if offset is not None else (0.0, 0.0), dtype=float)
     color = palette.unknown if hand.quality < 0.55 else palette.severity(severity)
     for first, second in HAND_EDGES:
         if source.point_validity.size != 21 or not bool(source.point_validity[first]) or not bool(source.point_validity[second]):
             continue
         if not np.isfinite(source.points_px[[first, second]]).all():
             continue
-        cv2.line(image, _integer_point(source.points_px[first]), _integer_point(source.points_px[second]), color, thickness, cv2.LINE_AA)
+        cv2.line(image, _integer_point(source.points_px[first] + translation), _integer_point(source.points_px[second] + translation), color, thickness, cv2.LINE_AA)
     for index, point in enumerate(source.points_px):
         if source.point_validity.size == 21 and bool(source.point_validity[index]) and np.isfinite(point).all():
-            cv2.circle(image, _integer_point(point), max(1, radius - 1), color, -1, cv2.LINE_AA)
+            cv2.circle(image, _integer_point(point + translation), max(1, radius - 1), color, -1, cv2.LINE_AA)
+
+
+def _draw_grip_state(
+    image: np.ndarray,
+    hand: HandGraphFrame,
+    state: str | None,
+    side: str,
+    palette: OverlayPalette,
+    *,
+    offset: tuple[float, float] | None,
+) -> None:
+    if not hand.visible or state not in {"POWER_GRIP", "PRECISION_PINCH", "CLOSED"} or hand.palm.center is None:
+        return
+    center = np.asarray(hand.palm.center, dtype=float)
+    center += np.asarray(offset if offset is not None else (0.0, 0.0), dtype=float)
+    center += np.asarray((12.0, 24.0))
+    labels = {"POWER_GRIP": "chwyt", "PRECISION_PINCH": "szczypcowy", "CLOSED": "zamknięta"}
+    _draw_label(image, f"{side}: {labels[state]}", _integer_point(center), palette.holding, palette)
 
 
 def _draw_holding_marker(
@@ -565,31 +622,77 @@ def _draw_angle_labels(
     severities: dict[str, VisualSeverity],
     palette: OverlayPalette,
     minimum_quality: float,
-) -> None:
+    *,
+    render_joint_points: np.ndarray | None = None,
+    render_joint_scores: np.ndarray | None = None,
+) -> LabelLayout:
     anchors: dict[str, tuple[float, float] | None] = {
         "trunk_inclination_deg": graph.anchors.torso_center,
         "neck_flexion_deg": graph.anchors.shoulder_center,
-        "left_upper_arm_elevation_deg": graph.joints[5].coordinates,
-        "right_upper_arm_elevation_deg": graph.joints[6].coordinates,
-        "left_elbow_flexion_deg": graph.joints[7].coordinates,
-        "right_elbow_flexion_deg": graph.joints[8].coordinates,
-        "left_wrist_flexion_deg": graph.joints[9].coordinates,
-        "right_wrist_flexion_deg": graph.joints[10].coordinates,
+        "left_upper_arm_elevation_deg": _overlay_joint(graph, 5, render_joint_points, render_joint_scores),
+        "right_upper_arm_elevation_deg": _overlay_joint(graph, 6, render_joint_points, render_joint_scores),
+        "left_elbow_flexion_deg": _overlay_joint(graph, 7, render_joint_points, render_joint_scores),
+        "right_elbow_flexion_deg": _overlay_joint(graph, 8, render_joint_points, render_joint_scores),
+        "left_wrist_flexion_deg": _overlay_joint(graph, 9, render_joint_points, render_joint_scores),
+        "right_wrist_flexion_deg": _overlay_joint(graph, 10, render_joint_points, render_joint_scores),
     }
-    occupied: list[np.ndarray] = []
-    for index, (name, anchor) in enumerate(anchors.items()):
+    labels = {
+        "trunk_inclination_deg": "Tułów",
+        "neck_flexion_deg": "Szyja",
+        "left_upper_arm_elevation_deg": "L ramię",
+        "right_upper_arm_elevation_deg": "P ramię",
+        "left_elbow_flexion_deg": "L łokieć",
+        "right_elbow_flexion_deg": "P łokieć",
+        "left_wrist_flexion_deg": "L nadgarstek",
+        "right_wrist_flexion_deg": "P nadgarstek",
+    }
+    prepared: list[tuple[str, str, tuple[float, float], tuple[int, int], int]] = []
+    font_scale = float(np.clip(image.shape[0] / 820.0, 0.48, 0.82))
+    thickness = int(np.clip(round(image.shape[0] / 620.0), 1, 3))
+    for name, anchor in anchors.items():
         metric = metrics.get(name, {})
         value, quality = metric.get("value"), metric.get("quality")
         if anchor is None or metric.get("valid") is not True or not isinstance(value, (int, float)) or isinstance(value, bool) or not isinstance(quality, (int, float)) or quality < minimum_quality:
             continue
-        base = np.asarray(anchor, dtype=float) + np.asarray((12.0, -10.0 if index % 2 == 0 else 18.0))
-        for existing in occupied:
-            if np.linalg.norm(base - existing) < 34.0:
-                base[1] += 22.0
-        base[0] = np.clip(base[0], 8.0, image.shape[1] - 52.0)
-        base[1] = np.clip(base[1], 16.0, image.shape[0] - 8.0)
-        occupied.append(base.copy())
-        _draw_label(image, f"{float(value):.0f}°", _integer_point(base), palette.severity(severities.get(name, VisualSeverity.UNKNOWN)), palette)
+        text = f"{labels[name]} {float(value):.0f}°"
+        (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        priority = 3 if name in {"trunk_inclination_deg", "neck_flexion_deg"} else 2 if "elbow" in name else 1
+        prepared.append((name, text, anchor, (text_width + 14, text_height + baseline + 12), priority))
+    layout = place_overlay_labels(
+        [LabelRequest(name, anchor, size, priority) for name, _text, anchor, size, priority in prepared],
+        image.shape[1],
+        image.shape[0],
+    )
+    for placed, (name, text, _anchor, _size, _priority) in zip(layout.labels, prepared):
+        if not placed.visible:
+            continue
+        left, top, right, bottom = placed.bounds
+        layer = image.copy()
+        cv2.rectangle(layer, (left, top), (right, bottom), palette.shadow, -1, cv2.LINE_AA)
+        cv2.addWeighted(layer, 0.78, image, 0.22, 0.0, dst=image)
+        color = palette.severity(severities.get(name, VisualSeverity.UNKNOWN))
+        cv2.rectangle(image, (left, top), (right, bottom), color, 1, cv2.LINE_AA)
+        cv2.putText(image, text, placed.origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, palette.shadow, thickness + 3, cv2.LINE_AA)
+        cv2.putText(image, text, placed.origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
+    return layout
+
+
+def _overlay_joint(
+    graph: PoseGraphFrame,
+    index: int,
+    render_points: np.ndarray | None,
+    render_scores: np.ndarray | None,
+) -> tuple[float, float] | None:
+    if (
+        render_points is not None
+        and render_scores is not None
+        and index < len(render_points)
+        and index < len(render_scores)
+        and float(render_scores[index]) > 0.0
+        and np.isfinite(render_points[index]).all()
+    ):
+        return tuple(float(value) for value in render_points[index])
+    return graph.joints[index].coordinates
 
 
 def _draw_debug_status(image: np.ndarray, graph: PoseGraphFrame, palette: OverlayPalette) -> None:
@@ -610,6 +713,7 @@ def _draw_alpha_line(
     alpha: float,
 ) -> None:
     layer = image.copy()
+    cv2.line(layer, _integer_point(first), _integer_point(second), (10, 18, 24), thickness + 4, cv2.LINE_AA)
     cv2.line(layer, _integer_point(first), _integer_point(second), color, thickness, cv2.LINE_AA)
     cv2.addWeighted(layer, float(np.clip(alpha, 0.0, 1.0)), image, 1.0 - float(np.clip(alpha, 0.0, 1.0)), 0.0, dst=image)
 

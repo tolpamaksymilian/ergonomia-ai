@@ -1,6 +1,6 @@
 export const release = {
-  version: "0.25.0-beta.1",
-  name: "Pose V6.2 Precision Pass Beta",
+  version: "0.26.0-beta.1",
+  name: "Pose V6.3 Final Quality Pass Beta",
   channel: "beta",
   statusLabel: "Wersja testowa",
   releasedAt: "2026-08-24",
