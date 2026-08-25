@@ -7,6 +7,11 @@ import {
   isDashboardPathActive,
   relationName,
 } from "../presentation.ts";
+import {
+  adminDashboardNavigation,
+  companyAdminNavigation,
+  userDashboardNavigation,
+} from "../../../config/dashboard-navigation.ts";
 
 test("sidebar active state respects exact dashboard links", () => {
   assert.equal(isDashboardPathActive("/panel", "/panel", true), true);
@@ -28,4 +33,12 @@ test("relation helper supports Supabase object and array shapes", () => {
   assert.equal(relationName([{ name: "Operator" }]), "Operator");
   assert.equal(relationName([]), null);
   assert.equal(relationName(null), null);
+});
+
+test("navigation passed across the server-client boundary is serializable", () => {
+  const groups = [...userDashboardNavigation, companyAdminNavigation, ...adminDashboardNavigation];
+  assert.doesNotThrow(() => structuredClone(groups));
+  for (const group of groups) {
+    for (const item of group.items) assert.equal(typeof item.icon, "string");
+  }
 });

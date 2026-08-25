@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { themeBootstrapScript } from "@/lib/theme";
 
@@ -34,7 +35,7 @@ export default function RootLayout({
       data-theme="light"
       suppressHydrationWarning
     >
-      <head><script dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }} /></head>
+      <head><Script id="theme-bootstrap" strategy="beforeInteractive">{themeBootstrapScript()}</Script></head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

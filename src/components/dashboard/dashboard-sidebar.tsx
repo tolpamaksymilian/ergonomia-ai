@@ -2,11 +2,41 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  BriefcaseBusiness,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  LayoutDashboard,
+  MailPlus,
+  Menu,
+  Settings2,
+  UserRound,
+  UsersRound,
+  Video,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useState } from "react";
 
-import type { DashboardNavGroup } from "@/config/dashboard-navigation";
+import type { DashboardIconName, DashboardNavGroup } from "@/config/dashboard-navigation";
 import { isDashboardPathActive } from "@/lib/dashboard/presentation";
+
+const DASHBOARD_ICONS = {
+  dashboard: LayoutDashboard,
+  "admin-dashboard": BarChart3,
+  analyses: Video,
+  reports: FileText,
+  positions: BriefcaseBusiness,
+  profile: UserRound,
+  settings: Settings2,
+  companies: Building2,
+  users: UsersRound,
+  invitations: MailPlus,
+} satisfies Record<DashboardIconName, LucideIcon>;
 
 export function DashboardSidebar({ groups, workspaceLabel }: { groups: readonly DashboardNavGroup[]; workspaceLabel: string }) {
   const pathname = usePathname();
@@ -24,7 +54,7 @@ export function DashboardSidebar({ groups, workspaceLabel }: { groups: readonly 
         {!collapsed && <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{group.label}</p>}
         <div className="space-y-1">{group.items.map((item) => {
           const active = isDashboardPathActive(pathname, item.href, item.exact);
-          const Icon = item.icon;
+          const Icon = DASHBOARD_ICONS[item.icon];
           return <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined} onClick={() => setMobileOpen(false)} className={`group flex min-h-11 items-center gap-3 rounded-xl px-3 transition ${active ? "bg-violet-500 text-white shadow-lg shadow-violet-950/20" : "text-slate-400 hover:bg-white/7 hover:text-white"}`}>
             <Icon className="size-[18px] shrink-0" />
             {!collapsed && <span className="min-w-0"><span className="block truncate text-sm font-semibold">{item.label}</span><span className={`block truncate text-[10px] ${active ? "text-violet-100" : "text-slate-600 group-hover:text-slate-400"}`}>{item.description}</span></span>}
