@@ -62,39 +62,63 @@ html[data-theme="dark"] {
 }
 
 .dashboard-shell {
-  --primary: #7c3aed;
-  --primary-hover: #6d28d9;
-  --ring: #8b5cf6;
-  --brand: #7c3aed;
-  --brand-hover: #6d28d9;
-  --brand-soft: #f3e8ff;
-  background-image: radial-gradient(circle at 78% -10%, rgb(124 58 237 / 0.09), transparent 32rem);
-}
-html.dark .dashboard-shell {
-  --background: #0b0d18;
-  --surface: #141726;
-  --surface-raised: #191d2f;
-  --surface-muted: #1c2033;
-  --card: #141726;
-  --border: #292d42;
-  --brand-soft: #251b42;
-  background-image: radial-gradient(circle at 78% -10%, rgb(124 58 237 / 0.15), transparent 34rem);
+  color-scheme: dark;
+  --background: #090b10;
+  --foreground: #f7f8fb;
+  --surface: #11151e;
+  --surface-raised: #181d28;
+  --surface-muted: #1b202c;
+  --card: #141821;
+  --card-foreground: #f8fafc;
+  --popover: #171c26;
+  --popover-foreground: #f8fafc;
+  --primary: #786cff;
+  --primary-hover: #8277ff;
+  --primary-foreground: #ffffff;
+  --secondary: #202633;
+  --secondary-foreground: #f7f8fb;
+  --muted: #1b202c;
+  --muted-foreground: #aab2c0;
+  --accent: #252044;
+  --accent-foreground: #dcd8ff;
+  --border: #303744;
+  --input: #3a4352;
+  --ring: #8d83ff;
+  --destructive: #f87171;
+  --brand: #786cff;
+  --brand-hover: #8277ff;
+  --brand-soft: #252044;
+  --shadow-subtle: 0 1px 1px rgb(0 0 0 / 0.32), 0 16px 36px rgb(0 0 0 / 0.12);
+  background-color: var(--background);
+  background-image: radial-gradient(circle at 78% -10%, rgb(120 108 255 / 0.14), transparent 34rem);
 }
 
 @layer components {
-  .dashboard-page { @apply mx-auto w-full max-w-[1600px] space-y-6; }
+  .dashboard-page { @apply mx-auto w-full max-w-[1600px] space-y-6 pb-8; }
   .dashboard-card { @apply rounded-2xl border border-border bg-card text-card-foreground shadow-[var(--shadow-subtle)]; }
-  .dashboard-eyebrow { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-violet-600 dark:text-violet-300; }
+  .dashboard-eyebrow { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300; }
   .dashboard-title { @apply text-2xl font-bold tracking-[-0.03em] sm:text-3xl; }
   .dashboard-muted { @apply text-sm leading-6 text-muted-foreground; }
   .dashboard-table-wrap { @apply overflow-x-auto rounded-2xl border border-border bg-card shadow-[var(--shadow-subtle)]; }
   .dashboard-table { @apply w-full min-w-[760px] border-collapse text-left text-sm; }
-  .dashboard-table th { @apply border-b border-border bg-surface-muted px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground; }
+  .dashboard-table th { @apply sticky top-0 border-b border-border bg-surface-muted px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground; }
   .dashboard-table td { @apply border-b border-border/70 px-5 py-4 align-middle; }
   .dashboard-table tbody tr { @apply transition hover:bg-surface-muted/70; }
   .dashboard-field { @apply grid gap-1.5 text-sm font-semibold text-foreground; }
-  .dashboard-field :is(input, select, textarea) { @apply min-h-11 w-full rounded-xl border border-input bg-surface px-3 font-normal outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20; }
+  .dashboard-field :is(input, select, textarea) { @apply min-h-11 w-full rounded-xl border border-input bg-surface-raised px-3 font-normal text-foreground outline-none transition placeholder:text-muted-foreground hover:border-slate-500 focus:border-violet-400 focus:ring-2 focus:ring-violet-400/25 disabled:cursor-not-allowed disabled:opacity-60; }
+  .dashboard-field > span { @apply text-xs font-normal leading-5 text-muted-foreground; }
   .dashboard-status { @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold; }
+  .dashboard-status-success { @apply border-emerald-400/30 bg-emerald-400/10 text-emerald-300; }
+  .dashboard-status-warning { @apply border-amber-400/30 bg-amber-400/10 text-amber-200; }
+  .dashboard-status-danger { @apply border-red-400/30 bg-red-400/10 text-red-300; }
+  .dashboard-status-neutral { @apply border-border bg-surface-muted text-muted-foreground; }
+  .dashboard-feedback { @apply rounded-xl border p-3 text-sm font-medium; }
+  .dashboard-feedback-success { @apply border-emerald-400/30 bg-emerald-400/10 text-emerald-200; }
+  .dashboard-feedback-error { @apply border-red-400/30 bg-red-400/10 text-red-200; }
+  .dashboard-toast { @apply fixed bottom-5 right-5 z-[100] max-w-sm rounded-xl border p-4 text-sm shadow-2xl; }
+  .dashboard-empty { @apply grid min-h-64 place-items-center content-center gap-3 rounded-2xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground; }
+  .dashboard-empty h3 { @apply text-lg font-bold text-foreground; }
+  .dashboard-empty p { @apply max-w-md text-sm leading-6; }
 }
 
 @theme inline {
@@ -145,6 +169,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .ui-card { @apply rounded-xl border border-border bg-card text-card-foreground shadow-[var(--shadow-subtle)]; }
   .ui-button-primary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50; }
   .ui-button-secondary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 font-semibold text-foreground transition hover:bg-secondary disabled:opacity-50; }
+  .ui-button-danger { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-2.5 font-semibold text-red-200 transition hover:border-red-300/50 hover:bg-red-400/20 disabled:opacity-50; }
   .ui-icon-button { @apply inline-flex size-10 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground transition hover:bg-secondary hover:text-foreground; }
   .ui-input { @apply min-h-11 w-full rounded-lg border border-input bg-surface px-3 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20; }
   .ui-chip { @apply rounded-full border border-border bg-surface-muted px-3 py-1 text-xs text-muted-foreground; }
@@ -172,6 +197,28 @@ html.dark :is(main, header, footer) [class*="border-slate-"] { border-color: var
 html.dark :is(main, header, footer) :is(input, textarea, select) { background: var(--surface-raised); border-color: var(--input); color: var(--foreground); }
 
 * { scrollbar-color: var(--border) transparent; }
+
+/* Legacy dashboard utilities receive a dark, accessible interpretation while pages migrate to status tokens. */
+.dashboard-shell .bg-emerald-50 { background-color: rgb(52 211 153 / 0.1) !important; }
+.dashboard-shell .bg-amber-50 { background-color: rgb(251 191 36 / 0.1) !important; }
+.dashboard-shell .bg-red-50 { background-color: rgb(248 113 113 / 0.1) !important; }
+.dashboard-shell .bg-violet-50 { background-color: rgb(120 108 255 / 0.12) !important; }
+.dashboard-shell .text-emerald-700,
+.dashboard-shell .text-emerald-600 { color: #6ee7b7 !important; }
+.dashboard-shell .text-amber-700,
+.dashboard-shell .text-amber-600 { color: #fde68a !important; }
+.dashboard-shell .text-red-700,
+.dashboard-shell .text-red-800 { color: #fca5a5 !important; }
+.dashboard-shell .text-violet-700,
+.dashboard-shell .text-violet-600 { color: #c4b5fd !important; }
+.dashboard-shell .text-sky-600 { color: #7dd3fc !important; }
+.dashboard-shell .border-emerald-200,
+.dashboard-shell .border-emerald-300 { border-color: rgb(52 211 153 / 0.3) !important; }
+.dashboard-shell .border-amber-200,
+.dashboard-shell .border-amber-300 { border-color: rgb(251 191 36 / 0.3) !important; }
+.dashboard-shell .border-red-200,
+.dashboard-shell .border-red-300 { border-color: rgb(248 113 113 / 0.3) !important; }
+.dashboard-shell .border-violet-200 { border-color: rgb(167 139 250 / 0.3) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }

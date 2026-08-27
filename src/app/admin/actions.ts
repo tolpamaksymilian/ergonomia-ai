@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
 import { requireAdmin, requireCompanyManager, requireUser } from "@/lib/auth/access";
+import { resolveTeamRole } from "@/lib/dashboard/team-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type InvitationActionState = { status: "idle" | "success" | "error"; message: string };
+export type MemberActionState = InvitationActionState;
 
 export async function createCompany(formData: FormData) {
   const { supabase } = await requireAdmin();
@@ -30,12 +32,13 @@ export async function inviteCompanyUser(_state: InvitationActionState, formData:
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: "error", message: "Podaj poprawny adres e-mail." };
   const fullName = optional(formData, "full_name", 160);
   const role = enumValue(formData, "company_role", ["admin", "member", "reviewer"] as const, "member");
+  const teamRole = resolveTeamRole(formData.get("team_role_choice"), formData.get("team_role_custom"));
   const positionId = optionalUuid(formData, "position_id");
   if (positionId) {
     const { data: position } = await supabase.from("company_positions").select("id").eq("id", positionId).eq("company_id", companyId).maybeSingle();
     if (!position) return { status: "error", message: "Wybrane stanowisko nie należy do wskazanej firmy." };
   }
-  const { data: invitation, error: insertError } = await supabase.from("company_invitations").insert({ company_id: companyId, email, full_name: fullName, company_role: role, position_id: positionId, invited_by: user.id }).select("id").single();
+  const { data: invitation, error: insertError } = await supabase.from("company_invitations").insert({ company_id: companyId, email, full_name: fullName, company_role: role, team_role: teamRole, position_id: positionId, invited_by: user.id }).select("id").single();
   if (insertError) return { status: "error", message: insertError.code === "23505" ? "Aktywne zaproszenie dla tego adresu już istnieje." : "Nie udało się zapisać zaproszenia." };
   const admin = createAdminClient();
   if (!admin) {
@@ -53,12 +56,20 @@ export async function inviteCompanyUser(_state: InvitationActionState, formData:
   return { status: "success", message: `Zaproszenie wysłano na ${email}.` };
 }
 
-export async function updateCompanyMember(formData: FormData) {
+export async function updateCompanyMember(_state: MemberActionState, formData: FormData): Promise<MemberActionState> {
   const companyId = uuid(formData, "company_id");
   const { supabase } = await requireCompanyManager(companyId);
-  const { error } = await supabase.rpc("manage_company_member", { p_user_id: uuid(formData, "user_id"), p_company_id: companyId, p_company_role: enumValue(formData, "company_role", ["admin", "member", "reviewer"] as const, "member"), p_position_id: optionalUuid(formData, "position_id"), p_account_status: enumValue(formData, "account_status", ["active", "inactive", "pending"] as const, "active") });
-  if (error) throw new Error("Nie udało się zaktualizować użytkownika firmy.");
+  const { data, error } = await supabase.rpc("manage_company_member_v2", {
+    p_user_id: uuid(formData, "user_id"),
+    p_company_id: companyId,
+    p_company_role: enumValue(formData, "company_role", ["admin", "member", "reviewer"] as const, "member"),
+    p_position_id: optionalUuid(formData, "position_id"),
+    p_account_status: enumValue(formData, "account_status", ["active", "inactive", "pending"] as const, "active"),
+    p_team_role: resolveTeamRole(formData.get("team_role_choice"), formData.get("team_role_custom")),
+  });
+  if (error || data !== true) return { status: "error", message: "Nie udało się zaktualizować członka zespołu." };
   revalidatePath(`/admin/firmy/${companyId}`); revalidatePath("/admin/uzytkownicy"); revalidatePath("/panel/firma");
+  return { status: "success", message: "Zmiany członka zespołu zostały zapisane." };
 }
 
 export async function cancelInvitation(formData: FormData) {

@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Image as ImageIcon } from "lucide-react";
 
 import { PhotoSceneEditor } from "@/components/photo-scene/photo-scene-editor";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { normalizeSceneState } from "@/lib/photo-scene/schema";
 import { requireUser } from "@/lib/auth/access";
 import type { SceneDetection, SceneState } from "@/types/photo-scene";
@@ -33,7 +32,7 @@ export default async function PhotoScenePage({ params }: { params: Promise<{ id:
     <div className="mx-auto max-w-[1800px] space-y-4">
       <header className="ui-surface flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-3"><Link href="/panel/analizy" className="ui-button-secondary"><ArrowLeft className="size-4" />Historia</Link><div><p className="text-xs font-bold uppercase tracking-wider text-primary">Projekt ze zdjęcia · Beta</p><h1 className="text-xl font-bold sm:text-2xl">{analysis.title}</h1></div></div>
-        <div className="flex items-center gap-2"><span className="hidden rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary sm:inline-flex"><ImageIcon className="mr-2 size-4" />Scene Builder v0.10 Beta</span><ThemeToggle /></div>
+        <div className="flex items-center gap-2"><span className="hidden rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary sm:inline-flex"><ImageIcon className="mr-2 size-4" />Scene Builder v0.10 Beta</span></div>
       </header>
       <PhotoSceneEditor
         key={`${id}:${scene.detection_completed_at ?? "pending"}`}

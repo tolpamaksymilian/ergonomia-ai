@@ -9,7 +9,6 @@ import type { AnalysisReviewModel, ReviewMetricName } from "@/lib/analysis-revie
 import type { CompanyMethodsView } from "@/lib/company-methods/normalize";
 import type { AnalysisCategory, AnalysisMetadata, Workstation } from "@/types/analysis-context";
 import { AnalysisContextEditor } from "@/components/analyses/analysis-context-editor";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 import { AnalysisTimeline } from "./analysis-timeline";
 import { AssessmentSection } from "./assessment-section";
@@ -94,7 +93,7 @@ export function AnalysisReviewWorkspace({ model, companyMethods, metadata, works
               <h1 className="mt-5 max-w-4xl text-3xl font-bold tracking-[-0.035em] sm:text-4xl lg:text-5xl">{analysis.title}</h1>
               {analysis.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{analysis.description}</p>}
             </div>
-            <div className="flex flex-wrap gap-2"><ThemeToggle />
+            <div className="flex flex-wrap gap-2">
               <Link href={`/panel/analizy/${analysis.id}/raport`} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"><FileText className="size-4" />Raport</Link>
               {urls.reportJson && <a href={urls.reportJson} download className="ui-button-secondary text-sm"><Download className="size-4" />Pobierz dane</a>}
             </div>

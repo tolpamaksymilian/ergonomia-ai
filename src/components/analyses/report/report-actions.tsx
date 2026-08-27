@@ -1,7 +1,6 @@
 "use client";
 
 import { Download, Printer } from "lucide-react";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type ReportActionsProps = {
   downloadUrl: string | null;
@@ -10,7 +9,6 @@ type ReportActionsProps = {
 export function ReportActions({ downloadUrl }: ReportActionsProps) {
   return (
     <div className="report-actions flex flex-wrap gap-3" data-print-hidden>
-      <ThemeToggle />
       <button
         type="button"
         onClick={() => window.print()}

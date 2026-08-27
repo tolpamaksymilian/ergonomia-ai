@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 import { Bell, ChevronRight, Home, LogOut } from "lucide-react";
 
 import { signOutAction } from "@/actions/auth";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 
-const labels: Record<string, string> = { panel: "Panel", admin: "Administracja", analizy: "Analizy", raporty: "Raporty", stanowiska: "Stanowiska", profil: "Profil", ustawienia: "Ustawienia", firmy: "Firmy", uzytkownicy: "Użytkownicy", zaproszenia: "Zaproszenia", rozwoj: "Rozwój systemu", nowa: "Nowa analiza", kategorie: "Kategorie" };
+const labels: Record<string, string> = { panel: "Panel", admin: "Administracja", analizy: "Analizy", raporty: "Raporty", stanowiska: "Stanowiska", firma: "Zespół i firma", profil: "Profil", ustawienia: "Ustawienia", firmy: "Firmy", uzytkownicy: "Użytkownicy", zaproszenia: "Zaproszenia", rozwoj: "Rozwój systemu", nowa: "Nowa analiza", kategorie: "Kategorie" };
 
 export function DashboardTopbar({ fullName, email, roleLabel }: { fullName: string; email: string; roleLabel: string }) {
   const pathname = usePathname();
@@ -20,7 +19,6 @@ export function DashboardTopbar({ fullName, email, roleLabel }: { fullName: stri
     </nav>
     <div className="flex shrink-0 items-center gap-2">
       <button type="button" className="ui-icon-button hidden sm:inline-flex" aria-label="Powiadomienia" title="Brak nowych powiadomień"><Bell className="size-4" /></button>
-      <ThemeToggle />
       <Link href="/panel/profil" className="flex items-center gap-3 rounded-xl border border-border bg-surface px-2 py-1.5 shadow-sm transition hover:bg-secondary">
         <span className="grid size-9 place-items-center rounded-lg bg-violet-500 text-xs font-bold text-white">{initials || "EA"}</span>
         <span className="hidden min-w-0 text-left md:block"><span className="block max-w-36 truncate text-xs font-bold">{fullName || email}</span><span className="block text-[10px] text-muted-foreground">{roleLabel}</span></span>

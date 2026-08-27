@@ -45,7 +45,7 @@ export const userDashboardNavigation: readonly DashboardNavGroup[] = [
 export const companyAdminNavigation: DashboardNavGroup = {
   label: "Organizacja",
   items: [
-    { href: "/panel/firma", label: "Moja firma", description: "Zespół, role i zaproszenia", icon: "companies" },
+    { href: "/panel/firma", label: "Zespół i firma", description: "Osoby, role i zaproszenia", icon: "companies" },
   ],
 };
 

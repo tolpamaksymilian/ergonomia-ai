@@ -18,7 +18,7 @@ export async function getCurrentAccount() {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id, full_name, role, company_id, company_role, position_id, account_status, created_at, updated_at")
+    .select("id, full_name, role, company_id, company_role, team_role, position_id, account_status, created_at, updated_at")
     .eq("id", user.id)
     .maybeSingle();
 

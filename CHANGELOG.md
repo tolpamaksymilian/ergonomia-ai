@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.28.0-beta.1] - 2026-08-27
+
+### Dashboard UX/UI Polish
+
+- Panel użytkownika i administracji korzysta z niezależnego, kontrastowego systemu dark-only bez przełącznika motywu.
+- Dodano wspólne centrum zespołu z wyszukiwaniem, filtrami, responsywną tabelą, edycją w drawerze i uproszczonym zapraszaniem osób.
+- Rozdzielono rolę systemową, informacyjną rolę w zespole i stanowisko organizacyjne; uprawnienia nadal wynikają wyłącznie z bezpiecznych ról systemowych.
+- Dodano addytywne pole `team_role`, zachowując dotychczasowe RLS, izolację firm i wszystkie pipeline'y analityczne.
+
 ## [0.27.0-beta.1] - 2026-08-25
 
 ### Dashboard Workspace Redesign

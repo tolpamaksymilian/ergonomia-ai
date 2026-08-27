@@ -2,14 +2,14 @@
 
 Dokumentacja nowego panelu, modelu firm i zaproszeń: [`docs/DASHBOARD_ARCHITECTURE.md`](docs/DASHBOARD_ARCHITECTURE.md).
 
-Wersja `0.27.0-beta.1` udostępnia dwa niezależne tryby pracy oraz nowy panel organizacyjny:
+Wersja `0.28.0-beta.1` udostępnia dwa niezależne tryby pracy oraz dopracowany panel organizacyjny dark-only:
 
 1. **Analiza filmu** — istniejący pipeline Pose, Metrics, Risk, RULA, REBA, OWAS i raport.
 2. **Projekt stanowiska ze zdjęcia — Beta** — prywatne zdjęcie, precyzyjny Coordinate Engine V2, jawna kontrola analizy zdjęcia, perspektywiczne pole skali, techniczny manekin, geometria wymiarów i sugestie Workera. Ten tryb nie wykonuje jeszcze oceny ergonomicznej.
 
 System do analizy ruchu z filmu oraz projektowania interaktywnej sceny stanowiska na podstawie zdjęcia.
 
-**Aktualna wersja: v0.27.0-beta.1 — Dashboard Workspace Redesign Beta.**
+**Aktualna wersja: v0.28.0-beta.1 — Dashboard UX/UI Polish Beta.**
 
 Ergonomia AI wykrywa sylwetkę pracownika, śledzi ruch, oblicza metryki postawy i przygotowuje dane do dalszej oceny ryzyka ergonomicznego.
 
