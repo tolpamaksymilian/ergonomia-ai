@@ -16,11 +16,29 @@ KPI_NAMES = (
     "angle_outlier_count",
     "angle_usable_coverage_ratio",
     "grip_valid_coverage_ratio",
+    "single_frame_grip_flicker_count",
     "left_hand_grip_coverage_ratio",
     "right_hand_grip_coverage_ratio",
     "overlay_label_overlap_count",
     "overlay_label_readability_score",
     "overlay_main_metric_visibility_ratio",
+    "pose_final_quality_score",
+    "pass1_quality",
+    "pass2_quality",
+    "pass3_quality",
+    "final_quality",
+    "frames_improved_by_pass2",
+    "frames_improved_by_pass3",
+    "frames_rolled_back",
+    "critical_segments_count",
+    "hard_segments_count",
+    "pass1_ms",
+    "pass2_ms",
+    "pass3_ms",
+    "global_optimization_ms",
+    "hand_ms",
+    "render_ms",
+    "total_ms",
 )
 
 
@@ -54,7 +72,13 @@ def compare_quality_documents(
             if candidate_kpis[name] is not None and baseline_kpis[name] is not None else None
             for name in KPI_NAMES
         }
-    return {"candidate": candidate_kpis, "baseline": baseline_kpis, "delta": deltas}
+    return {
+        "comparison_mode": "single-pass-vs-multi-pass",
+        "accuracy_claimed": False,
+        "candidate": candidate_kpis,
+        "baseline": baseline_kpis,
+        "delta": deltas,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

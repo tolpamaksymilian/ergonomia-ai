@@ -21,7 +21,7 @@ def augment_pose_document_v6(
     document["worker_version"] = WORKER_VERSION
     document["pipeline_version"] = POSE_VERSION
     document["quality_version"] = POSE_VERSION
-    document["generated_by"] = "Ergonomia AI Worker V0.10"
+    document["generated_by"] = f"Ergonomia AI Worker {WORKER_VERSION}"
     configuration = document.setdefault("configuration", {})
     if isinstance(configuration, dict):
         configuration["pose_v6"] = {
@@ -39,6 +39,20 @@ def augment_pose_document_v6(
             "anatomical_projection": "canonical-normalized-constrained-chain-v1",
             "angle_engine": "angle-engine-v2.0",
             "grip_engine": "grip-v4.0",
+            "iterative_refinement": {
+                "enabled": config.iterative.enabled,
+                "pass2_maximum_ratio": config.iterative.pass2_maximum_ratio,
+                "pass3_critical_ratio": config.iterative.pass3_critical_ratio,
+                "segment_padding_seconds": config.iterative.segment_padding_seconds,
+                "convergence_epsilon": config.iterative.convergence_epsilon,
+                "minimum_quality_gain": config.iterative.minimum_quality_gain,
+                "maximum_repair_iterations": config.iterative.maximum_repair_iterations,
+                "pass2_roi_scales": list(config.iterative.pass2_roi_scales),
+                "pass3_roi_scales": list(config.iterative.pass3_roi_scales),
+                "expert_model_enabled": False,
+                "rtmw_hard_frame_batching": "multi-bbox-single-call",
+                "inference_device": "cuda",
+            },
         }
     summary = document.setdefault("summary", {})
     if isinstance(summary, dict):

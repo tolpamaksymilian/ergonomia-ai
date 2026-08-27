@@ -93,11 +93,43 @@ class MotionConfig:
 
 
 @dataclass(frozen=True)
+class IterativeRefinementConfig:
+    """Bounded offline compute policy for the self-correcting V6.4 passes."""
+
+    enabled: bool = True
+    pass2_maximum_ratio: float = 0.30
+    pass3_critical_ratio: float = 0.05
+    segment_padding_seconds: float = 0.20
+    convergence_epsilon: float = 0.006
+    minimum_quality_gain: float = 0.010
+    maximum_repair_iterations: int = 3
+    pass2_roi_scales: tuple[float, ...] = (1.0, 1.15, 1.30)
+    pass3_roi_scales: tuple[float, ...] = (0.92, 1.0, 1.15, 1.30, 1.45)
+
+    def validate(self) -> None:
+        if not 0.0 <= self.pass2_maximum_ratio <= 1.0:
+            raise ValueError("pass2_maximum_ratio must be in range 0..1")
+        if not 0.01 <= self.pass3_critical_ratio <= 0.05:
+            raise ValueError("pass3_critical_ratio must be in range 0.01..0.05")
+        if self.segment_padding_seconds < 0.0:
+            raise ValueError("segment_padding_seconds cannot be negative")
+        if self.convergence_epsilon < 0.0 or self.minimum_quality_gain < 0.0:
+            raise ValueError("iterative quality thresholds cannot be negative")
+        if not 1 <= self.maximum_repair_iterations <= 4:
+            raise ValueError("maximum_repair_iterations must be in range 1..4")
+        if not self.pass2_roi_scales or not self.pass3_roi_scales:
+            raise ValueError("iterative ROI scale sets cannot be empty")
+        if any(not 0.75 <= value <= 1.75 for value in (*self.pass2_roi_scales, *self.pass3_roi_scales)):
+            raise ValueError("iterative ROI scales must be in range 0.75..1.75")
+
+
+@dataclass(frozen=True)
 class PoseV6Config:
     profile: str = "ACCURATE"
     temporal: TemporalPolicy = field(default_factory=TemporalPolicy)
     optical_flow: OpticalFlowConfig = field(default_factory=OpticalFlowConfig)
     motion: MotionConfig = field(default_factory=MotionConfig)
+    iterative: IterativeRefinementConfig = field(default_factory=IterativeRefinementConfig)
     recovery_roi_scale: float = 1.22
     refinement_fast_motion_enabled: bool = True
 
@@ -109,6 +141,7 @@ class PoseV6Config:
         self.temporal.validate()
         self.optical_flow.validate()
         self.motion.validate()
+        self.iterative.validate()
 
 
 def load_pose_v6_config() -> PoseV6Config:
@@ -131,6 +164,15 @@ def load_pose_v6_config() -> PoseV6Config:
         motion=MotionConfig(
             fast_threshold_scale_per_second=fast_threshold,
             extreme_threshold_scale_per_second=max(2.40, fast_threshold * 1.8),
+        ),
+        iterative=IterativeRefinementConfig(
+            enabled=_boolean("POSE_ITERATIVE_REFINEMENT_ENABLED", True),
+            pass2_maximum_ratio=_number("POSE_PASS2_MAXIMUM_RATIO", 0.30, 0.0, 1.0),
+            pass3_critical_ratio=_number("POSE_PASS3_CRITICAL_RATIO", 0.05, 0.01, 0.05),
+            segment_padding_seconds=_number("POSE_ITERATIVE_PADDING_SECONDS", 0.20, 0.0, 1.0),
+            convergence_epsilon=_number("POSE_REFINEMENT_CONVERGENCE_EPSILON", 0.006, 0.0, 0.1),
+            minimum_quality_gain=_number("POSE_REFINEMENT_MINIMUM_GAIN", 0.010, 0.0, 0.25),
+            maximum_repair_iterations=int(_number("POSE_MAX_REPAIR_ITERATIONS", 3.0, 1.0, 4.0)),
         ),
         recovery_roi_scale=_number("POSE_RECOVERY_ROI_SCALE", 1.22, 1.0, 2.0),
         refinement_fast_motion_enabled=_boolean("POSE_REFINEMENT_FAST_MOTION_ENABLED", True),

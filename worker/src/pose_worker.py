@@ -55,9 +55,18 @@ try:
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
     from worker.src.pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
-    from worker.src.pose_v6.fusion import fuse_pose_candidates
     from worker.src.pose_v6.grip_v4 import analyze_grip_v4
     from worker.src.pose_v6.integration import augment_pose_document_v6
+    from worker.src.pose_v6.iterative_refinement import (
+        PoseHypothesis,
+        PoseErrorCode,
+        audit_pose_sequence,
+        compare_iteration_quality,
+        detect_grip_flicker,
+        fuse_pose_hypotheses,
+        optimize_global_trajectories,
+        select_critical_segments,
+    )
     from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
     from worker.src.pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
@@ -72,9 +81,18 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
     from pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
-    from pose_v6.fusion import fuse_pose_candidates
     from pose_v6.grip_v4 import analyze_grip_v4
     from pose_v6.integration import augment_pose_document_v6
+    from pose_v6.iterative_refinement import (
+        PoseHypothesis,
+        PoseErrorCode,
+        audit_pose_sequence,
+        compare_iteration_quality,
+        detect_grip_flicker,
+        fuse_pose_hypotheses,
+        optimize_global_trajectories,
+        select_critical_segments,
+    )
     from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
     from pose_v6.optical_flow import track_point_forward_backward
     from pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
@@ -3189,7 +3207,7 @@ def process_pose_video(
     logger: logging.Logger,
 ) -> PoseProcessingResult:
     """
-    Pose Pipeline V6 działa dwupasowo i rozdziela RAW, ANALYSIS oraz RENDER.
+    Pose Pipeline V6.4 działa wieloprzebiegowo i rozdziela RAW, ANALYSIS oraz RENDER.
 
     Przebieg 1:
     - RTMW wyznacza ciało,
@@ -3262,9 +3280,21 @@ def process_pose_video(
         camera=CameraMotionConfig(enabled=settings.pose_v5_camera_motion_enabled),
         refinement=RefinementConfig(
             enabled=settings.pose_v5_refinement_enabled,
-            maximum_refinement_ratio=settings.pose_v5_max_refinement_ratio,
-            padding_seconds=settings.pose_v5_segment_padding_seconds,
-            minimum_quality_gain=settings.pose_v5_min_quality_gain,
+            maximum_refinement_ratio=(
+                pose_v6_config.iterative.pass2_maximum_ratio
+                if pose_v6_config.iterative.enabled
+                else settings.pose_v5_max_refinement_ratio
+            ),
+            padding_seconds=(
+                pose_v6_config.iterative.segment_padding_seconds
+                if pose_v6_config.iterative.enabled
+                else settings.pose_v5_segment_padding_seconds
+            ),
+            minimum_quality_gain=(
+                pose_v6_config.iterative.minimum_quality_gain
+                if pose_v6_config.iterative.enabled
+                else settings.pose_v5_min_quality_gain
+            ),
         ),
     )
     camera_motion_estimator = CameraMotionEstimator(pose_v5_config.camera)
@@ -3712,6 +3742,77 @@ def process_pose_video(
         frame_height=height,
         logger=logger,
     )
+    pass1_seconds = time.perf_counter() - processing_started_at
+    scene_cut_flags = [
+        bool(record["camera_motion"] is not None and record["camera_motion"].scene_cut)
+        for record in body_records
+    ]
+
+    def audit_current_pose(
+        grip_states: dict[str, list[str]] | None = None,
+    ) -> Any:
+        model_disagreements: dict[int, list[int]] = {}
+        for frame_index, record in enumerate(body_records):
+            for field, key in (
+                ("refinement_fusion", "rejected_disagreement_indexes"),
+                ("pass3_fusion", "model_disagreement_joint_indexes"),
+            ):
+                diagnostic = record.get(field)
+                if isinstance(diagnostic, dict) and diagnostic.get(key):
+                    model_disagreements.setdefault(frame_index, []).extend(
+                        int(value) for value in diagnostic[key]
+                    )
+        return audit_pose_sequence(
+            [record["raw_points"] for record in body_records],
+            [record["raw_scores"] for record in body_records],
+            [float(record["pose_graph"].body_scale) for record in body_records],
+            [float(record["source_timestamp_seconds"]) for record in body_records],
+            [str(record["tracking_state"]) for record in body_records],
+            [str(record["motion_v6"]["state"]) for record in body_records],
+            scene_cut_flags,
+            config=pose_v6_config.iterative,
+            hand_visible={
+                side: [frame.observation is not None for frame in raw_hand_frames[side]]
+                for side in ("left", "right")
+            },
+            hand_quality_values={
+                side: [
+                    max(0.0, min(1.0, 1.0 - frame.observation.assignment_score))
+                    if frame.observation is not None else 0.0
+                    for frame in raw_hand_frames[side]
+                ]
+                for side in ("left", "right")
+            },
+            grip_states=grip_states,
+            motion_blur=[bool(record["prevalidation_motion_blur"]) for record in body_records],
+            model_disagreements=model_disagreements,
+            body_joint_count=BODY_POINT_COUNT,
+        )
+
+    pass1_audit = audit_current_pose()
+    pass2_audit = pass1_audit
+    pass3_audit = pass1_audit
+    pass1_snapshots = [
+        (record["raw_points"].copy(), record["raw_scores"].copy())
+        for record in body_records
+    ]
+    pass1_bbox_snapshots = [
+        record["bbox_array"].copy()
+        if isinstance(record.get("bbox_array"), np.ndarray) else None
+        for record in body_records
+    ]
+    pass1_hand_snapshots = {
+        side: list(raw_hand_frames[side]) for side in ("left", "right")
+    }
+    pass1_bbox_sources = [str(record["bbox_source"]) for record in body_records]
+    pass2_seconds = 0.0
+    pass3_seconds = 0.0
+    pass2_rollback_count = 0
+    pass3_rollback_count = 0
+    frames_improved_by_pass2 = 0
+    frames_improved_by_pass3 = 0
+    pass3_results: list[dict[str, object]] = []
+    pass2_started_at = time.perf_counter()
     if pose_v5_config.refinement.enabled and body_records:
         refinement_source = []
         for index, record in enumerate(body_records):
@@ -3749,6 +3850,7 @@ def process_pose_video(
                 "quality": min(
                     float(record["pose_graph"].quality),
                     min(hand_qualities) if hand_qualities else 1.0,
+                    0.70 if index in pass1_audit.angle_glitch_frames else 1.0,
                 ),
                 "tracking_state": record["tracking_state"],
                 "camera_shake": bool(
@@ -3756,6 +3858,18 @@ def process_pose_video(
                     and record["camera_motion"].camera_shake
                 ),
                 "reasons": [
+                    *[
+                        error.code.value
+                        for error in pass1_audit.frames[index].errors
+                    ],
+                    *(
+                        ["METRIC_SPIKE"]
+                        if index in pass1_audit.angle_glitch_frames else []
+                    ),
+                    *(
+                        ["HAND_DROPOUT"]
+                        if index in pass1_audit.grip_flicker_frames else []
+                    ),
                     *list(record["tracking_reasons"]),
                     *(
                         ["PERSON_DETECTOR_MISS"]
@@ -3843,31 +3957,26 @@ def process_pose_video(
                     )
                     if detector_refined is not None:
                         refined_candidates.append(detector_refined)
-                    needs_motion_crops = (
-                        detector_refined is None
-                        or record["bbox_source"] == BBoxSource.TRACK_PREDICTED.value
-                        or record["motion_v6"]["state"]
-                        in {
-                            MotionState.FAST_MOTION.value,
-                            MotionState.EXTREME_MOTION.value,
-                        }
-                    )
                     motion_box = record.get("render_bbox_array")
-                    if needs_motion_crops and isinstance(motion_box, np.ndarray):
+                    if isinstance(motion_box, np.ndarray):
                         center = (motion_box[:2] + motion_box[2:]) * 0.5
                         size = motion_box[2:] - motion_box[:2]
-                        for scale in (1.0, 1.28):
-                            crop = np.concatenate(
+                        pass2_crops = [
+                            np.concatenate(
                                 (center - size * 0.5 * scale, center + size * 0.5 * scale)
                             ).astype(np.float32)
-                            recovery_points, recovery_scores = model.infer_on_bboxes(
-                                refinement_frame,
-                                [crop],
-                                timing_key="pose_recovery",
-                            )
+                            for scale in pose_v6_config.iterative.pass2_roi_scales
+                        ]
+                        recovery_points, recovery_scores = model.infer_on_bboxes(
+                            refinement_frame,
+                            pass2_crops,
+                            timing_key="pose_recovery",
+                        )
+                        recovery_count = min(len(recovery_points), len(recovery_scores))
+                        for crop_index in range(recovery_count):
                             recovery_candidate = select_primary_person(
-                                recovery_points,
-                                recovery_scores,
+                                recovery_points[crop_index:crop_index + 1],
+                                recovery_scores[crop_index:crop_index + 1],
                                 width,
                                 height,
                                 settings,
@@ -3876,19 +3985,44 @@ def process_pose_video(
                             )
                             if recovery_candidate is not None:
                                 refined_candidates.append(recovery_candidate)
-                    refined = (
-                        max(refined_candidates, key=lambda item: item.selection_score)
-                        if refined_candidates
-                        else None
-                    )
-                    if refined is None:
+                    if not refined_candidates:
                         return None
-                    raw_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
-                    raw_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
-                    point_count = min(KEYPOINT_COUNT, refined.keypoints.shape[0])
-                    score_count = min(KEYPOINT_COUNT, refined.scores.shape[0])
-                    raw_points[:point_count] = refined.keypoints[:point_count]
-                    raw_scores[:score_count] = refined.scores[:score_count]
+                    hypotheses = [
+                        PoseHypothesis(
+                            record["raw_points"], record["raw_scores"],
+                            "pass1-primary", 1, 1.0,
+                        )
+                    ]
+                    for candidate_index, refined_candidate in enumerate(refined_candidates):
+                        candidate_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                        candidate_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                        point_count = min(KEYPOINT_COUNT, refined_candidate.keypoints.shape[0])
+                        score_count = min(KEYPOINT_COUNT, refined_candidate.scores.shape[0])
+                        candidate_points[:point_count] = refined_candidate.keypoints[:point_count]
+                        candidate_scores[:score_count] = refined_candidate.scores[:score_count]
+                        hypotheses.append(PoseHypothesis(
+                            candidate_points,
+                            candidate_scores,
+                            f"pass2-multiscale-{candidate_index + 1}",
+                            2,
+                            0.90,
+                        ))
+                    consensus = fuse_pose_hypotheses(
+                        hypotheses,
+                        body_scale=float(record["pose_graph"].body_scale),
+                        previous_points=(
+                            body_records[frame_index - 1]["raw_points"]
+                            if frame_index > 0 else None
+                        ),
+                        following_points=(
+                            body_records[frame_index + 1]["raw_points"]
+                            if frame_index + 1 < len(body_records) else None
+                        ),
+                        minimum_quality_gain=pose_v6_config.iterative.minimum_quality_gain,
+                    )
+                    raw_points = consensus.points
+                    raw_scores = consensus.scores
+                    refined = max(refined_candidates, key=lambda item: item.selection_score)
                     valid_scores = raw_scores[:BODY_POINT_COUNT][
                         raw_scores[:BODY_POINT_COUNT] >= settings.body_presence_threshold
                     ]
@@ -3935,6 +4069,13 @@ def process_pose_video(
                         "raw_scores": raw_scores,
                         "bbox": refined.bbox.copy(),
                         "raw_hands": refined_hands,
+                        "iterative_fusion": {
+                            "selected_joint_metadata": list(consensus.selected_joint_metadata),
+                            "corrected_joint_indexes": sorted(consensus.corrected_joint_indexes),
+                            "model_disagreement_joint_indexes": sorted(consensus.disagreement_joint_indexes),
+                            "candidate_count": len(hypotheses),
+                            "selected_pass": 2,
+                        },
                     }
 
                 for segment in difficult_segments:
@@ -3972,40 +4113,19 @@ def process_pose_video(
                 if not isinstance(replacement, dict):
                     continue
                 record = body_records[item.frame_index]
-                fused = fuse_pose_candidates(
-                    record["raw_points"],
-                    record["raw_scores"],
-                    replacement["raw_points"],
-                    replacement["raw_scores"],
-                    previous_points=(
-                        body_records[item.frame_index - 1]["raw_points"]
-                        if item.frame_index > 0
-                        else None
-                    ),
-                    previous_scores=(
-                        body_records[item.frame_index - 1]["raw_scores"]
-                        if item.frame_index > 0
-                        else None
-                    ),
-                    following_points=(
-                        body_records[item.frame_index + 1]["raw_points"]
-                        if item.frame_index + 1 < len(body_records)
-                        else None
-                    ),
-                    following_scores=(
-                        body_records[item.frame_index + 1]["raw_scores"]
-                        if item.frame_index + 1 < len(body_records)
-                        else None
-                    ),
-                    motion_gate_multiplier=float(
-                        record["motion_v6"].get("gate_multiplier", 1.0)
-                    ),
+                iterative_fusion = replacement.get("iterative_fusion")
+                corrected_indexes = frozenset(
+                    int(value)
+                    for value in (
+                        iterative_fusion.get("corrected_joint_indexes", [])
+                        if isinstance(iterative_fusion, dict) else []
+                    )
                 )
-                record["raw_points"] = fused.points
-                record["raw_scores"] = fused.scores
-                record["refined_measurement"] = bool(fused.refined_joint_indexes)
-                record["refined_joint_indexes"] = fused.refined_joint_indexes
-                if fused.refined_joint_indexes:
+                record["raw_points"] = replacement["raw_points"].copy()
+                record["raw_scores"] = replacement["raw_scores"].copy()
+                record["refined_measurement"] = bool(corrected_indexes)
+                record["refined_joint_indexes"] = corrected_indexes
+                if corrected_indexes:
                     record["bbox_array"] = replacement["bbox"]
                     record["render_bbox_array"] = replacement["bbox"].copy()
                     record["bbox_xyxy"] = [
@@ -4013,15 +4133,25 @@ def process_pose_video(
                     ]
                     record["bbox_source"] = BBoxSource.TEMPORAL_REFINED.value
                 record["refinement_fusion"] = {
-                    "accepted_joint_count": len(fused.refined_joint_indexes),
-                    "accepted_joint_indexes": sorted(fused.refined_joint_indexes),
-                    "rejected_disagreement_count": len(fused.rejected_fallback_indexes),
-                    "rejected_disagreement_indexes": sorted(fused.rejected_fallback_indexes),
-                    "joint_trust": {
-                        str(index): value
-                        for index, value in fused.joint_trust.items()
-                    },
-                    "fusion_policy": "confidence-temporal-spatial-anatomical-hysteresis-v2",
+                    "accepted_joint_count": len(corrected_indexes),
+                    "accepted_joint_indexes": sorted(corrected_indexes),
+                    "rejected_disagreement_count": len(
+                        iterative_fusion.get("model_disagreement_joint_indexes", [])
+                        if isinstance(iterative_fusion, dict) else []
+                    ),
+                    "rejected_disagreement_indexes": (
+                        iterative_fusion.get("model_disagreement_joint_indexes", [])
+                        if isinstance(iterative_fusion, dict) else []
+                    ),
+                    "joint_diagnostics": (
+                        iterative_fusion.get("selected_joint_metadata", [])
+                        if isinstance(iterative_fusion, dict) else []
+                    ),
+                    "candidate_count": (
+                        iterative_fusion.get("candidate_count", 1)
+                        if isinstance(iterative_fusion, dict) else 1
+                    ),
+                    "fusion_policy": "multi-hypothesis-per-joint-consensus-v1",
                 }
                 refined_hands = replacement.get("raw_hands")
                 if isinstance(refined_hands, dict):
@@ -4055,6 +4185,431 @@ def process_pose_video(
                 record["smoothed_points"] = validated_points
                 record["smoothed_scores"] = validated_scores
             pose_graph = replay_graph
+
+    pass2_seconds = time.perf_counter() - pass2_started_at
+    pass2_audit = audit_current_pose()
+    pass3_audit = pass2_audit
+    rolled_back_pass2_indexes: list[int] = []
+    for item in refinement_results:
+        if not item.accepted or not 0 <= item.frame_index < len(body_records):
+            continue
+        decision = compare_iteration_quality(
+            pass1_audit.frame_quality(item.frame_index),
+            pass2_audit.frame_quality(item.frame_index),
+            iteration=2,
+            config=pose_v6_config.iterative,
+        )
+        if not decision.accepted:
+            points_before, scores_before = pass1_snapshots[item.frame_index]
+            body_records[item.frame_index]["raw_points"] = points_before.copy()
+            body_records[item.frame_index]["raw_scores"] = scores_before.copy()
+            body_records[item.frame_index]["refined_measurement"] = False
+            body_records[item.frame_index]["refined_joint_indexes"] = frozenset()
+            body_records[item.frame_index]["bbox_source"] = pass1_bbox_sources[item.frame_index]
+            body_records[item.frame_index]["bbox_array"] = pass1_bbox_snapshots[item.frame_index]
+            body_records[item.frame_index]["render_bbox_array"] = (
+                pass1_bbox_snapshots[item.frame_index].copy()
+                if isinstance(pass1_bbox_snapshots[item.frame_index], np.ndarray) else None
+            )
+            for side in ("left", "right"):
+                raw_hand_frames[side][item.frame_index] = pass1_hand_snapshots[side][item.frame_index]
+            body_records[item.frame_index]["refinement_fusion"]["pass2_regression"] = (
+                decision.rolled_back
+            )
+            body_records[item.frame_index]["refinement_fusion"]["converged"] = (
+                decision.converged
+            )
+            body_records[item.frame_index]["refinement_fusion"]["accepted_joint_count"] = 0
+            body_records[item.frame_index]["refinement_fusion"]["accepted_joint_indexes"] = []
+            rolled_back_pass2_indexes.append(item.frame_index)
+        elif decision.accepted:
+            frames_improved_by_pass2 += 1
+    pass2_rollback_count = len(rolled_back_pass2_indexes)
+    if rolled_back_pass2_indexes:
+        replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+        for record in body_records:
+            replayed = replay_graph.update(
+                raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                frame_width=width, frame_height=height,
+                timestamp_seconds=float(record["source_timestamp_seconds"]),
+                relative_depth=None,
+                motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+            )
+            record["pose_graph"] = replayed
+            validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+            validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+            count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+            validated_points[:count] = replayed.analysis_points[:count]
+            validated_scores[:count] = replayed.analysis_scores[:count]
+            record["smoothed_points"] = validated_points
+            record["smoothed_scores"] = validated_scores
+        pose_graph = replay_graph
+        pass2_audit = audit_current_pose()
+    if pass2_audit.quality_score < pass1_audit.quality_score:
+        pass2_applied_indexes = [
+            index for index, record in enumerate(body_records)
+            if isinstance(record.get("refinement_fusion"), dict)
+            and int(record["refinement_fusion"].get("accepted_joint_count", 0)) > 0
+        ]
+        for frame_index in pass2_applied_indexes:
+            points_before, scores_before = pass1_snapshots[frame_index]
+            record = body_records[frame_index]
+            record["raw_points"] = points_before.copy()
+            record["raw_scores"] = scores_before.copy()
+            record["refined_measurement"] = False
+            record["refined_joint_indexes"] = frozenset()
+            record["bbox_source"] = pass1_bbox_sources[frame_index]
+            record["bbox_array"] = pass1_bbox_snapshots[frame_index]
+            record["render_bbox_array"] = (
+                pass1_bbox_snapshots[frame_index].copy()
+                if isinstance(pass1_bbox_snapshots[frame_index], np.ndarray) else None
+            )
+            record["refinement_fusion"]["global_pass_rollback"] = True
+            record["refinement_fusion"]["accepted_joint_count"] = 0
+            record["refinement_fusion"]["accepted_joint_indexes"] = []
+            for side in ("left", "right"):
+                raw_hand_frames[side][frame_index] = pass1_hand_snapshots[side][frame_index]
+        if pass2_applied_indexes:
+            pass2_rollback_count += len(pass2_applied_indexes)
+            frames_improved_by_pass2 = 0
+            replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+            for record in body_records:
+                replayed = replay_graph.update(
+                    raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                    bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                    frame_width=width, frame_height=height,
+                    timestamp_seconds=float(record["source_timestamp_seconds"]),
+                    relative_depth=None,
+                    motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+                )
+                record["pose_graph"] = replayed
+                validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+                validated_points[:count] = replayed.analysis_points[:count]
+                validated_scores[:count] = replayed.analysis_scores[:count]
+                record["smoothed_points"] = validated_points
+                record["smoothed_scores"] = validated_scores
+            pose_graph = replay_graph
+            pass2_audit = audit_current_pose()
+            pass3_audit = pass2_audit
+
+    # Pass 3 spends the expensive multi-scale budget only on the worst 1-5%
+    # left by the Pass 2 audit.  Candidate selection remains per joint and the
+    # full pre/post temporal context participates in consensus.
+    pass2_converged = abs(
+        pass2_audit.quality_score - pass1_audit.quality_score
+    ) < pose_v6_config.iterative.convergence_epsilon
+    critical_segments = select_critical_segments(
+        pass2_audit,
+        maximum_ratio=pose_v6_config.iterative.pass3_critical_ratio,
+    ) if pose_v6_config.iterative.enabled and not pass2_converged else []
+    if critical_segments:
+        pass3_started_at = time.perf_counter()
+        pass2_snapshots = [
+            (record["raw_points"].copy(), record["raw_scores"].copy())
+            for record in body_records
+        ]
+        pass2_refined_indexes = [record["refined_joint_indexes"] for record in body_records]
+        pass2_refined_measurements = [bool(record["refined_measurement"]) for record in body_records]
+        pass2_bbox_sources = [str(record["bbox_source"]) for record in body_records]
+        pass2_bbox_snapshots = [
+            record["bbox_array"].copy()
+            if isinstance(record.get("bbox_array"), np.ndarray) else None
+            for record in body_records
+        ]
+        pass2_hand_snapshots = {
+            side: list(raw_hand_frames[side]) for side in ("left", "right")
+        }
+        pass3_capture = cv2.VideoCapture(str(video_path))
+        pass3_hand_memory = HandAssignmentMemory()
+        try:
+            if pass3_capture.isOpened():
+                critical_indexes = sorted({
+                    index
+                    for segment in critical_segments
+                    for index in range(segment.start_frame, segment.end_frame + 1)
+                })
+                for frame_index in critical_indexes:
+                    record = body_records[frame_index]
+                    if record["tracking_state"] in {TrackingState.LOST.value, TrackingState.REACQUIRING.value}:
+                        continue
+                    pass3_capture.set(cv2.CAP_PROP_POS_FRAMES, int(record["source_frame_index"]))
+                    success, pass3_frame = pass3_capture.read()
+                    if not success or pass3_frame is None or pass3_frame.size == 0:
+                        continue
+                    motion_box = record.get("render_bbox_array")
+                    if not isinstance(motion_box, np.ndarray):
+                        continue
+                    center = (motion_box[:2] + motion_box[2:]) * 0.5
+                    size = motion_box[2:] - motion_box[:2]
+                    hypotheses = [PoseHypothesis(
+                        record["raw_points"], record["raw_scores"],
+                        "best-pass2-state", 2, 1.0,
+                    )]
+                    best_bbox = motion_box.copy()
+                    best_selection = -math.inf
+                    pass3_crops = [
+                        np.concatenate((
+                            center - size * 0.5 * scale,
+                            center + size * 0.5 * scale,
+                        )).astype(np.float32)
+                        for scale in pose_v6_config.iterative.pass3_roi_scales
+                    ]
+                    candidate_points, candidate_scores = model.infer_on_bboxes(
+                        pass3_frame, pass3_crops, timing_key="pose_recovery",
+                    )
+                    candidate_count = min(len(candidate_points), len(candidate_scores))
+                    for candidate_index in range(candidate_count):
+                        selected = select_primary_person(
+                            candidate_points[candidate_index:candidate_index + 1],
+                            candidate_scores[candidate_index:candidate_index + 1],
+                            width, height,
+                            settings, motion_box,
+                            settings.body_presence_threshold * 0.84,
+                        )
+                        if selected is None:
+                            continue
+                        expanded_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                        expanded_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                        point_count = min(KEYPOINT_COUNT, selected.keypoints.shape[0])
+                        score_count = min(KEYPOINT_COUNT, selected.scores.shape[0])
+                        expanded_points[:point_count] = selected.keypoints[:point_count]
+                        expanded_scores[:score_count] = selected.scores[:score_count]
+                        hypotheses.append(PoseHypothesis(
+                            expanded_points, expanded_scores,
+                            f"pass3-deep-scale-{candidate_index + 1}", 3, 0.92,
+                        ))
+                        if selected.selection_score > best_selection:
+                            best_selection = selected.selection_score
+                            best_bbox = selected.bbox.copy()
+                    if len(hypotheses) <= 1:
+                        continue
+                    consensus = fuse_pose_hypotheses(
+                        hypotheses,
+                        body_scale=float(record["pose_graph"].body_scale),
+                        previous_points=(body_records[frame_index - 1]["raw_points"] if frame_index > 0 else None),
+                        following_points=(body_records[frame_index + 1]["raw_points"] if frame_index + 1 < len(body_records) else None),
+                        minimum_quality_gain=pose_v6_config.iterative.minimum_quality_gain,
+                    )
+                    if not consensus.corrected_joint_indexes or not _refinement_body_is_valid(
+                        consensus.points, consensus.scores, best_bbox, settings,
+                    ):
+                        continue
+                    record["raw_points"] = consensus.points
+                    record["raw_scores"] = consensus.scores
+                    record["refined_measurement"] = True
+                    record["refined_joint_indexes"] = frozenset({
+                        *record["refined_joint_indexes"], *consensus.corrected_joint_indexes,
+                    })
+                    record["bbox_array"] = best_bbox
+                    record["render_bbox_array"] = best_bbox.copy()
+                    record["bbox_source"] = BBoxSource.TEMPORAL_REFINED.value
+                    record["pass3_fusion"] = {
+                        "accepted_joint_indexes": sorted(consensus.corrected_joint_indexes),
+                        "model_disagreement_joint_indexes": sorted(consensus.disagreement_joint_indexes),
+                        "joint_diagnostics": list(consensus.selected_joint_metadata),
+                        "candidate_count": len(hypotheses),
+                    }
+                    expanded_hand_rois = {
+                        side: enlarge_roi(
+                            hand_rois[side][frame_index],
+                            frame_width=width,
+                            frame_height=height,
+                            scale=1.55,
+                        )
+                        for side in ("left", "right")
+                    }
+                    pass3_hand_roi = union_hand_roi(
+                        expanded_hand_rois,
+                        frame_width=width,
+                        frame_height=height,
+                    )
+                    if pass3_hand_roi is not None:
+                        pass3_hand_candidates = hand_engine.detect(
+                            pass3_frame,
+                            int(round(float(record["source_timestamp_seconds"]) * 1000.0)),
+                            pass3_hand_roi,
+                        )
+                        pass3_assignments = assign_hands_to_body_v2(
+                            pass3_hand_candidates,
+                            consensus.points,
+                            consensus.scores,
+                            settings.body_presence_threshold,
+                            hand_engine.config,
+                            hand_graph_config,
+                            float(record["source_timestamp_seconds"]),
+                            pass3_hand_memory,
+                        )
+                        for side in ("left", "right"):
+                            if pass3_assignments[side].observation is not None:
+                                raw_hand_frames[side][frame_index] = pass3_assignments[side]
+            replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+            for record in body_records:
+                replayed = replay_graph.update(
+                    raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                    bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                    frame_width=width, frame_height=height,
+                    timestamp_seconds=float(record["source_timestamp_seconds"]),
+                    relative_depth=None,
+                    motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+                )
+                record["pose_graph"] = replayed
+                validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+                validated_points[:count] = replayed.analysis_points[:count]
+                validated_scores[:count] = replayed.analysis_scores[:count]
+                record["smoothed_points"] = validated_points
+                record["smoothed_scores"] = validated_scores
+            pose_graph = replay_graph
+            tentative_pass3_audit = audit_current_pose()
+            pass3_indexes = [
+                index for index, record in enumerate(body_records)
+                if isinstance(record.get("pass3_fusion"), dict)
+            ]
+            for frame_index in pass3_indexes:
+                decision = compare_iteration_quality(
+                    pass2_audit.frame_quality(frame_index),
+                    tentative_pass3_audit.frame_quality(frame_index),
+                    iteration=3,
+                    config=pose_v6_config.iterative,
+                )
+                if decision.accepted:
+                    frames_improved_by_pass3 += 1
+                else:
+                    points_before, scores_before = pass2_snapshots[frame_index]
+                    body_records[frame_index]["raw_points"] = points_before.copy()
+                    body_records[frame_index]["raw_scores"] = scores_before.copy()
+                    body_records[frame_index]["refined_joint_indexes"] = pass2_refined_indexes[frame_index]
+                    body_records[frame_index]["refined_measurement"] = pass2_refined_measurements[frame_index]
+                    body_records[frame_index]["bbox_source"] = pass2_bbox_sources[frame_index]
+                    body_records[frame_index]["bbox_array"] = pass2_bbox_snapshots[frame_index]
+                    body_records[frame_index]["render_bbox_array"] = (
+                        pass2_bbox_snapshots[frame_index].copy()
+                        if isinstance(pass2_bbox_snapshots[frame_index], np.ndarray) else None
+                    )
+                    for side in ("left", "right"):
+                        raw_hand_frames[side][frame_index] = pass2_hand_snapshots[side][frame_index]
+                    body_records[frame_index].pop("pass3_fusion", None)
+                    pass3_rollback_count += 1
+                pass3_results.append({"frame_index": frame_index, **decision.to_dict()})
+            if pass3_rollback_count:
+                replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+                for record in body_records:
+                    replayed = replay_graph.update(
+                        raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                        bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                        frame_width=width, frame_height=height,
+                        timestamp_seconds=float(record["source_timestamp_seconds"]),
+                        relative_depth=None,
+                        motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+                    )
+                    record["pose_graph"] = replayed
+                    validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                    validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                    count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+                    validated_points[:count] = replayed.analysis_points[:count]
+                    validated_scores[:count] = replayed.analysis_scores[:count]
+                    record["smoothed_points"] = validated_points
+                    record["smoothed_scores"] = validated_scores
+                pose_graph = replay_graph
+            pass3_audit = audit_current_pose()
+            if pass3_audit.quality_score < pass2_audit.quality_score:
+                globally_rolled_back = [
+                    index for index, record in enumerate(body_records)
+                    if isinstance(record.get("pass3_fusion"), dict)
+                ]
+                for frame_index in globally_rolled_back:
+                    points_before, scores_before = pass2_snapshots[frame_index]
+                    record = body_records[frame_index]
+                    record["raw_points"] = points_before.copy()
+                    record["raw_scores"] = scores_before.copy()
+                    record["refined_joint_indexes"] = pass2_refined_indexes[frame_index]
+                    record["refined_measurement"] = pass2_refined_measurements[frame_index]
+                    record["bbox_source"] = pass2_bbox_sources[frame_index]
+                    record["bbox_array"] = pass2_bbox_snapshots[frame_index]
+                    record["render_bbox_array"] = (
+                        pass2_bbox_snapshots[frame_index].copy()
+                        if isinstance(pass2_bbox_snapshots[frame_index], np.ndarray) else None
+                    )
+                    for side in ("left", "right"):
+                        raw_hand_frames[side][frame_index] = pass2_hand_snapshots[side][frame_index]
+                    record.pop("pass3_fusion", None)
+                if globally_rolled_back:
+                    pass3_rollback_count += len(globally_rolled_back)
+                    frames_improved_by_pass3 = 0
+                    pass3_results.append({
+                        "scope": "whole-pass",
+                        "rolled_back": True,
+                        "quality_score_before": round(pass2_audit.quality_score, 6),
+                        "quality_score_after": round(pass3_audit.quality_score, 6),
+                        "reason": "PASS3_REGRESSION",
+                    })
+                    replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+                    for record in body_records:
+                        replayed = replay_graph.update(
+                            raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                            bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                            frame_width=width, frame_height=height,
+                            timestamp_seconds=float(record["source_timestamp_seconds"]),
+                            relative_depth=None,
+                            motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+                        )
+                        record["pose_graph"] = replayed
+                        validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                        validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                        count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+                        validated_points[:count] = replayed.analysis_points[:count]
+                        validated_scores[:count] = replayed.analysis_scores[:count]
+                        record["smoothed_points"] = validated_points
+                        record["smoothed_scores"] = validated_scores
+                    pose_graph = replay_graph
+                    pass3_audit = audit_current_pose()
+        except (cv2.error, ValueError, TypeError, RuntimeError) as error:
+            logger.warning(
+                "Pose V6.4 Pass 3 unavailable for %s; best Pass 2 state retained: %s.",
+                analysis_id, type(error).__name__,
+            )
+            for index, (points_before, scores_before) in enumerate(pass2_snapshots):
+                body_records[index]["raw_points"] = points_before
+                body_records[index]["raw_scores"] = scores_before
+                body_records[index]["refined_joint_indexes"] = pass2_refined_indexes[index]
+                body_records[index]["refined_measurement"] = pass2_refined_measurements[index]
+                body_records[index]["bbox_source"] = pass2_bbox_sources[index]
+                body_records[index]["bbox_array"] = pass2_bbox_snapshots[index]
+                body_records[index]["render_bbox_array"] = (
+                    pass2_bbox_snapshots[index].copy()
+                    if isinstance(pass2_bbox_snapshots[index], np.ndarray) else None
+                )
+                for side in ("left", "right"):
+                    raw_hand_frames[side][index] = pass2_hand_snapshots[side][index]
+                body_records[index].pop("pass3_fusion", None)
+            replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+            for record in body_records:
+                replayed = replay_graph.update(
+                    raw_points=record["raw_points"], raw_scores=record["raw_scores"],
+                    bbox=record["bbox_array"], tracking=record["tracking_decision"],
+                    frame_width=width, frame_height=height,
+                    timestamp_seconds=float(record["source_timestamp_seconds"]),
+                    relative_depth=None,
+                    motion_gate_multiplier=float(record["motion_v6"].get("gate_multiplier", 1.0)),
+                )
+                record["pose_graph"] = replayed
+                validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+                validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+                count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+                validated_points[:count] = replayed.analysis_points[:count]
+                validated_scores[:count] = replayed.analysis_scores[:count]
+                record["smoothed_points"] = validated_points
+                record["smoothed_scores"] = validated_scores
+            pose_graph = replay_graph
+            pass3_audit = pass2_audit
+            pass3_rollback_count += 1
+        finally:
+            pass3_capture.release()
+            pass3_seconds = time.perf_counter() - pass3_started_at
 
     smoothing_started_at = time.perf_counter()
     smoothed_points, smoothed_scores, interpolation_masks = smooth_body_sequence(
@@ -4126,6 +4681,17 @@ def process_pose_video(
         lag_frames=2,
     )
     temporal_frames = trajectory_result.frames
+    global_optimization_started_at = time.perf_counter()
+    global_optimization_result = optimize_global_trajectories(
+        temporal_frames,
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        scene_cut_flags,
+        config=pose_v6_config.iterative,
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    temporal_frames = global_optimization_result.frames
     anatomical_result = project_anatomical_sequence(
         temporal_frames,
         [float(record["pose_graph"].body_scale) for record in body_records],
@@ -4138,8 +4704,109 @@ def process_pose_video(
         maximum_prediction_seconds=pose_v6_config.temporal.render_persistence_seconds,
     )
     temporal_frames = anatomical_result.frames
+    post_anatomical_audit = audit_pose_sequence(
+        [frame.analysis_points for frame in temporal_frames],
+        [frame.analysis_scores for frame in temporal_frames],
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        scene_cut_flags,
+        config=pose_v6_config.iterative,
+        point_sources=[frame.sources for frame in temporal_frames],
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    final_repair_codes = {
+        PoseErrorCode.JOINT_JUMP,
+        PoseErrorCode.TEMPORAL_DISCONTINUITY,
+        PoseErrorCode.BONE_LENGTH_ERROR,
+        PoseErrorCode.ANGLE_OUTLIER,
+        PoseErrorCode.LEFT_RIGHT_AMBIGUITY,
+    }
+    final_repair_requested = any(
+        error.repairable and error.code in final_repair_codes
+        for error in post_anatomical_audit.errors
+    )
+    local_repair_summary: dict[str, object] = {
+        "triggered": final_repair_requested,
+        "accepted": False,
+        "trigger_error_count": sum(
+            error.code in final_repair_codes for error in post_anatomical_audit.errors
+        ),
+    }
+    if final_repair_requested and pose_v6_config.iterative.enabled:
+        local_repair_frame_indexes = {
+            frame_index
+            for segment in post_anatomical_audit.hard_segments
+            if any(code in final_repair_codes for code in segment.error_codes)
+            for frame_index in range(segment.start_frame, segment.end_frame + 1)
+        }
+        local_repair_result = optimize_global_trajectories(
+            temporal_frames,
+            [float(record["pose_graph"].body_scale) for record in body_records],
+            [str(record["motion_v6"]["state"]) for record in body_records],
+            [str(record["tracking_state"]) for record in body_records],
+            scene_cut_flags,
+            config=pose_v6_config.iterative,
+            body_joint_count=BODY_POINT_COUNT,
+            allowed_frame_indexes=local_repair_frame_indexes,
+        )
+        local_repair_summary["segments"] = [
+            segment.to_dict()
+            for segment in post_anatomical_audit.hard_segments
+            if any(code in final_repair_codes for code in segment.error_codes)
+        ]
+        local_repair_summary.update(local_repair_result.summary)
+        if int(local_repair_result.summary.get("correction_count", 0)) > 0:
+            temporal_frames = local_repair_result.frames
+            anatomical_result = project_anatomical_sequence(
+                temporal_frames,
+                [float(record["pose_graph"].body_scale) for record in body_records],
+                [float(record["source_timestamp_seconds"]) for record in body_records],
+                [str(record["tracking_state"]) for record in body_records],
+                scene_cut_flags,
+                maximum_prediction_seconds=pose_v6_config.temporal.render_persistence_seconds,
+            )
+            temporal_frames = anatomical_result.frames
+            local_repair_summary["accepted"] = True
+            for initial, repaired in zip(
+                global_optimization_result.frame_diagnostics,
+                local_repair_result.frame_diagnostics,
+            ):
+                indexes = sorted({
+                    *initial.get("corrected_joint_indexes", []),
+                    *repaired.get("corrected_joint_indexes", []),
+                })
+                initial["corrected_joint_indexes"] = indexes
+                initial["correction_count"] = int(initial.get("correction_count", 0)) + int(
+                    repaired.get("correction_count", 0)
+                )
+                initial_iterations = initial.get("repair_iterations_by_joint", {})
+                repaired_iterations = repaired.get("repair_iterations_by_joint", {})
+                if isinstance(initial_iterations, dict) and isinstance(repaired_iterations, dict):
+                    initial["repair_iterations_by_joint"] = {
+                        key: int(initial_iterations.get(key, 0))
+                        + int(repaired_iterations.get(key, 0))
+                        for key in {*initial_iterations, *repaired_iterations}
+                    }
+            global_optimization_result.summary["correction_count"] = int(
+                global_optimization_result.summary.get("correction_count", 0)
+            ) + int(local_repair_result.summary.get("correction_count", 0))
+            global_optimization_result.summary["repaired_frames_count"] = min(
+                len(body_records),
+                int(global_optimization_result.summary.get("repaired_frames_count", 0))
+                + int(local_repair_result.summary.get("repaired_frames_count", 0)),
+            )
+            global_optimization_result.summary["rollback_count"] = int(
+                global_optimization_result.summary.get("rollback_count", 0)
+            ) + int(local_repair_result.summary.get("rollback_count", 0))
+    global_optimization_result.summary["final_local_repair"] = local_repair_summary
+    global_optimization_seconds = time.perf_counter() - global_optimization_started_at
     for index, record in enumerate(body_records):
         record["trajectory_refinement"] = trajectory_result.frame_diagnostics[index]
+        record["global_trajectory_optimization"] = (
+            global_optimization_result.frame_diagnostics[index]
+        )
         temporal = temporal_frames[index]
         graph = record["pose_graph"]
         canonical_names = {
@@ -4195,6 +4862,47 @@ def process_pose_video(
         )
         record["temporal_v6"] = temporal
         record["temporal_joints_v6"] = temporal.joint_metadata(JOINT_NAMES)
+        pass2_joint_diagnostics = (
+            record["refinement_fusion"].get("joint_diagnostics", [])
+            if isinstance(record.get("refinement_fusion"), dict) else []
+        )
+        pass3_joint_diagnostics = (
+            record["pass3_fusion"].get("joint_diagnostics", [])
+            if isinstance(record.get("pass3_fusion"), dict) else []
+        )
+        global_corrections = set(
+            record["global_trajectory_optimization"].get("corrected_joint_indexes", [])
+        )
+        repair_iterations_by_joint = record["global_trajectory_optimization"].get(
+            "repair_iterations_by_joint", {}
+        )
+        for joint_index, joint_name in enumerate(JOINT_NAMES):
+            if joint_name not in record["temporal_joints_v6"]:
+                continue
+            selected = (
+                pass3_joint_diagnostics[joint_index]
+                if joint_index < len(pass3_joint_diagnostics)
+                and pass3_joint_diagnostics[joint_index].get("selected_pass") == 3
+                else pass2_joint_diagnostics[joint_index]
+                if joint_index < len(pass2_joint_diagnostics)
+                else {
+                    "selected_pass": 1,
+                    "selected_source": "pass1-primary",
+                    "consensus_score": round(float(temporal.render_scores[joint_index]), 6),
+                    "correction_count": 0,
+                }
+            )
+            record["temporal_joints_v6"][joint_name].update({
+                "selected_pass": int(selected.get("selected_pass", 1)),
+                "selected_source": str(selected.get("selected_source", "pass1-primary")),
+                "consensus_score": float(selected.get("consensus_score", 0.0)),
+                "correction_count": int(selected.get("correction_count", 0))
+                + int(joint_index in global_corrections),
+                "repair_iteration": int(
+                    repair_iterations_by_joint.get(str(joint_index), 0)
+                    if isinstance(repair_iterations_by_joint, dict) else 0
+                ),
+            })
         record["temporal_bones_v6"] = temporal_bones
         record["anatomical_v62"] = anatomical_result.frame_diagnostics[index]
     smoothing_seconds = time.perf_counter() - smoothing_started_at
@@ -4342,6 +5050,190 @@ def process_pose_video(
         maximum_unknown_gap_seconds=0.25,
         fallback_fps=fps,
     )
+    grip_reanalysis_started_at = time.perf_counter()
+    grip_reanalysis_summary: dict[str, object] = {
+        "triggered_frames": [],
+        "accepted": False,
+        "rollback_count": 0,
+        "flicker_count_before": 0,
+        "flicker_count_after": 0,
+    }
+    grip_flicker_indexes = sorted({
+        *detect_grip_flicker(
+            [frame.state.value for frame in left_grip_v4.frames],
+            scene_cuts=scene_cut_flags,
+        ),
+        *detect_grip_flicker(
+            [frame.state.value for frame in right_grip_v4.frames],
+            scene_cuts=scene_cut_flags,
+        ),
+    })
+    flicker_before = int(left_grip_v4.summary["single_frame_grip_flicker_count"]) + int(
+        right_grip_v4.summary["single_frame_grip_flicker_count"]
+    )
+    def grip_pair_quality(left: Any, right: Any) -> float:
+        frames = [*left.frames, *right.frames]
+        if not frames:
+            return 0.0
+        valid_ratio = sum(frame.state.value != "UNKNOWN" for frame in frames) / len(frames)
+        mean_confidence = float(np.mean([frame.confidence for frame in frames]))
+        mean_geometry = float(np.mean([
+            min(frame.palm_quality, frame.finger_quality) for frame in frames
+        ]))
+        flicker_count = int(left.summary["single_frame_grip_flicker_count"]) + int(
+            right.summary["single_frame_grip_flicker_count"]
+        )
+        return float(np.clip(
+            0.35 * valid_ratio + 0.35 * mean_confidence + 0.30 * mean_geometry
+            - min(0.25, 0.06 * flicker_count),
+            0.0, 1.0,
+        ))
+
+    grip_quality_before = grip_pair_quality(left_grip_v4, right_grip_v4)
+    grip_reanalysis_summary["flicker_count_before"] = flicker_before
+    grip_reanalysis_summary["quality_score_before"] = round(grip_quality_before, 6)
+    grip_reanalysis_summary["quality_score_after"] = round(grip_quality_before, 6)
+    if grip_flicker_indexes and pose_v6_config.iterative.enabled:
+        hand_snapshots = {
+            side: list(raw_hand_frames[side]) for side in ("left", "right")
+        }
+        hand_repass_capture = cv2.VideoCapture(str(video_path))
+        hand_repass_memory = HandAssignmentMemory()
+        try:
+            if hand_repass_capture.isOpened():
+                for frame_index in grip_flicker_indexes:
+                    record = body_records[frame_index]
+                    hand_repass_capture.set(
+                        cv2.CAP_PROP_POS_FRAMES,
+                        int(record["source_frame_index"]),
+                    )
+                    success, hand_frame = hand_repass_capture.read()
+                    if not success or hand_frame is None or hand_frame.size == 0:
+                        continue
+                    expanded_rois = {
+                        side: enlarge_roi(
+                            hand_rois[side][frame_index],
+                            frame_width=width,
+                            frame_height=height,
+                            scale=1.45,
+                        )
+                        for side in ("left", "right")
+                    }
+                    combined_roi = union_hand_roi(
+                        {side: roi for side, roi in expanded_rois.items() if roi is not None},
+                        frame_width=width,
+                        frame_height=height,
+                    )
+                    candidates = hand_engine.detect(
+                        hand_frame,
+                        int(round(float(record["source_timestamp_seconds"]) * 1000.0)),
+                        combined_roi,
+                    )
+                    assignments = assign_hands_to_body_v2(
+                        candidates,
+                        record["smoothed_points"],
+                        record["smoothed_scores"],
+                        0.01,
+                        hand_engine.config,
+                        hand_graph_config,
+                        float(record["source_timestamp_seconds"]),
+                        hand_repass_memory,
+                    )
+                    for side in ("left", "right"):
+                        if assignments[side].observation is not None:
+                            raw_hand_frames[side][frame_index] = assignments[side]
+
+                left_hand_result = enhance_hand_track(
+                    stabilize_hand_track("left", raw_hand_frames["left"], hand_temporal_config),
+                    frame_width=width, frame_height=height, config=hand_engine.config,
+                )
+                right_hand_result = enhance_hand_track(
+                    stabilize_hand_track("right", raw_hand_frames["right"], hand_temporal_config),
+                    frame_width=width, frame_height=height, config=hand_engine.config,
+                )
+                left_hand_graph = analyze_hand_graph_sequence(
+                    "left", left_hand_result.frames, pose_graph_frames,
+                    tracked_object_frames, hand_rois["left"], config=hand_graph_config,
+                )
+                right_hand_graph = analyze_hand_graph_sequence(
+                    "right", right_hand_result.frames, pose_graph_frames,
+                    tracked_object_frames, hand_rois["right"], config=hand_graph_config,
+                )
+                candidate_left_grip = analyze_grip_v4(
+                    "left", left_hand_graph, output_timestamps, temporal_frames,
+                    confirmation_seconds=0.12, release_seconds=0.12,
+                    maximum_unknown_gap_seconds=0.25, fallback_fps=fps,
+                )
+                candidate_right_grip = analyze_grip_v4(
+                    "right", right_hand_graph, output_timestamps, temporal_frames,
+                    confirmation_seconds=0.12, release_seconds=0.12,
+                    maximum_unknown_gap_seconds=0.25, fallback_fps=fps,
+                )
+                flicker_after = int(candidate_left_grip.summary["single_frame_grip_flicker_count"]) + int(
+                    candidate_right_grip.summary["single_frame_grip_flicker_count"]
+                )
+                grip_reanalysis_summary["flicker_count_after"] = flicker_after
+                grip_quality_after = grip_pair_quality(
+                    candidate_left_grip, candidate_right_grip,
+                )
+                grip_reanalysis_summary["quality_score_after"] = round(
+                    grip_quality_after, 6,
+                )
+                grip_improved = (
+                    flicker_after < flicker_before
+                    and grip_quality_after >= grip_quality_before - 0.02
+                ) or (
+                    flicker_after == flicker_before
+                    and grip_quality_after - grip_quality_before
+                    >= pose_v6_config.iterative.minimum_quality_gain
+                )
+                if grip_improved:
+                    left_grip_v4 = candidate_left_grip
+                    right_grip_v4 = candidate_right_grip
+                    grip_reanalysis_summary["accepted"] = True
+                    grip_reanalysis_summary["triggered_frames"] = grip_flicker_indexes
+                else:
+                    raw_hand_frames = hand_snapshots
+                    grip_reanalysis_summary["rollback_count"] = 1
+            else:
+                grip_reanalysis_summary["rollback_count"] = 1
+        except (cv2.error, RuntimeError, ValueError, TypeError) as error:
+            raw_hand_frames = hand_snapshots
+            grip_reanalysis_summary["rollback_count"] = 1
+            logger.warning(
+                "Pose V6.4 hand re-pass unavailable for %s; previous grip state retained: %s.",
+                analysis_id, type(error).__name__,
+            )
+        finally:
+            hand_repass_capture.release()
+        if not bool(grip_reanalysis_summary["accepted"]):
+            left_hand_result = enhance_hand_track(
+                stabilize_hand_track("left", raw_hand_frames["left"], hand_temporal_config),
+                frame_width=width, frame_height=height, config=hand_engine.config,
+            )
+            right_hand_result = enhance_hand_track(
+                stabilize_hand_track("right", raw_hand_frames["right"], hand_temporal_config),
+                frame_width=width, frame_height=height, config=hand_engine.config,
+            )
+            left_hand_graph = analyze_hand_graph_sequence(
+                "left", left_hand_result.frames, pose_graph_frames,
+                tracked_object_frames, hand_rois["left"], config=hand_graph_config,
+            )
+            right_hand_graph = analyze_hand_graph_sequence(
+                "right", right_hand_result.frames, pose_graph_frames,
+                tracked_object_frames, hand_rois["right"], config=hand_graph_config,
+            )
+            left_grip_v4 = analyze_grip_v4(
+                "left", left_hand_graph, output_timestamps, temporal_frames,
+                confirmation_seconds=0.12, release_seconds=0.12,
+                maximum_unknown_gap_seconds=0.25, fallback_fps=fps,
+            )
+            right_grip_v4 = analyze_grip_v4(
+                "right", right_hand_graph, output_timestamps, temporal_frames,
+                confirmation_seconds=0.12, release_seconds=0.12,
+                maximum_unknown_gap_seconds=0.25, fallback_fps=fps,
+            )
+    grip_reanalysis_seconds = time.perf_counter() - grip_reanalysis_started_at
     holding_config = HoldingV2Config(
         enabled=settings.holding_enabled,
         minimum_confirmation_seconds=settings.holding_min_confirmation_seconds,
@@ -4711,7 +5603,11 @@ def process_pose_video(
                     "raw_person_detected": body_record["raw_person_detected"],
                     "bbox_source": body_record["bbox_source"],
                     "refinement_fusion": body_record.get("refinement_fusion"),
+                    "pass3_fusion": body_record.get("pass3_fusion"),
                     "trajectory_refinement": body_record.get("trajectory_refinement"),
+                    "global_trajectory_optimization": body_record.get(
+                        "global_trajectory_optimization"
+                    ),
                     "motion_v6": body_record["motion_v6"],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
@@ -4952,6 +5848,107 @@ def process_pose_video(
         overlay_metric_frames,
         output_timestamps,
     )
+    final_audit = audit_pose_sequence(
+        [frame.analysis_points for frame in temporal_frames],
+        [frame.analysis_scores for frame in temporal_frames],
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        scene_cut_flags,
+        config=pose_v6_config.iterative,
+        hand_visible={
+            "left": [frame.visible for frame in left_hand_result.frames],
+            "right": [frame.visible for frame in right_hand_result.frames],
+        },
+        hand_quality_values={
+            "left": [frame.confidence for frame in left_grip_v4.frames],
+            "right": [frame.confidence for frame in right_grip_v4.frames],
+        },
+        grip_states={
+            "left": [frame.state.value for frame in left_grip_v4.frames],
+            "right": [frame.state.value for frame in right_grip_v4.frames],
+        },
+        motion_blur=[bool(record["prevalidation_motion_blur"]) for record in body_records],
+        prediction_ages=[frame.prediction_age_seconds for frame in temporal_frames],
+        flow_errors=[frame.flow_errors for frame in temporal_frames],
+        wrist_disagreement={
+            "left": [
+                bool(frame.wrist_alignment.get("available"))
+                and not bool(frame.wrist_alignment.get("accepted"))
+                for frame in left_grip_v4.frames
+            ],
+            "right": [
+                bool(frame.wrist_alignment.get("available"))
+                and not bool(frame.wrist_alignment.get("accepted"))
+                for frame in right_grip_v4.frames
+            ],
+        },
+        model_disagreements={
+            index: [
+                *(
+                    record["refinement_fusion"].get("rejected_disagreement_indexes", [])
+                    if isinstance(record.get("refinement_fusion"), dict) else []
+                ),
+                *(
+                    record["pass3_fusion"].get("model_disagreement_joint_indexes", [])
+                    if isinstance(record.get("pass3_fusion"), dict) else []
+                ),
+            ]
+            for index, record in enumerate(body_records)
+        },
+        point_sources=[frame.sources for frame in temporal_frames],
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    for frame, audit_frame in zip(frames_data, final_audit.frames):
+        frame["pose_self_audit_v64"] = audit_frame.to_dict()
+    global_summary = global_optimization_result.summary
+    iterative_v64_summary = {
+        "version": "iterative-refinement-v1",
+        "profile": pose_v6_config.profile,
+        "best_result_not_last": True,
+        "refinement_iterations": 1
+        + int(bool(refinement_results))
+        + int(bool(critical_segments))
+        + int(global_summary.get("iterations", 0)),
+        "pass1_quality": round(pass1_audit.quality_score, 6),
+        "pass2_quality": round(pass2_audit.quality_score, 6),
+        "pass3_quality": round(pass3_audit.quality_score, 6),
+        "final_quality": round(final_audit.quality_score, 6),
+        "pose_final_quality_score": round(final_audit.quality_score, 6),
+        "quality_score_is_accuracy": False,
+        "frames_improved_by_pass2": frames_improved_by_pass2,
+        "frames_improved_by_pass3": frames_improved_by_pass3,
+        "frames_unchanged": max(
+            0, processed_frames - frames_improved_by_pass2 - frames_improved_by_pass3,
+        ),
+        "frames_rolled_back": pass2_rollback_count + pass3_rollback_count,
+        "rollback_count": pass2_rollback_count + pass3_rollback_count
+        + int(global_summary.get("rollback_count", 0))
+        + int(grip_reanalysis_summary.get("rollback_count", 0)),
+        "repaired_frames_count": min(
+            processed_frames,
+            int(global_summary.get("repaired_frames_count", 0))
+            + frames_improved_by_pass2 + frames_improved_by_pass3
+            + len(grip_reanalysis_summary.get("triggered_frames", [])),
+        ),
+        "critical_segments_count": len(critical_segments),
+        "hard_segments_count": len(pass1_audit.hard_segments),
+        "global_optimization_applied": int(
+            global_summary.get("correction_count", 0)
+        ) > 0,
+        "pass1_self_audit": pass1_audit.to_dict(include_frame_audit=False),
+        "pass2_self_audit": pass2_audit.to_dict(include_frame_audit=False),
+        "pass3_self_audit": pass3_audit.to_dict(include_frame_audit=False),
+        "final_self_audit": final_audit.to_dict(include_frame_audit=False),
+        "critical_segments": [segment.to_dict() for segment in critical_segments],
+        "pass3_iteration_diagnostics": pass3_results,
+        "global_trajectory_optimization": global_summary,
+        "hand_grip_reanalysis": grip_reanalysis_summary,
+        "converged": bool(global_summary.get("converged", False)),
+        "pass2_converged": pass2_converged,
+        "maximum_repair_iterations": pose_v6_config.iterative.maximum_repair_iterations,
+    }
     temporal_v6_summary = summarize_temporal_frames(
         temporal_frames,
         [str(record["motion_v6"]["state"]) for record in body_records],
@@ -5034,6 +6031,10 @@ def process_pose_video(
     )
     temporal_worst_frames = rank_temporal_worst_frames(body_records)
     runtime_breakdown = {
+        "pass1_ms": round(1000.0 * pass1_seconds, 3),
+        "pass2_ms": round(1000.0 * pass2_seconds, 3),
+        "pass3_ms": round(1000.0 * pass3_seconds, 3),
+        "global_optimization_ms": round(1000.0 * global_optimization_seconds, 3),
         "person_detection_ms": round(1000.0 * sum(
             float(record["timing_seconds"]["detector"])
             for record in body_records
@@ -5049,18 +6050,19 @@ def process_pose_video(
         "hand_ms": round(1000.0 * (sum(
             float(record["timing_seconds"]["hands"])
             for record in body_records
-        ) + hand_validation_seconds), 3),
+        ) + hand_validation_seconds + grip_reanalysis_seconds), 3),
         "object_logic_ms": round(1000.0 * hand_object_seconds, 3),
         "validation_ms": round(1000.0 * validation_seconds, 3),
         "smoothing_ms": round(1000.0 * smoothing_seconds, 3),
         "render_ms": round(1000.0 * drawing_seconds, 3),
         "encode_ms": round(1000.0 * encoding_seconds, 3),
+        "total_ms": round(1000.0 * (time.perf_counter() - processing_started_at), 3),
     }
 
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
-        "generated_by": "Ergonomia AI Worker V0.10",
+        "generated_by": f"Ergonomia AI Worker {WORKER_VERSION}",
         "worker_version": WORKER_VERSION,
         "pipeline_version": QUALITY_VERSION,
         "pose_version": POSE_VERSION,
@@ -5275,6 +6277,19 @@ def process_pose_video(
                 "anatomical_projection": "canonical-normalized-constrained-chain-v1",
                 "angle_engine": "angle-engine-v2.0",
                 "grip_engine": "grip-v4.0",
+                "iterative_refinement": {
+                    "enabled": pose_v6_config.iterative.enabled,
+                    "pass2_maximum_ratio": pose_v6_config.iterative.pass2_maximum_ratio,
+                    "pass3_critical_ratio": pose_v6_config.iterative.pass3_critical_ratio,
+                    "maximum_repair_iterations": pose_v6_config.iterative.maximum_repair_iterations,
+                    "convergence_epsilon": pose_v6_config.iterative.convergence_epsilon,
+                    "minimum_quality_gain": pose_v6_config.iterative.minimum_quality_gain,
+                    "pass2_roi_scales": list(pose_v6_config.iterative.pass2_roi_scales),
+                    "pass3_roi_scales": list(pose_v6_config.iterative.pass3_roi_scales),
+                    "expert_model_enabled": False,
+                    "rtmw_hard_frame_batching": "multi-bbox-single-call",
+                    "inference_device": "cuda",
+                },
             },
             "draw_hands": settings.draw_hands,
             "draw_face": settings.draw_face,
@@ -5382,6 +6397,7 @@ def process_pose_video(
                     "valid_coverage_ratio"
                 ],
             },
+            "iterative_v64": iterative_v64_summary,
             "temporal_v6": temporal_v6_summary,
             "render_v6": render_v6_summary,
             "timeline_v6": timeline_v6_summary,
@@ -5488,6 +6504,7 @@ def process_pose_video(
         "analysis_id": analysis_id,
         "runtime_seconds": round(time.perf_counter() - processing_started_at, 4),
         "runtime_breakdown_seconds": runtime_breakdown,
+        "iterative_v64": iterative_v64_summary,
         "tracking": result_document["summary"]["tracking"],
         "scene_cut_count": scene_cut_count,
         "refinement": result_document["refinement"],
@@ -5928,7 +6945,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ergonomia AI Worker V0.10 — Pose Pipeline V6"
+        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.4"
     )
     parser.add_argument(
         "--once",

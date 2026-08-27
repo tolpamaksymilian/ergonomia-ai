@@ -1,5 +1,16 @@
 # Worker changelog
 
+## 0.12.0-beta.1
+
+- Pose `pose-v6.4.0-beta.1`: whole-track self-audit, padded hard segments,
+  multi-scale per-joint consensus and a bounded critical Pass 3.
+- Every iterative state is quality-compared; regression rolls back, convergence
+  stops compute, and the final document records the best accepted state.
+- Added robust confidence/source-weighted global trajectory optimization and a
+  local expanded-ROI hand re-pass for single-frame grip flicker.
+- YOLOX-X, RTMW WholeBody, MediaPipe weights and additive schema `6.0` remain
+  unchanged; no accuracy claim or unbenchmarked expert model was introduced.
+
 ## 0.11.0-beta.1
 
 - Pose `pose-v6.3.0-beta.1`: conservative fixed-lag trajectory correction,

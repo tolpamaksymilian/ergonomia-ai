@@ -43,6 +43,33 @@ and hard loss are protected. Hard-frame fusion now ranks every candidate joint
 by confidence, temporal continuity, local topology and primary-source
 hysteresis rather than raw confidence alone.
 
+Pose 6.4 treats Pass 1 as an initial hypothesis. A whole-track self-audit maps
+joint jumps, low confidence, bone instability, angle glitches, hand dropouts,
+old predictions and flow disagreement into padded hard segments. Pass 2 runs
+RTMW on several person-context ROI scales and fuses all hypotheses per joint.
+The worst bounded 1-5% left by its audit can enter a deeper Pass 3. Each stage
+must produce a material quality gain; regression is rolled back and convergence
+stops further compute. A robust, confidence/source-weighted bidirectional
+trajectory optimizer then repairs isolated jerk across each continuous track,
+while scene cuts, hard loss, sustained fast motion and strong measurements are
+anchors. The final state is the best accepted state, never merely the last one.
+After anatomical projection, the final audit may run one more repair only on
+the reported hard segment plus configured temporal padding. It never retries a
+scene cut, hard-lost/out-of-frame interval or an unobserved image, and it is
+bounded to three iterations with convergence and rollback.
+
+Grip flicker can trigger a local expanded-ROI MediaPipe re-pass. Angle spikes
+mark their source shoulder/elbow/wrist or hip/knee/ankle joints for model
+reanalysis; the worker does not hide bad geometry by editing only the derived
+angle. No expert model was enabled: the repository has no reviewed weights,
+license record and ground-truth benchmark proving a safe improvement over the
+current RTMW primary model.
+
+Hard-frame ROI variants are submitted to the existing CUDA RTMW backend in a
+single multi-bbox call per source frame. This keeps the additional compute on
+GPU and bounds host memory/VRAM to one hard frame's crop set; it does not retain
+an entire segment's image tensors in memory.
+
 The presentation and grip contracts are documented in `OVERLAY_CONTRACT.md`
 and `GRIP_CONTRACT.md`. A local KPI comparison can be run with:
 
@@ -66,7 +93,23 @@ reset continuity.
 
 The defaults target the `ACCURATE` profile. The small optional surface is
 documented in `worker/.env.example`: recovery/hard-lost/interpolation/render
-times, optical-flow validation, fast-motion threshold and recovery ROI scale.
+times, optical-flow validation, fast-motion threshold, recovery ROI scale and
+the bounded V6.4 pass/repair budgets. `POSE_V6_PROFILE=ACCURATE` remains the
+default. The quality score is a technical internal data score, not accuracy.
+Its analytical coverage counts only measured/refined measurements; render-only
+prediction is reported separately. Explicit penalties for joint jumps, bone
+instability, side ambiguity, angle outliers and model/wrist disagreement stop
+coverage alone from hiding a geometry regression.
+
+## Compute policy and diagnostics
+
+Pass 1 covers the active video once. Pass 2 is capped at 30% hard frames; Pass
+3 is capped at the worst unresolved 5%. Final repair is local to padded error
+segments, not a fourth whole-video pass. Convergence, minimum quality gain and
+the three-iteration ceiling can skip work early. `pose-keypoints.json` reports
+pass/final quality, hard/critical segment counts, improved/unchanged/rolled-back
+frames, per-joint selected pass/source/consensus/correction iteration and the
+runtime split for Pass 1, Pass 2, Pass 3, global optimization, hands and render.
 
 ## Tests
 

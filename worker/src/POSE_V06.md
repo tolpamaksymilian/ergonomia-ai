@@ -1,7 +1,19 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: aplikacja `0.26.0-beta.1`, worker `0.11.0-beta.1`, Pose
-`pose-v6.3.0-beta.1`, schema `6.0`.
+Wersje: worker `0.12.0-beta.1`, Pose `pose-v6.4.0-beta.1`, schema `6.0`.
+Wersja aplikacji nie jest zmieniana przez iterację worker-only.
+
+Minor `6.4` dodaje sterowany mapą błędów Pass 2 i Pass 3, wieloskalowy konsensus
+per joint, porównanie jakości z rollbackiem i warunkiem zbieżności, ograniczony
+repair loop, globalną robust trajectory optimization oraz lokalny re-pass dłoni
+po wykryciu grip flicker. Wynik zachowuje najlepszy zaakceptowany stan, a nowe
+pola diagnostyczne są addytywne względem schema `6.0`.
+
+Pass 1 obejmuje cały aktywny fragment. Pass 2 ma domyślny limit 30% klatek,
+Pass 3 wybiera najwyżej 5% nierozwiązanych klatek, a końcowy repair dotyka
+wyłącznie wskazanych segmentów wraz z paddingiem. Scene cut, HARD LOST, brak
+obrazu i monotoniczny szybki ruch są twardymi granicami. Minimalny przyrost
+jakości, epsilon zbieżności i limit trzech iteracji kontrolują koszt.
 
 Minor `6.3` dodaje fixed-lag offline trajectory refinement, kompozytowy per-joint
 trust w hard-frame fusion, stabilność confidence Angle Engine oraz mierzalny,
