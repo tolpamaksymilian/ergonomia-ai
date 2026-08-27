@@ -1,9 +1,10 @@
-"""Run the real Pose V5 pipeline for a local video without Supabase."""
+"""Run the production Pose V6.5 core for a local video without Supabase."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -21,6 +22,7 @@ from assessment.integration import process_assessment_files  # noqa: E402
 from report.integration import build_report_file  # noqa: E402
 from risk.processor import process_risk_file  # noqa: E402
 from pose_v3.hand_pipeline import MediaPipeHandEngine  # noqa: E402
+from pose_v6.quality_benchmark import collect_quality_kpis  # noqa: E402
 from pose_worker import (  # noqa: E402
     WORKER_VERSION,
     configure_logging,
@@ -34,10 +36,18 @@ from pose_worker import (  # noqa: E402
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lokalna walidacja Ergonomia AI Worker V0.4 bez Supabase."
+        description="Lokalny real-video benchmark Pose V6.5 bez Supabase i kolejki."
     )
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
-    parser.add_argument("--output", required=True, help="Katalog wynikowy.")
+    parser.add_argument(
+        "--output",
+        default=".runtime/pose-benchmark",
+        help="Katalog wynikowy (domyślnie .runtime/pose-benchmark).",
+    )
+    parser.add_argument(
+        "--profile", choices=("BALANCED", "ACCURATE", "ULTRA"),
+        default="ACCURATE", help="Profil compute Pose V6.5.",
+    )
     parser.add_argument("--debug-overlay", action="store_true")
     parser.add_argument("--refine", action=argparse.BooleanOptionalAction, default=None, help="Włącz lub wyłącz ograniczony Pass 2.")
     parser.add_argument("--angles", action="store_true", help="Pokaż kąty metryk na overlayu.")
@@ -69,6 +79,7 @@ def main() -> int:
         return 2
     output_directory.mkdir(parents=True, exist_ok=True)
 
+    os.environ["POSE_V6_PROFILE"] = arguments.profile
     settings = load_settings(require_supabase=False)
     settings = replace(
         settings,
@@ -166,6 +177,31 @@ def main() -> int:
             assessment_path=assessment_path,
         )
     diagnostics = json.loads(result.diagnostics_path.read_text(encoding="utf-8"))
+    quality_summary_path = output_directory / "quality-summary.json"
+    quality_summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "generated_by": "Ergonomia AI local Pose benchmark",
+                "worker_version": WORKER_VERSION,
+                "profile": arguments.profile,
+                "input_file": input_path.name,
+                "processed_frames": result.processed_frames,
+                "accuracy_claimed": False,
+                "queue_or_supabase_touched": False,
+                "kpis": collect_quality_kpis({"summary": diagnostics}),
+                "artifacts": {
+                    "overlay": result.video_path.name,
+                    "keypoints": result.json_path.name,
+                    "diagnostics": result.diagnostics_path.name,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ) + "\n",
+        encoding="utf-8",
+    )
     summary_path = output_directory / "validation-summary.txt"
     summary_path.write_text(
         _validation_summary(input_path, fps, frame_count, diagnostics),
@@ -175,6 +211,8 @@ def main() -> int:
         _save_selected_frames(result.video_path, output_directory, diagnostics)
     _print_summary(input_path, fps, frame_count, diagnostics)
     print(f"OUTPUT={output_directory}")
+    print(f"QUALITY_SUMMARY={quality_summary_path}")
+    print(f"PROFILE={arguments.profile}")
     print(f"WORKER_VERSION={WORKER_VERSION}")
     return 0
 

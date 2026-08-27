@@ -1,5 +1,21 @@
 # Worker changelog
 
+## 0.13.0-beta.1
+
+- Pose `pose-v6.5.0-beta.1` fixes the real-video final-audit crash caused by
+  NumPy tuple indexing of the 1-D per-joint prediction-age vector.
+- Explicit audit array contracts, a strict final-skeleton contract and a
+  degraded optional-audit fallback prevent diagnostics from discarding valid
+  output without allowing invalid geometry to be serialized.
+- Added the opt-in `ULTRA` compute profile, seconds-based bidirectional context,
+  joint-chain-aware robust optimization and best-state rollback diagnostics.
+- Angle Engine V3 exposes technical uncertainty; Grip V5 exposes state
+  confidence, stability and landmark coverage independently per hand.
+- Added an expert-backend contract and honest local readiness assessment. No
+  unbenchmarked secondary model or weights are enabled in production.
+- The local real-video runner uses production core without queue/Supabase and
+  writes `quality-summary.json`. Schema remains additively compatible at `6.0`.
+
 ## 0.12.0-beta.1
 
 - Pose `pose-v6.4.0-beta.1`: whole-track self-audit, padded hard segments,

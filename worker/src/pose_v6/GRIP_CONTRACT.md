@@ -1,6 +1,6 @@
-# Grip V4 contract
+# Grip V5 contract
 
-Grip V4 classifies validated MediaPipe hand geometry into `OPEN`, `RELAXED`,
+Grip V5 classifies validated MediaPipe hand geometry into `OPEN`, `RELAXED`,
 `PARTIALLY_CLOSED`, `POWER_GRIP`, `PRECISION_PINCH`, `CLOSED` or `UNKNOWN`.
 Classification uses palm-normalized closure, aperture, finger flexion, thumb
 opposition and thumb-to-finger distance. Object proximity is supporting
@@ -14,5 +14,7 @@ single-frame flicker and a temporal stability score alongside coverage.
 RTMW and MediaPipe wrists are fused only for visualization when both sources
 are valid and their palm-normalized distance is at most 0.65. The output keeps
 the alignment weight and translation explicit. Rejected assignments do not
-move the hand. Grip V4 does not estimate force, mass or normative ergonomic
+move the hand. Grip V5 additionally reports state confidence, temporal
+stability and usable landmark coverage as separate technical signals. It does
+not estimate force, mass or normative ergonomic
 risk.

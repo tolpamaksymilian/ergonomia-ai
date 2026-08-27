@@ -94,32 +94,42 @@ class MotionConfig:
 
 @dataclass(frozen=True)
 class IterativeRefinementConfig:
-    """Bounded offline compute policy for the self-correcting V6.4 passes."""
+    """Bounded offline compute policy for the self-correcting V6.5 passes."""
 
     enabled: bool = True
     pass2_maximum_ratio: float = 0.30
     pass3_critical_ratio: float = 0.05
+    expert_resolution_ratio: float = 0.02
     segment_padding_seconds: float = 0.20
+    critical_temporal_context_seconds: float = 0.15
     convergence_epsilon: float = 0.006
     minimum_quality_gain: float = 0.010
     maximum_repair_iterations: int = 3
+    minimum_repair_error_confidence: float = 0.65
     pass2_roi_scales: tuple[float, ...] = (1.0, 1.15, 1.30)
     pass3_roi_scales: tuple[float, ...] = (0.92, 1.0, 1.15, 1.30, 1.45)
+    expert_roi_scales: tuple[float, ...] = (0.85, 0.92, 1.0, 1.15, 1.30, 1.45, 1.60)
 
     def validate(self) -> None:
         if not 0.0 <= self.pass2_maximum_ratio <= 1.0:
             raise ValueError("pass2_maximum_ratio must be in range 0..1")
         if not 0.01 <= self.pass3_critical_ratio <= 0.05:
             raise ValueError("pass3_critical_ratio must be in range 0.01..0.05")
+        if not 0.0 <= self.expert_resolution_ratio <= 0.03:
+            raise ValueError("expert_resolution_ratio must be in range 0..0.03")
         if self.segment_padding_seconds < 0.0:
             raise ValueError("segment_padding_seconds cannot be negative")
+        if not 0.05 <= self.critical_temporal_context_seconds <= 0.50:
+            raise ValueError("critical_temporal_context_seconds must be in range 0.05..0.50")
         if self.convergence_epsilon < 0.0 or self.minimum_quality_gain < 0.0:
             raise ValueError("iterative quality thresholds cannot be negative")
-        if not 1 <= self.maximum_repair_iterations <= 4:
-            raise ValueError("maximum_repair_iterations must be in range 1..4")
-        if not self.pass2_roi_scales or not self.pass3_roi_scales:
+        if not 1 <= self.maximum_repair_iterations <= 6:
+            raise ValueError("maximum_repair_iterations must be in range 1..6")
+        if not 0.0 <= self.minimum_repair_error_confidence <= 1.0:
+            raise ValueError("minimum_repair_error_confidence must be in range 0..1")
+        if not self.pass2_roi_scales or not self.pass3_roi_scales or not self.expert_roi_scales:
             raise ValueError("iterative ROI scale sets cannot be empty")
-        if any(not 0.75 <= value <= 1.75 for value in (*self.pass2_roi_scales, *self.pass3_roi_scales)):
+        if any(not 0.75 <= value <= 1.75 for value in (*self.pass2_roi_scales, *self.pass3_roi_scales, *self.expert_roi_scales)):
             raise ValueError("iterative ROI scales must be in range 0.75..1.75")
 
 
@@ -134,8 +144,8 @@ class PoseV6Config:
     refinement_fast_motion_enabled: bool = True
 
     def validate(self) -> None:
-        if self.profile not in {"BALANCED", "ACCURATE"}:
-            raise ValueError("profile must be BALANCED or ACCURATE")
+        if self.profile not in {"BALANCED", "ACCURATE", "ULTRA"}:
+            raise ValueError("profile must be BALANCED, ACCURATE or ULTRA")
         if not 1.0 <= self.recovery_roi_scale <= 2.0:
             raise ValueError("recovery_roi_scale must be in range 1..2")
         self.temporal.validate()
@@ -148,6 +158,8 @@ def load_pose_v6_config() -> PoseV6Config:
     """Read the intentionally small V6 environment surface."""
 
     profile = os.getenv("POSE_V6_PROFILE", "ACCURATE").strip().upper()
+    ultra = profile == "ULTRA"
+    balanced = profile == "BALANCED"
     fast_threshold = _number("POSE_FAST_MOTION_THRESHOLD", 1.20, 0.1, 10.0)
     config = PoseV6Config(
         profile=profile,
@@ -169,10 +181,33 @@ def load_pose_v6_config() -> PoseV6Config:
             enabled=_boolean("POSE_ITERATIVE_REFINEMENT_ENABLED", True),
             pass2_maximum_ratio=_number("POSE_PASS2_MAXIMUM_RATIO", 0.30, 0.0, 1.0),
             pass3_critical_ratio=_number("POSE_PASS3_CRITICAL_RATIO", 0.05, 0.01, 0.05),
+            expert_resolution_ratio=_number(
+                "POSE_EXPERT_RESOLUTION_RATIO", 0.03 if ultra else (0.0 if balanced else 0.02),
+                0.0, 0.03,
+            ),
             segment_padding_seconds=_number("POSE_ITERATIVE_PADDING_SECONDS", 0.20, 0.0, 1.0),
+            critical_temporal_context_seconds=_number(
+                "POSE_CRITICAL_CONTEXT_SECONDS", 0.30 if ultra else 0.15,
+                0.05, 0.50,
+            ),
             convergence_epsilon=_number("POSE_REFINEMENT_CONVERGENCE_EPSILON", 0.006, 0.0, 0.1),
             minimum_quality_gain=_number("POSE_REFINEMENT_MINIMUM_GAIN", 0.010, 0.0, 0.25),
-            maximum_repair_iterations=int(_number("POSE_MAX_REPAIR_ITERATIONS", 3.0, 1.0, 4.0)),
+            maximum_repair_iterations=int(_number(
+                "POSE_MAX_REPAIR_ITERATIONS", 5.0 if ultra else (2.0 if balanced else 3.0),
+                1.0, 6.0,
+            )),
+            pass2_roi_scales=(
+                (0.92, 1.0, 1.10, 1.22, 1.35)
+                if ultra else ((1.0, 1.18) if balanced else (1.0, 1.15, 1.30))
+            ),
+            pass3_roi_scales=(
+                (0.85, 0.92, 1.0, 1.10, 1.22, 1.35, 1.50, 1.65)
+                if ultra else ((0.95, 1.0, 1.20) if balanced else (0.92, 1.0, 1.15, 1.30, 1.45))
+            ),
+            expert_roi_scales=(
+                (0.80, 0.85, 0.92, 1.0, 1.08, 1.18, 1.30, 1.45, 1.60, 1.72)
+                if ultra else (0.85, 0.92, 1.0, 1.15, 1.30, 1.45, 1.60)
+            ),
         ),
         recovery_roi_scale=_number("POSE_RECOVERY_ROI_SCALE", 1.22, 1.0, 2.0),
         refinement_fast_motion_enabled=_boolean("POSE_REFINEMENT_FAST_MOTION_ENABLED", True),

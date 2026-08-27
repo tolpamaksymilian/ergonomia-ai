@@ -53,12 +53,15 @@ try:
     from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
     from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from worker.src.pose_v6.contracts import validate_final_skeleton_contract
     from worker.src.pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from worker.src.pose_v6.expert_backend import assess_local_expert_candidates
     from worker.src.pose_v6.grip_v4 import analyze_grip_v4
     from worker.src.pose_v6.integration import augment_pose_document_v6
     from worker.src.pose_v6.iterative_refinement import (
         PoseHypothesis,
+        PoseAuditInputError,
         PoseErrorCode,
         audit_pose_sequence,
         compare_iteration_quality,
@@ -79,12 +82,15 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.anatomical_stability import project_anatomical_sequence
     from pose_v6.angle_engine import stabilize_angle_sequence
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from pose_v6.contracts import validate_final_skeleton_contract
     from pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
+    from pose_v6.expert_backend import assess_local_expert_candidates
     from pose_v6.grip_v4 import analyze_grip_v4
     from pose_v6.integration import augment_pose_document_v6
     from pose_v6.iterative_refinement import (
         PoseHypothesis,
+        PoseAuditInputError,
         PoseErrorCode,
         audit_pose_sequence,
         compare_iteration_quality,
@@ -3207,7 +3213,7 @@ def process_pose_video(
     logger: logging.Logger,
 ) -> PoseProcessingResult:
     """
-    Pose Pipeline V6.4 działa wieloprzebiegowo i rozdziela RAW, ANALYSIS oraz RENDER.
+    Pose Pipeline V6.5 działa wieloprzebiegowo i rozdziela RAW, ANALYSIS oraz RENDER.
 
     Przebieg 1:
     - RTMW wyznacza ciało,
@@ -3807,6 +3813,7 @@ def process_pose_video(
     pass1_bbox_sources = [str(record["bbox_source"]) for record in body_records]
     pass2_seconds = 0.0
     pass3_seconds = 0.0
+    expert_pass_seconds = 0.0
     pass2_rollback_count = 0
     pass3_rollback_count = 0
     frames_improved_by_pass2 = 0
@@ -4569,7 +4576,7 @@ def process_pose_video(
                     pass3_audit = audit_current_pose()
         except (cv2.error, ValueError, TypeError, RuntimeError) as error:
             logger.warning(
-                "Pose V6.4 Pass 3 unavailable for %s; best Pass 2 state retained: %s.",
+                "Pose V6.5 Pass 3 unavailable for %s; best Pass 2 state retained: %s.",
                 analysis_id, type(error).__name__,
             )
             for index, (points_before, scores_before) in enumerate(pass2_snapshots):
@@ -4610,6 +4617,27 @@ def process_pose_video(
         finally:
             pass3_capture.release()
             pass3_seconds = time.perf_counter() - pass3_started_at
+
+    expert_candidates = assess_local_expert_candidates()
+    expert_segments = select_critical_segments(
+        pass3_audit,
+        maximum_ratio=pose_v6_config.iterative.expert_resolution_ratio,
+    ) if pose_v6_config.iterative.enabled else []
+    expert_resolution_summary: dict[str, object] = {
+        "enabled_by_profile": pose_v6_config.iterative.expert_resolution_ratio > 0.0,
+        "maximum_frame_ratio": pose_v6_config.iterative.expert_resolution_ratio,
+        "candidate_segment_count": len(expert_segments),
+        "candidate_frame_count": sum(segment.frame_count for segment in expert_segments),
+        "executed_frame_count": 0,
+        "usage_ratio": 0.0,
+        "backend_executed": False,
+        "source_if_executed": "EXPERT_REFINED_MODEL",
+        "reason": (
+            "no repository-configured expert weights, validated canonical mapping, "
+            "or same-video quality benchmark"
+        ),
+        "candidates": [candidate.to_dict() for candidate in expert_candidates],
+    }
 
     smoothing_started_at = time.perf_counter()
     smoothed_points, smoothed_scores, interpolation_masks = smooth_body_sequence(
@@ -4690,8 +4718,25 @@ def process_pose_video(
         scene_cut_flags,
         config=pose_v6_config.iterative,
         body_joint_count=BODY_POINT_COUNT,
+        timestamps=[
+            float(record["source_timestamp_seconds"]) for record in body_records
+        ],
     )
     temporal_frames = global_optimization_result.frames
+    post_global_optimization_audit = audit_pose_sequence(
+        [frame.analysis_points for frame in temporal_frames],
+        [frame.analysis_scores for frame in temporal_frames],
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["tracking_state"]) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        scene_cut_flags,
+        config=pose_v6_config.iterative,
+        prediction_ages=[frame.prediction_age_seconds for frame in temporal_frames],
+        flow_errors=[frame.flow_errors for frame in temporal_frames],
+        point_sources=[frame.sources for frame in temporal_frames],
+        body_joint_count=BODY_POINT_COUNT,
+    )
     anatomical_result = project_anatomical_sequence(
         temporal_frames,
         [float(record["pose_graph"].body_scale) for record in body_records],
@@ -4724,7 +4769,9 @@ def process_pose_video(
         PoseErrorCode.LEFT_RIGHT_AMBIGUITY,
     }
     final_repair_requested = any(
-        error.repairable and error.code in final_repair_codes
+        error.repairable
+        and error.error_confidence >= pose_v6_config.iterative.minimum_repair_error_confidence
+        and error.code in final_repair_codes
         for error in post_anatomical_audit.errors
     )
     local_repair_summary: dict[str, object] = {
@@ -4750,6 +4797,9 @@ def process_pose_video(
             config=pose_v6_config.iterative,
             body_joint_count=BODY_POINT_COUNT,
             allowed_frame_indexes=local_repair_frame_indexes,
+            timestamps=[
+                float(record["source_timestamp_seconds"]) for record in body_records
+            ],
         )
         local_repair_summary["segments"] = [
             segment.to_dict()
@@ -5058,7 +5108,7 @@ def process_pose_video(
         "flicker_count_before": 0,
         "flicker_count_after": 0,
     }
-    grip_flicker_indexes = sorted({
+    grip_flicker_seed_indexes = sorted({
         *detect_grip_flicker(
             [frame.state.value for frame in left_grip_v4.frames],
             scene_cuts=scene_cut_flags,
@@ -5068,6 +5118,22 @@ def process_pose_video(
             scene_cuts=scene_cut_flags,
         ),
     })
+    grip_flicker_indexes = list(grip_flicker_seed_indexes)
+    if grip_flicker_seed_indexes and pose_v6_config.profile == "ULTRA":
+        hand_context_frames = frames_for_seconds(
+            min(0.15, pose_v6_config.iterative.critical_temporal_context_seconds),
+            fps,
+        )
+        expanded_indexes: set[int] = set()
+        for seed in grip_flicker_seed_indexes:
+            for candidate in range(
+                max(0, seed - hand_context_frames),
+                min(processed_frames, seed + hand_context_frames + 1),
+            ):
+                start, end = sorted((seed, candidate))
+                if not any(scene_cut_flags[start + 1:end + 1]):
+                    expanded_indexes.add(candidate)
+        grip_flicker_indexes = sorted(expanded_indexes)
     flicker_before = int(left_grip_v4.summary["single_frame_grip_flicker_count"]) + int(
         right_grip_v4.summary["single_frame_grip_flicker_count"]
     )
@@ -5091,6 +5157,11 @@ def process_pose_video(
 
     grip_quality_before = grip_pair_quality(left_grip_v4, right_grip_v4)
     grip_reanalysis_summary["flicker_count_before"] = flicker_before
+    grip_reanalysis_summary["seed_flicker_frames"] = grip_flicker_seed_indexes
+    grip_reanalysis_summary["profile"] = pose_v6_config.profile
+    grip_reanalysis_summary["roi_scale"] = (
+        1.65 if pose_v6_config.profile == "ULTRA" else 1.45
+    )
     grip_reanalysis_summary["quality_score_before"] = round(grip_quality_before, 6)
     grip_reanalysis_summary["quality_score_after"] = round(grip_quality_before, 6)
     if grip_flicker_indexes and pose_v6_config.iterative.enabled:
@@ -5115,7 +5186,9 @@ def process_pose_video(
                             hand_rois[side][frame_index],
                             frame_width=width,
                             frame_height=height,
-                            scale=1.45,
+                            scale=(
+                                1.65 if pose_v6_config.profile == "ULTRA" else 1.45
+                            ),
                         )
                         for side in ("left", "right")
                     }
@@ -5201,7 +5274,7 @@ def process_pose_video(
             raw_hand_frames = hand_snapshots
             grip_reanalysis_summary["rollback_count"] = 1
             logger.warning(
-                "Pose V6.4 hand re-pass unavailable for %s; previous grip state retained: %s.",
+                "Pose V6.5 hand re-pass unavailable for %s; previous grip state retained: %s.",
                 analysis_id, type(error).__name__,
             )
         finally:
@@ -5651,6 +5724,7 @@ def process_pose_video(
                     },
                     "anatomical_v62": body_record["anatomical_v62"],
                     "angles_v2": angle_v2.diagnostics[frame_offset],
+                    "angles_v3": angle_v2.diagnostics[frame_offset],
                     "timeline_v6": {
                         "contract_version": "pose-timeline-coverage-v1",
                         "layers": layer_contract,
@@ -5698,6 +5772,7 @@ def process_pose_video(
                             left_holding_frames[frame_offset]
                         ),
                         "grip_v4": left_grip_v4.frames[frame_offset].to_dict(),
+                        "grip_v5": left_grip_v4.frames[frame_offset].to_dict(),
                     },
                     "right_hand": {
                         **serialize_hand_frame(right_frame),
@@ -5707,6 +5782,7 @@ def process_pose_video(
                             right_holding_frames[frame_offset]
                         ),
                         "grip_v4": right_grip_v4.frames[frame_offset].to_dict(),
+                        "grip_v5": right_grip_v4.frames[frame_offset].to_dict(),
                     },
                     "holding": {
                         "left": {
@@ -5848,63 +5924,97 @@ def process_pose_video(
         overlay_metric_frames,
         output_timestamps,
     )
-    final_audit = audit_pose_sequence(
-        [frame.analysis_points for frame in temporal_frames],
-        [frame.analysis_scores for frame in temporal_frames],
-        [float(record["pose_graph"].body_scale) for record in body_records],
-        [float(record["source_timestamp_seconds"]) for record in body_records],
-        [str(record["tracking_state"]) for record in body_records],
-        [str(record["motion_v6"]["state"]) for record in body_records],
-        scene_cut_flags,
-        config=pose_v6_config.iterative,
-        hand_visible={
-            "left": [frame.visible for frame in left_hand_result.frames],
-            "right": [frame.visible for frame in right_hand_result.frames],
-        },
-        hand_quality_values={
-            "left": [frame.confidence for frame in left_grip_v4.frames],
-            "right": [frame.confidence for frame in right_grip_v4.frames],
-        },
-        grip_states={
-            "left": [frame.state.value for frame in left_grip_v4.frames],
-            "right": [frame.state.value for frame in right_grip_v4.frames],
-        },
-        motion_blur=[bool(record["prevalidation_motion_blur"]) for record in body_records],
-        prediction_ages=[frame.prediction_age_seconds for frame in temporal_frames],
-        flow_errors=[frame.flow_errors for frame in temporal_frames],
-        wrist_disagreement={
-            "left": [
-                bool(frame.wrist_alignment.get("available"))
-                and not bool(frame.wrist_alignment.get("accepted"))
-                for frame in left_grip_v4.frames
-            ],
-            "right": [
-                bool(frame.wrist_alignment.get("available"))
-                and not bool(frame.wrist_alignment.get("accepted"))
-                for frame in right_grip_v4.frames
-            ],
-        },
-        model_disagreements={
-            index: [
-                *(
-                    record["refinement_fusion"].get("rejected_disagreement_indexes", [])
-                    if isinstance(record.get("refinement_fusion"), dict) else []
-                ),
-                *(
-                    record["pass3_fusion"].get("model_disagreement_joint_indexes", [])
-                    if isinstance(record.get("pass3_fusion"), dict) else []
-                ),
-            ]
-            for index, record in enumerate(body_records)
-        },
-        point_sources=[frame.sources for frame in temporal_frames],
+    final_skeleton_contract = validate_final_skeleton_contract(
+        temporal_frames,
+        expected_frame_count=processed_frames,
         body_joint_count=BODY_POINT_COUNT,
+        identity_scores=[
+            float(record["tracking_identity_score"]) for record in body_records
+        ],
     )
+    final_audit_degraded: dict[str, object] | None = None
+    try:
+        final_audit = audit_pose_sequence(
+            [frame.analysis_points for frame in temporal_frames],
+            [frame.analysis_scores for frame in temporal_frames],
+            [float(record["pose_graph"].body_scale) for record in body_records],
+            [float(record["source_timestamp_seconds"]) for record in body_records],
+            [str(record["tracking_state"]) for record in body_records],
+            [str(record["motion_v6"]["state"]) for record in body_records],
+            scene_cut_flags,
+            config=pose_v6_config.iterative,
+            hand_visible={
+                "left": [frame.visible for frame in left_hand_result.frames],
+                "right": [frame.visible for frame in right_hand_result.frames],
+            },
+            hand_quality_values={
+                "left": [frame.confidence for frame in left_grip_v4.frames],
+                "right": [frame.confidence for frame in right_grip_v4.frames],
+            },
+            grip_states={
+                "left": [frame.state.value for frame in left_grip_v4.frames],
+                "right": [frame.state.value for frame in right_grip_v4.frames],
+            },
+            motion_blur=[bool(record["prevalidation_motion_blur"]) for record in body_records],
+            prediction_ages=[frame.prediction_age_seconds for frame in temporal_frames],
+            flow_errors=[frame.flow_errors for frame in temporal_frames],
+            wrist_disagreement={
+                "left": [
+                    bool(frame.wrist_alignment.get("available"))
+                    and not bool(frame.wrist_alignment.get("accepted"))
+                    for frame in left_grip_v4.frames
+                ],
+                "right": [
+                    bool(frame.wrist_alignment.get("available"))
+                    and not bool(frame.wrist_alignment.get("accepted"))
+                    for frame in right_grip_v4.frames
+                ],
+            },
+            model_disagreements={
+                index: [
+                    *(
+                        record["refinement_fusion"].get("rejected_disagreement_indexes", [])
+                        if isinstance(record.get("refinement_fusion"), dict) else []
+                    ),
+                    *(
+                        record["pass3_fusion"].get("model_disagreement_joint_indexes", [])
+                        if isinstance(record.get("pass3_fusion"), dict) else []
+                    ),
+                ]
+                for index, record in enumerate(body_records)
+            },
+            point_sources=[frame.sources for frame in temporal_frames],
+            body_joint_count=BODY_POINT_COUNT,
+        )
+    except PoseAuditInputError as error:
+        # Final geometry has already passed FinalSkeletonContract.  An optional
+        # diagnostic-array contract failure degrades audit metadata only; it
+        # must not discard several minutes of validated inference output.
+        logger.warning(
+            "Final Pose V6 audit degraded for %s: component=final_self_audit "
+            "field=%s actual_shape=%s expected_shape=%s frame=%s",
+            analysis_id,
+            error.field,
+            error.actual_shape,
+            error.expected_shape,
+            error.frame_index,
+        )
+        final_audit = post_anatomical_audit
+        final_audit_degraded = {
+            "degraded": True,
+            "component": "final_self_audit",
+            "field": error.field,
+            "actual_shape": list(error.actual_shape),
+            "expected_shape": error.expected_shape,
+            "frame_index": error.frame_index,
+            "fallback": "post_anatomical_audit",
+        }
     for frame, audit_frame in zip(frames_data, final_audit.frames):
         frame["pose_self_audit_v64"] = audit_frame.to_dict()
+        frame["pose_self_audit_v65"] = audit_frame.to_dict()
     global_summary = global_optimization_result.summary
-    iterative_v64_summary = {
-        "version": "iterative-refinement-v1",
+    iterative_v65_summary = {
+        "version": "iterative-refinement-v2",
         "profile": pose_v6_config.profile,
         "best_result_not_last": True,
         "refinement_iterations": 1
@@ -5914,11 +6024,24 @@ def process_pose_video(
         "pass1_quality": round(pass1_audit.quality_score, 6),
         "pass2_quality": round(pass2_audit.quality_score, 6),
         "pass3_quality": round(pass3_audit.quality_score, 6),
+        "expert_quality": None,
         "final_quality": round(final_audit.quality_score, 6),
         "pose_final_quality_score": round(final_audit.quality_score, 6),
         "quality_score_is_accuracy": False,
         "frames_improved_by_pass2": frames_improved_by_pass2,
         "frames_improved_by_pass3": frames_improved_by_pass3,
+        "frames_improved_by_expert": 0,
+        "pass2_usage_ratio": round(
+            min(processed_frames, len(refinement_results)) / processed_frames, 6
+        ),
+        "pass3_usage_ratio": round(
+            min(
+                processed_frames,
+                sum(segment.frame_count for segment in critical_segments),
+            ) / processed_frames,
+            6,
+        ),
+        "expert_pass_usage_ratio": 0.0,
         "frames_unchanged": max(
             0, processed_frames - frames_improved_by_pass2 - frames_improved_by_pass3,
         ),
@@ -5940,7 +6063,16 @@ def process_pose_video(
         "pass1_self_audit": pass1_audit.to_dict(include_frame_audit=False),
         "pass2_self_audit": pass2_audit.to_dict(include_frame_audit=False),
         "pass3_self_audit": pass3_audit.to_dict(include_frame_audit=False),
+        "expert_resolution_pass": expert_resolution_summary,
+        "post_global_optimization_self_audit": (
+            post_global_optimization_audit.to_dict(include_frame_audit=False)
+        ),
+        "post_anatomical_self_audit": post_anatomical_audit.to_dict(
+            include_frame_audit=False
+        ),
         "final_self_audit": final_audit.to_dict(include_frame_audit=False),
+        "final_self_audit_diagnostic": final_audit_degraded,
+        "final_skeleton_contract": final_skeleton_contract.to_dict(),
         "critical_segments": [segment.to_dict() for segment in critical_segments],
         "pass3_iteration_diagnostics": pass3_results,
         "global_trajectory_optimization": global_summary,
@@ -5949,6 +6081,8 @@ def process_pose_video(
         "pass2_converged": pass2_converged,
         "maximum_repair_iterations": pose_v6_config.iterative.maximum_repair_iterations,
     }
+    # Additive compatibility alias for consumers introduced with Pose V6.4.
+    iterative_v64_summary = iterative_v65_summary
     temporal_v6_summary = summarize_temporal_frames(
         temporal_frames,
         [str(record["motion_v6"]["state"]) for record in body_records],
@@ -6034,6 +6168,7 @@ def process_pose_video(
         "pass1_ms": round(1000.0 * pass1_seconds, 3),
         "pass2_ms": round(1000.0 * pass2_seconds, 3),
         "pass3_ms": round(1000.0 * pass3_seconds, 3),
+        "expert_pass_ms": round(1000.0 * expert_pass_seconds, 3),
         "global_optimization_ms": round(1000.0 * global_optimization_seconds, 3),
         "person_detection_ms": round(1000.0 * sum(
             float(record["timing_seconds"]["detector"])
@@ -6275,18 +6410,24 @@ def process_pose_video(
                 "hard_frame_fusion": "per-joint-confidence-and-disagreement-gated",
                 "timeline_contract": "pose-timeline-coverage-v1",
                 "anatomical_projection": "canonical-normalized-constrained-chain-v1",
-                "angle_engine": "angle-engine-v2.0",
-                "grip_engine": "grip-v4.0",
+                "angle_engine": "angle-engine-v3.0",
+                "grip_engine": "grip-v5.0",
                 "iterative_refinement": {
                     "enabled": pose_v6_config.iterative.enabled,
                     "pass2_maximum_ratio": pose_v6_config.iterative.pass2_maximum_ratio,
                     "pass3_critical_ratio": pose_v6_config.iterative.pass3_critical_ratio,
+                    "expert_resolution_ratio": pose_v6_config.iterative.expert_resolution_ratio,
+                    "critical_temporal_context_seconds": pose_v6_config.iterative.critical_temporal_context_seconds,
                     "maximum_repair_iterations": pose_v6_config.iterative.maximum_repair_iterations,
                     "convergence_epsilon": pose_v6_config.iterative.convergence_epsilon,
                     "minimum_quality_gain": pose_v6_config.iterative.minimum_quality_gain,
                     "pass2_roi_scales": list(pose_v6_config.iterative.pass2_roi_scales),
                     "pass3_roi_scales": list(pose_v6_config.iterative.pass3_roi_scales),
+                    "expert_roi_scales": list(pose_v6_config.iterative.expert_roi_scales),
                     "expert_model_enabled": False,
+                    "expert_model_assessment": [
+                        candidate.to_dict() for candidate in expert_candidates
+                    ],
                     "rtmw_hard_frame_batching": "multi-bbox-single-call",
                     "inference_device": "cuda",
                 },
@@ -6322,6 +6463,15 @@ def process_pose_video(
                     record["bbox_source"] == BBoxSource.TRACK_PREDICTED.value
                     for record in body_records
                 ),
+                "detector_miss_while_track_locked_count": sum(
+                    not bool(record["raw_person_detected"])
+                    and bool(record["track_started"])
+                    and str(record["tracking_state"]) not in {
+                        TrackingState.LOST.value,
+                        TrackingState.REACQUIRING.value,
+                    }
+                    for record in body_records
+                ),
                 "person_switches": None,
                 "person_switch_measurement_available": False,
                 "partial_frames": partial_frames,
@@ -6346,6 +6496,11 @@ def process_pose_video(
                 "finger_rejections": finger_rejections,
                 "rescue": hand_rescue_summary,
                 "grip_v4": {
+                    "left": left_grip_v4.summary,
+                    "right": right_grip_v4.summary,
+                    "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
+                },
+                "grip_v5": {
                     "left": left_grip_v4.summary,
                     "right": right_grip_v4.summary,
                     "grip_valid_coverage_ratio": grip_valid_coverage_ratio,
@@ -6398,6 +6553,7 @@ def process_pose_video(
                 ],
             },
             "iterative_v64": iterative_v64_summary,
+            "iterative_v65": iterative_v65_summary,
             "temporal_v6": temporal_v6_summary,
             "render_v6": render_v6_summary,
             "timeline_v6": timeline_v6_summary,
@@ -6505,6 +6661,7 @@ def process_pose_video(
         "runtime_seconds": round(time.perf_counter() - processing_started_at, 4),
         "runtime_breakdown_seconds": runtime_breakdown,
         "iterative_v64": iterative_v64_summary,
+        "iterative_v65": iterative_v65_summary,
         "tracking": result_document["summary"]["tracking"],
         "scene_cut_count": scene_cut_count,
         "refinement": result_document["refinement"],
@@ -6945,7 +7102,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.4"
+        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.5"
     )
     parser.add_argument(
         "--once",

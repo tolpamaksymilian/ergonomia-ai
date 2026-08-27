@@ -56,4 +56,16 @@ def test_angle_confidence_exposes_temporal_stability_without_hiding_motion() -> 
     assert result.metric_frames[1]["trunk_inclination_deg"]["value"] == 22
 
 
+def test_angle_v3_reports_robust_uncertainty_without_3d_claim() -> None:
+    frames = [_metrics(value) for value in (55, 72, 94)]
+    result = stabilize_angle_sequence(
+        frames, [_temporal()] * 3, [0, .05, .1], ["FAST_MOTION"] * 3,
+    )
+    diagnostic = result.diagnostics[1]["left_elbow_flexion_deg"]
+    assert diagnostic["angle_uncertainty_degrees"] > 10.0
+    assert diagnostic["pass_ensemble_uncertainty_available"] is False
+    assert result.summary["angle_engine_version"] == "angle-engine-v3.0"
+    assert result.summary["full_3d_anatomical_angle_claimed"] is False
+
+
 import pytest

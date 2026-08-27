@@ -16,7 +16,7 @@ from typing import IO, Mapping, Sequence
 from dotenv import load_dotenv
 
 
-RELEASE_VERSION = "0.12.0-beta.1"
+RELEASE_VERSION = "0.13.0-beta.1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 WORKER_ROOT = REPOSITORY_ROOT / "worker"
 ENV_PATH = WORKER_ROOT / ".env"

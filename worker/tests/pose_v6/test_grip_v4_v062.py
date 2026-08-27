@@ -74,3 +74,12 @@ def test_grip_summary_reports_no_single_frame_flicker_after_hysteresis() -> None
     result = _run([(GripStateV2.OPEN, True)] * 3 + [(GripStateV2.CLOSED, True)] + [(GripStateV2.OPEN, True)] * 3)
     assert result.summary["single_frame_grip_flicker_count"] == 0
     assert result.summary["grip_temporal_stability_score"] == 1.0
+
+
+def test_grip_v5_reports_confidence_stability_and_landmark_coverage() -> None:
+    result = _run([(GripStateV2.OPEN, True)] * 3)
+    payload = result.frames[1].to_dict()
+    assert payload["grip_state_confidence"] == payload["confidence"]
+    assert payload["grip_state_stability"] == payload["temporal_stability"]
+    assert payload["grip_landmark_coverage"] == 1.0
+    assert result.summary["grip_engine_version"] == "grip-v5.0"

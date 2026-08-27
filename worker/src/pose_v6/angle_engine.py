@@ -1,4 +1,4 @@
-"""Angle Engine V2 diagnostics and conservative temporal glitch rejection."""
+"""Angle Engine V3 diagnostics and conservative temporal uncertainty."""
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ class AngleDiagnostic:
     provenance: AngleProvenance
     temporal_outlier_corrected: bool = False
     temporal_stability: float = 0.0
+    angle_uncertainty_degrees: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -57,6 +58,15 @@ class AngleDiagnostic:
             "provenance": self.provenance.value,
             "temporal_outlier_corrected": self.temporal_outlier_corrected,
             "temporal_stability": round(self.temporal_stability, 6),
+            "angle_uncertainty_degrees": (
+                round(self.angle_uncertainty_degrees, 6)
+                if self.angle_uncertainty_degrees is not None else None
+            ),
+            "uncertainty_source": (
+                "robust_final_skeleton_temporal_window"
+                if self.angle_uncertainty_degrees is not None else None
+            ),
+            "pass_ensemble_uncertainty_available": False,
         }
 
 
@@ -109,6 +119,7 @@ def stabilize_angle_sequence(
     diagnostics: list[dict[str, dict[str, object]]] = []
     usable = possible = 0
     stability_values: list[float] = []
+    uncertainty_values: list[float] = []
     for frame_index, (metrics, temporal) in enumerate(zip(output, temporal_frames)):
         frame_diagnostics: dict[str, dict[str, object]] = {}
         for name, dependencies in ANGLE_DEPENDENCIES.items():
@@ -126,17 +137,23 @@ def stabilize_angle_sequence(
             if corrected_here:
                 provenance = AngleProvenance.MIXED_RECONSTRUCTED
                 confidence *= 0.78
+            uncertainty = _temporal_angle_uncertainty(
+                output, frame_index, name, timestamps,
+            ) if analysis_usable else None
             frame_diagnostics[name] = AngleDiagnostic(
                 value, confidence, source_quality, analysis_usable,
                 provenance if analysis_usable else AngleProvenance.INSUFFICIENT,
                 corrected_here,
                 temporal_stability,
+                uncertainty,
             ).to_dict()
             if analysis_usable:
                 stability_values.append(temporal_stability)
+                if uncertainty is not None:
+                    uncertainty_values.append(uncertainty)
         diagnostics.append(frame_diagnostics)
     summary = {
-        "angle_engine_version": "angle-engine-v2.0",
+        "angle_engine_version": "angle-engine-v3.0",
         "angle_outlier_count": len(corrected),
         "angle_usable_coverage_ratio": round(usable / possible, 6) if possible else 0.0,
         "angles_evaluated_per_frame": len(ANGLE_DEPENDENCIES),
@@ -144,6 +161,13 @@ def stabilize_angle_sequence(
         "full_3d_anatomical_angle_claimed": False,
         "angle_temporal_stability_score": round(float(np.mean(stability_values)), 6) if stability_values else 0.0,
         "confidence_contract": "minimum_metric_and_source_quality_times_temporal_stability",
+        "angle_uncertainty_mean_degrees": round(
+            float(np.mean(uncertainty_values)), 6
+        ) if uncertainty_values else None,
+        "angle_uncertainty_p95_degrees": round(
+            float(np.percentile(uncertainty_values, 95)), 6
+        ) if uncertainty_values else None,
+        "uncertainty_is_accuracy": False,
     }
     return AngleEngineResult(output, diagnostics, summary)
 
@@ -208,3 +232,28 @@ def _temporal_angle_stability(
     if not rates:
         return 0.7
     return float(np.clip(1.0 - float(np.median(rates)) / 540.0, 0.0, 1.0))
+
+
+def _temporal_angle_uncertainty(
+    frames: Sequence[Mapping[str, Mapping[str, object]]],
+    index: int,
+    name: str,
+    timestamps: Sequence[float],
+    *,
+    window_seconds: float = 0.15,
+) -> float | None:
+    center_time = float(timestamps[index])
+    candidates = [
+        value
+        for neighbor, frame in enumerate(frames)
+        if abs(float(timestamps[neighbor]) - center_time) <= window_seconds + 1e-9
+        and (value := _valid_value(frame.get(name))) is not None
+    ]
+    if len(candidates) < 2:
+        return None
+    values = np.asarray(candidates, dtype=np.float64)
+    median = float(np.median(values))
+    robust_sigma = 1.4826 * float(np.median(np.abs(values - median)))
+    half_range = 0.5 * float(np.max(values) - np.min(values))
+    uncertainty = max(robust_sigma, half_range * 0.5)
+    return float(np.clip(uncertainty, 0.0, 180.0))

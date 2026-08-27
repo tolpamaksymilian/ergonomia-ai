@@ -1,4 +1,4 @@
-"""Pose V6.4 offline self-audit, consensus fusion and bounded repair.
+"""Pose V6.5 offline self-audit, consensus fusion and bounded repair.
 
 This module is deliberately model-agnostic.  The worker supplies RTMW and hand
 hypotheses; the functions below audit them, select hard segments and retain the
@@ -19,6 +19,115 @@ import numpy as np
 
 from .config import IterativeRefinementConfig
 from .temporal_reconstruction import PointSource, TemporalFrame
+
+
+class PoseAuditInputError(ValueError):
+    """Raised when an audit boundary receives an unsupported array contract."""
+
+    def __init__(
+        self,
+        *,
+        field: str,
+        actual_shape: tuple[int, ...],
+        expected_shape: str,
+        frame_index: int | None = None,
+    ) -> None:
+        location = f" at frame {frame_index}" if frame_index is not None else ""
+        super().__init__(
+            f"pose audit field {field!r}{location} has shape {actual_shape}; "
+            f"expected {expected_shape}"
+        )
+        self.field = field
+        self.actual_shape = actual_shape
+        self.expected_shape = expected_shape
+        self.frame_index = frame_index
+
+
+def normalize_joint_age_vector(
+    values: object,
+    joint_count: int,
+    *,
+    frame_index: int | None = None,
+) -> np.ndarray:
+    """Normalize supported prediction-age layouts to one value per joint.
+
+    Contract:
+    - canonical input/output: ``(joint,)``;
+    - historical coordinate-wise input: ``(joint, 1|2)`` and is reduced with
+      the conservative maximum finite age per joint;
+    - every other layout is rejected explicitly.  In particular, this helper
+      deliberately does not call ``squeeze`` or ``flatten``.
+    """
+
+    if joint_count < 0:
+        raise ValueError("joint_count cannot be negative")
+    return _normalize_joint_numeric_vector(
+        values,
+        joint_count,
+        field="prediction_ages",
+        frame_index=frame_index,
+    )
+
+
+def _normalize_joint_numeric_vector(
+    values: object,
+    joint_count: int,
+    *,
+    field: str,
+    frame_index: int | None,
+) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 1 and array.shape[0] >= joint_count:
+        return array[:joint_count].copy()
+    if (
+        array.ndim == 2
+        and array.shape[0] >= joint_count
+        and array.shape[1] in {1, 2}
+    ):
+        selected = array[:joint_count]
+        if selected.shape[1] == 1:
+            return selected[:, 0].copy()
+        finite = np.isfinite(selected)
+        reduced = np.full(joint_count, np.nan, dtype=np.float64)
+        available = np.any(finite, axis=1)
+        if np.any(available):
+            safe = np.where(finite[available], selected[available], -np.inf)
+            reduced[available] = np.max(safe, axis=1)
+        return reduced
+    raise PoseAuditInputError(
+        field=field,
+        actual_shape=tuple(int(value) for value in array.shape),
+        expected_shape=f"({joint_count},), ({joint_count}, 1), or ({joint_count}, 2)",
+        frame_index=frame_index,
+    )
+
+
+def normalize_joint_mask(
+    values: object,
+    joint_count: int,
+    *,
+    field: str = "joint_mask",
+    frame_index: int | None = None,
+) -> np.ndarray:
+    """Normalize a joint or coordinate mask to canonical ``(joint,)``."""
+
+    if joint_count < 0:
+        raise ValueError("joint_count cannot be negative")
+    array = np.asarray(values, dtype=bool)
+    if array.ndim == 1 and array.shape[0] >= joint_count:
+        return array[:joint_count].copy()
+    if (
+        array.ndim == 2
+        and array.shape[0] >= joint_count
+        and array.shape[1] in {1, 2}
+    ):
+        return np.any(array[:joint_count], axis=1)
+    raise PoseAuditInputError(
+        field=field,
+        actual_shape=tuple(int(value) for value in array.shape),
+        expected_shape=f"({joint_count},), ({joint_count}, 1), or ({joint_count}, 2)",
+        frame_index=frame_index,
+    )
 
 
 class PoseErrorCode(StrEnum):
@@ -42,9 +151,21 @@ class PoseErrorCode(StrEnum):
     PASS2_REGRESSION = "PASS2_REGRESSION"
 
 
+class Repairability(StrEnum):
+    REPAIRABLE = "REPAIRABLE"
+    UNCERTAIN = "UNCERTAIN"
+    NON_REPAIRABLE = "NON_REPAIRABLE"
+
+
 DEFAULT_BODY_BONES: tuple[tuple[int, int], ...] = (
     (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12),
     (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
+)
+COUPLED_JOINT_CHAINS: tuple[tuple[int, int, int], ...] = (
+    (5, 7, 9),
+    (6, 8, 10),
+    (11, 13, 15),
+    (12, 14, 16),
 )
 ANGLE_DEPENDENCIES: tuple[tuple[int, int, int], ...] = (
     (5, 7, 9), (6, 8, 10), (11, 13, 15), (12, 14, 16),
@@ -68,6 +189,15 @@ class PoseError:
     joint_indexes: tuple[int, ...]
     severity: float
     repairable: bool = True
+    error_confidence: float = 1.0
+
+    @property
+    def repairability(self) -> Repairability:
+        if not self.repairable:
+            return Repairability.NON_REPAIRABLE
+        if self.error_confidence < 0.65:
+            return Repairability.UNCERTAIN
+        return Repairability.REPAIRABLE
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -75,7 +205,11 @@ class PoseError:
             "code": self.code.value,
             "joint_indexes": list(self.joint_indexes),
             "severity": round(float(np.clip(self.severity, 0.0, 1.0)), 6),
+            "error_confidence": round(
+                float(np.clip(self.error_confidence, 0.0, 1.0)), 6
+            ),
             "repairable": self.repairable,
+            "repairability": self.repairability.value,
         }
 
 
@@ -151,7 +285,14 @@ class PoseAuditResult:
     def to_dict(self, *, include_frame_audit: bool = True) -> dict[str, object]:
         counts = Counter(error.code.value for error in self.errors)
         result: dict[str, object] = {
+            "quality_score_version": "pose-quality-v2",
             "quality_score": round(self.quality_score, 6),
+            "quality_score_is_accuracy": False,
+            "quality_components": [
+                "measurement_trust", "temporal_continuity", "bone_consistency",
+                "topology", "identity", "angular_continuity",
+                "model_agreement", "hand_agreement",
+            ],
             "error_count": len(self.errors),
             "error_counts": dict(sorted(counts.items())),
             "hard_segments": [item.to_dict() for item in self.hard_segments],
@@ -231,7 +372,15 @@ def audit_pose_sequence(
     point_sources: Sequence[Sequence[PointSource | str]] | None = None,
     body_joint_count: int = 17,
 ) -> PoseAuditResult:
-    """Build an explicit error map and padded hard segments for one hypothesis."""
+    """Build an explicit error map and padded hard segments for one hypothesis.
+
+    Array contract at this boundary:
+    ``points[frame]`` is ``(joint, xy)``, ``scores[frame]`` is ``(joint,)``,
+    ``prediction_ages[frame]`` and ``flow_errors[frame]`` are canonical
+    ``(joint,)`` vectors, and ``point_sources[frame]`` has one item per joint.
+    Prediction ages additionally accept the documented historical
+    ``(joint, 1|2)`` representation through :func:`normalize_joint_age_vector`.
+    """
 
     count = len(points)
     if not (
@@ -241,8 +390,50 @@ def audit_pose_sequence(
         raise ValueError("pose audit inputs must have equal lengths")
     if count == 0:
         return PoseAuditResult((), (), (), 0.0, (), ())
+    for field, values in (
+        ("motion_blur", motion_blur),
+        ("prediction_ages", prediction_ages),
+        ("flow_errors", flow_errors),
+        ("point_sources", point_sources),
+    ):
+        if values is not None and len(values) != count:
+            raise PoseAuditInputError(
+                field=field,
+                actual_shape=(len(values),),
+                expected_shape=f"({count}, ...)",
+            )
+    for field, values in (
+        ("hand_visible", hand_visible),
+        ("hand_quality_values", hand_quality_values),
+        ("grip_states", grip_states),
+        ("wrist_disagreement", wrist_disagreement),
+    ):
+        if values is not None:
+            for side, side_values in values.items():
+                if len(side_values) != count:
+                    raise PoseAuditInputError(
+                        field=f"{field}.{side}",
+                        actual_shape=(len(side_values),),
+                        expected_shape=f"({count},)",
+                    )
     arrays = [np.asarray(item, dtype=np.float32) for item in points]
     score_arrays = [np.asarray(item, dtype=np.float32) for item in scores]
+    for index, array in enumerate(arrays):
+        if array.ndim != 2 or array.shape[1] < 2:
+            raise PoseAuditInputError(
+                field="points",
+                actual_shape=tuple(int(value) for value in array.shape),
+                expected_shape="(joint, xy>=2)",
+                frame_index=index,
+            )
+    for index, array in enumerate(score_arrays):
+        if array.ndim != 1:
+            raise PoseAuditInputError(
+                field="scores",
+                actual_shape=tuple(int(value) for value in array.shape),
+                expected_shape="(joint,)",
+                frame_index=index,
+            )
     joint_count = min(body_joint_count, *(len(item) for item in score_arrays))
     bone_references = _bone_references(arrays, score_arrays, joint_count)
     angle_glitches = detect_angle_glitches(arrays, score_arrays, scene_cuts=scene_cuts)
@@ -332,19 +523,51 @@ def audit_pose_sequence(
         if model_disagreements is not None and index in model_disagreements:
             joints = tuple(sorted(int(value) for value in model_disagreements[index]))
             if joints:
-                errors.append(PoseError(index, PoseErrorCode.MODEL_DISAGREEMENT, joints, 0.60))
+                errors.append(PoseError(
+                    index, PoseErrorCode.MODEL_DISAGREEMENT, joints, 0.60,
+                    error_confidence=0.60,
+                ))
         if motion_blur is not None and bool(motion_blur[index]):
             errors.append(PoseError(index, PoseErrorCode.MOTION_BLUR, (), 0.55))
         if prediction_ages is not None:
-            ages = np.asarray(prediction_ages[index], dtype=np.float32)[:joint_count]
-            old = tuple(int(item) for item in np.flatnonzero(np.isfinite(ages) & (ages > 0.25)))
-            if old:
-                errors.append(PoseError(index, PoseErrorCode.PREDICTION_TOO_OLD, old, min(1.0, float(np.max(ages[old])))))
+            ages = normalize_joint_age_vector(
+                prediction_ages[index], joint_count, frame_index=index,
+            )
+            invalid_age = ~np.isfinite(ages) | (ages < 0.0)
+            old_mask = normalize_joint_mask(
+                invalid_age | (ages > 0.25),
+                joint_count,
+                field="prediction_age_old_mask",
+                frame_index=index,
+            )
+            old_indexes = np.flatnonzero(old_mask)
+            if old_indexes.size:
+                finite_old = ages[old_indexes]
+                finite_old = finite_old[np.isfinite(finite_old) & (finite_old >= 0.0)]
+                severity = (
+                    1.0
+                    if np.any(invalid_age[old_indexes]) or finite_old.size == 0
+                    else min(1.0, float(np.max(finite_old)))
+                )
+                errors.append(PoseError(
+                    index,
+                    PoseErrorCode.PREDICTION_TOO_OLD,
+                    tuple(int(item) for item in old_indexes),
+                    severity,
+                ))
         if flow_errors is not None:
-            values = np.asarray(flow_errors[index], dtype=np.float32)[:joint_count]
-            bad = tuple(int(item) for item in np.flatnonzero(np.isfinite(values) & (values > 2.5)))
-            if bad:
-                errors.append(PoseError(index, PoseErrorCode.FLOW_DISAGREEMENT, bad, min(1.0, float(np.max(values[bad]) / 6.0))))
+            values = _normalize_joint_numeric_vector(
+                flow_errors[index], joint_count,
+                field="flow_errors", frame_index=index,
+            )
+            bad_indexes = np.flatnonzero(np.isfinite(values) & (values > 2.5))
+            if bad_indexes.size:
+                errors.append(PoseError(
+                    index,
+                    PoseErrorCode.FLOW_DISAGREEMENT,
+                    tuple(int(item) for item in bad_indexes),
+                    min(1.0, float(np.max(values[bad_indexes]) / 6.0)),
+                ))
 
         hand_quality = 1.0
         if hand_visible is not None:
@@ -398,6 +621,7 @@ def audit_pose_sequence(
         tracking_states,
         padding_seconds=config.segment_padding_seconds,
         maximum_ratio=config.pass2_maximum_ratio,
+        minimum_error_confidence=config.minimum_repair_error_confidence,
     )
     quality_score = float(np.mean([item.quality_score for item in frame_audits]))
     return PoseAuditResult(
@@ -454,10 +678,18 @@ def group_hard_segments(
     *,
     padding_seconds: float,
     maximum_ratio: float,
+    minimum_error_confidence: float = 0.65,
 ) -> list[HardSegment]:
     if not frames:
         return []
-    difficult = [item.frame_index for item in frames if any(error.repairable for error in item.errors)]
+    difficult = [
+        item.frame_index
+        for item in frames
+        if any(
+            error.repairable and error.error_confidence >= minimum_error_confidence
+            for error in item.errors
+        )
+    ]
     if not difficult:
         return []
     durations = np.diff(np.asarray(timestamps, dtype=np.float64))
@@ -668,34 +900,48 @@ def optimize_global_trajectories(
     config: IterativeRefinementConfig,
     body_joint_count: int = 17,
     allowed_frame_indexes: set[int] | frozenset[int] | None = None,
+    timestamps: Sequence[float] | None = None,
 ) -> GlobalOptimizationResult:
-    """Confidence/source-weighted robust full-track coordinate descent.
+    """Confidence/source-weighted, joint-chain-aware coordinate descent.
 
-    It repairs isolated jerk against bidirectional context. Sustained fast
-    motion and high-confidence measured samples are anchors, not smoothing
-    targets. Every sweep is compared with the best state and rolled back when
-    the robust trajectory objective regresses.
+    It repairs isolated jerk against bidirectional, seconds-based context and
+    couples shoulder-elbow-wrist / hip-knee-ankle topology. Sustained fast
+    motion and high-confidence measured samples remain anchors. Every sweep is
+    compared with best-state history and rolled back on objective regression.
     """
 
     count = len(frames)
     if not (count == len(body_scales) == len(motion_states) == len(tracking_states) == len(scene_cuts)):
         raise ValueError("global optimization inputs must have equal lengths")
+    if timestamps is not None and len(timestamps) != count:
+        raise ValueError("global optimization timestamps must match frame count")
     if not frames:
         return GlobalOptimizationResult([], [], {
-            "version": "global-trajectory-optimization-v1", "iterations": 0,
+            "version": "global-trajectory-optimization-v2", "iterations": 0,
             "quality_score_before": 0.0, "quality_score_after": 0.0,
             "correction_count": 0, "rollback_count": 0, "converged": True,
         })
     working = [_copy_temporal_frame(frame) for frame in frames]
     best = [_copy_temporal_frame(frame) for frame in frames]
-    before_objective = _trajectory_objective(best, body_scales, motion_states, tracking_states, scene_cuts, body_joint_count)
+    measurement_reference = [_copy_temporal_frame(frame) for frame in frames]
+    reference_bones = _bone_references(
+        [frame.analysis_points for frame in frames],
+        [frame.analysis_scores for frame in frames],
+        body_joint_count,
+    )
+    before_objective = _trajectory_objective(
+        best, body_scales, motion_states, tracking_states, scene_cuts,
+        body_joint_count, measurement_reference=measurement_reference,
+    )
     best_objective = before_objective
     corrections = np.zeros((count, len(frames[0].analysis_scores)), dtype=np.int32)
     rollback_count = 0
     iteration_records: list[dict[str, object]] = []
     converged = False
+    coupled_chain_corrections = 0
     for iteration in range(1, config.maximum_repair_iterations + 1):
         changed = 0
+        candidate_chain_corrections = 0
         candidate = [_copy_temporal_frame(frame) for frame in working]
         candidate_corrections = corrections.copy()
         for index in range(1, count - 1):
@@ -707,8 +953,15 @@ def optimize_global_trajectories(
                 continue
             for joint in range(min(body_joint_count, len(candidate[index].analysis_scores))):
                 current = candidate[index]
-                previous = working[index - 1]
-                following = working[index + 1]
+                previous_index, following_index = _bidirectional_context_indexes(
+                    index,
+                    count,
+                    timestamps,
+                    config.critical_temporal_context_seconds,
+                    scene_cuts,
+                )
+                previous = working[previous_index]
+                following = working[following_index]
                 if not (current.analysis_usable[joint] and previous.analysis_usable[joint] and following.analysis_usable[joint]):
                     continue
                 source = current.sources[joint].value
@@ -721,20 +974,52 @@ def optimize_global_trajectories(
                 right_velocity = following.analysis_points[joint] - current.analysis_points[joint]
                 if _sustained_motion(left_velocity, right_velocity, body_scales[index], motion):
                     continue
-                expected = (previous.analysis_points[joint] + following.analysis_points[joint]) * 0.5
+                expected = _time_weighted_consensus(
+                    previous.analysis_points[joint],
+                    current.analysis_points[joint],
+                    following.analysis_points[joint],
+                    previous_index,
+                    index,
+                    following_index,
+                    timestamps,
+                )
                 residual = current.analysis_points[joint] - expected
                 normalized = float(np.linalg.norm(residual) / max(body_scales[index], 1.0))
                 if not math.isfinite(normalized) or normalized < 0.075:
                     continue
                 huber = min(1.0, 0.16 / max(normalized, 1e-6))
-                repair_weight = min(0.58, (1.0 - 0.72 * source_trust * score) * 0.50 * huber)
+                age = float(current.prediction_age_seconds[joint])
+                age_penalty = min(1.0, max(0.0, age) / 0.55) if math.isfinite(age) else 1.0
+                occluded = tracking_states[index].upper() in {"PARTIAL", "OCCLUDED"}
+                evidence_trust = source_trust * score * (1.0 - 0.35 * age_penalty)
+                repair_weight = min(
+                    0.62,
+                    (1.0 - 0.72 * evidence_trust)
+                    * (0.56 if occluded else 0.48)
+                    * huber,
+                )
+                if motion in {"FAST_MOTION", "EXTREME_MOTION"}:
+                    repair_weight *= 0.55
                 if source_trust >= 0.90:
                     repair_weight = min(repair_weight, 0.16)
                 repaired = current.analysis_points[joint] * (1.0 - repair_weight) + expected * repair_weight
                 _replace_temporal_joint(candidate[index], joint, repaired)
                 candidate_corrections[index, joint] += 1
                 changed += 1
-        objective = _trajectory_objective(candidate, body_scales, motion_states, tracking_states, scene_cuts, body_joint_count)
+            chain_changes = _project_coupled_chains(
+                candidate[index],
+                reference_bones,
+                motion_states[index],
+                body_joint_count,
+            )
+            for joint in chain_changes:
+                candidate_corrections[index, joint] += 1
+            changed += len(chain_changes)
+            candidate_chain_corrections += len(chain_changes)
+        objective = _trajectory_objective(
+            candidate, body_scales, motion_states, tracking_states, scene_cuts,
+            body_joint_count, measurement_reference=measurement_reference,
+        )
         quality_before = 1.0 / (1.0 + best_objective)
         quality_after = 1.0 / (1.0 + objective)
         decision = compare_iteration_quality(
@@ -746,6 +1031,7 @@ def optimize_global_trajectories(
             best_objective = objective
             working = candidate
             corrections = candidate_corrections
+            coupled_chain_corrections += candidate_chain_corrections
         else:
             if decision.rolled_back:
                 rollback_count += 1
@@ -765,8 +1051,20 @@ def optimize_global_trajectories(
         for index in range(count)
     ]
     return GlobalOptimizationResult(best, diagnostics, {
-        "version": "global-trajectory-optimization-v1",
-        "robust_loss": "huber-bidirectional-context",
+        "version": "global-trajectory-optimization-v2",
+        "robust_loss": "huber-bidirectional-chain-context",
+        "objective_terms": [
+            "measurement", "velocity", "acceleration", "jerk",
+            "bone_length", "joint_topology",
+        ],
+        "dynamic_weights": [
+            "source", "model_trust", "motion_state", "occlusion_state",
+            "prediction_age",
+        ],
+        "temporal_context_seconds": config.critical_temporal_context_seconds,
+        "bidirectional_consensus": True,
+        "coupled_joint_chains": [list(chain) for chain in COUPLED_JOINT_CHAINS],
+        "coupled_chain_correction_count": coupled_chain_corrections,
         "source_hierarchy_enforced": True,
         "iterations": len(iteration_records),
         "iteration_diagnostics": iteration_records,
@@ -969,6 +1267,147 @@ def _sustained_motion(
     return cosine > 0.45 and speed > threshold
 
 
+def _bidirectional_context_indexes(
+    index: int,
+    count: int,
+    timestamps: Sequence[float] | None,
+    context_seconds: float,
+    scene_cuts: Sequence[bool],
+) -> tuple[int, int]:
+    """Choose bounded past/future evidence using seconds, never crossing cuts."""
+
+    previous = index - 1
+    following = index + 1
+    if timestamps is None:
+        maximum_steps = max(1, int(round(context_seconds * 30.0)))
+        target_previous = max(0, index - maximum_steps)
+        target_following = min(count - 1, index + maximum_steps)
+    else:
+        target_previous = previous
+        target_following = following
+        for candidate in range(index - 1, -1, -1):
+            if scene_cuts[candidate + 1]:
+                break
+            if float(timestamps[index]) - float(timestamps[candidate]) <= context_seconds + 1e-9:
+                target_previous = candidate
+            else:
+                break
+        for candidate in range(index + 1, count):
+            if scene_cuts[candidate]:
+                break
+            if float(timestamps[candidate]) - float(timestamps[index]) <= context_seconds + 1e-9:
+                target_following = candidate
+            else:
+                break
+    if not _has_cut(scene_cuts, target_previous + 1, index):
+        previous = target_previous
+    if not _has_cut(scene_cuts, index + 1, target_following):
+        following = target_following
+    return previous, following
+
+
+def _time_weighted_consensus(
+    previous: np.ndarray,
+    current: np.ndarray,
+    following: np.ndarray,
+    previous_index: int,
+    current_index: int,
+    following_index: int,
+    timestamps: Sequence[float] | None,
+) -> np.ndarray:
+    """Interpolate the forward/backward estimates at the current instant."""
+
+    if timestamps is None:
+        denominator = following_index - previous_index
+        ratio = (
+            (current_index - previous_index) / denominator
+            if denominator > 0 else 0.5
+        )
+    else:
+        before = float(timestamps[previous_index])
+        after = float(timestamps[following_index])
+        ratio = (
+            (float(timestamps[current_index]) - before) / (after - before)
+            if math.isfinite(before) and math.isfinite(after) and after > before
+            else 0.5
+        )
+    ratio = float(np.clip(ratio, 0.0, 1.0))
+    temporal = previous * (1.0 - ratio) + following * ratio
+    # Current contributes only a small robust anchor. The repair weight applied
+    # by the caller still decides how far the candidate may move.
+    return (temporal * 0.88 + current * 0.12).astype(np.float32)
+
+
+def _project_coupled_chains(
+    frame: TemporalFrame,
+    bone_references: Mapping[tuple[int, int], float],
+    motion_state: str,
+    body_joint_count: int,
+) -> set[int]:
+    """Apply a bounded topology correction to complete limb chains."""
+
+    changed: set[int] = set()
+    for first, middle, last in COUPLED_JOINT_CHAINS:
+        if last >= body_joint_count or not all(
+            frame.analysis_usable[joint] for joint in (first, middle, last)
+        ):
+            continue
+        first_length = bone_references.get((first, middle))
+        second_length = bone_references.get((middle, last))
+        if first_length is None or second_length is None:
+            continue
+        first_vector = frame.analysis_points[middle] - frame.analysis_points[first]
+        second_vector = frame.analysis_points[last] - frame.analysis_points[middle]
+        first_actual = float(np.linalg.norm(first_vector))
+        second_actual = float(np.linalg.norm(second_vector))
+        if min(first_actual, second_actual, first_length, second_length) <= 1e-6:
+            continue
+        first_error = abs(first_actual - first_length) / first_length
+        second_error = abs(second_actual - second_length) / second_length
+        if max(first_error, second_error) < 0.14:
+            continue
+        source_trust = min(
+            SOURCE_TRUST.get(frame.sources[joint].value, 0.25)
+            * float(frame.analysis_scores[joint])
+            for joint in (middle, last)
+        )
+        if (
+            motion_state.upper() in {"FAST_MOTION", "EXTREME_MOTION"}
+            and source_trust >= 0.55
+        ):
+            continue
+        weight = min(0.30, 0.10 + 0.25 * (1.0 - source_trust))
+        middle_target = (
+            frame.analysis_points[first]
+            + first_vector / first_actual * first_length
+        )
+        middle_value = (
+            frame.analysis_points[middle] * (1.0 - weight)
+            + middle_target * weight
+        )
+        last_target = middle_value + second_vector / second_actual * second_length
+        last_value = (
+            frame.analysis_points[last] * (1.0 - weight)
+            + last_target * weight
+        )
+        _replace_temporal_joint(frame, middle, middle_value.astype(np.float32))
+        _replace_temporal_joint(frame, last, last_value.astype(np.float32))
+        changed.update((middle, last))
+    return changed
+
+
+def _chain_angle(
+    points: np.ndarray, first: int, middle: int, last: int,
+) -> float | None:
+    first_vector = points[first] - points[middle]
+    second_vector = points[last] - points[middle]
+    denominator = float(np.linalg.norm(first_vector) * np.linalg.norm(second_vector))
+    if denominator <= 1e-8 or not np.isfinite(first_vector).all() or not np.isfinite(second_vector).all():
+        return None
+    cosine = float(np.clip(np.dot(first_vector, second_vector) / denominator, -1.0, 1.0))
+    return math.degrees(math.acos(cosine))
+
+
 def _trajectory_objective(
     frames: Sequence[TemporalFrame],
     body_scales: Sequence[float],
@@ -976,6 +1415,8 @@ def _trajectory_objective(
     tracking_states: Sequence[str],
     scene_cuts: Sequence[bool],
     body_joint_count: int,
+    *,
+    measurement_reference: Sequence[TemporalFrame] | None = None,
 ) -> float:
     residuals: list[float] = []
     bone_references: dict[tuple[int, int], float] = {}
@@ -1004,7 +1445,25 @@ def _trajectory_objective(
             delta = 0.12
             huber = 0.5 * jerk * jerk if jerk <= delta else delta * (jerk - 0.5 * delta)
             trust = SOURCE_TRUST.get(frames[index].sources[joint].value, 0.25)
-            residuals.append(huber * (1.15 - 0.35 * trust))
+            motion_factor = 0.42 if motion_states[index].upper() in {"FAST_MOTION", "EXTREME_MOTION"} else 1.0
+            residuals.append(huber * (1.15 - 0.35 * trust) * motion_factor)
+            velocity_scale = max(body_scales[index], 1.0)
+            residuals.append(0.20 * motion_factor * abs(float(np.linalg.norm(left)) - float(np.linalg.norm(right))) / velocity_scale)
+            if measurement_reference is not None and frames[index].analysis_usable[joint]:
+                measurement_delta = float(np.linalg.norm(
+                    frames[index].analysis_points[joint]
+                    - measurement_reference[index].analysis_points[joint]
+                )) / velocity_scale
+                age = float(frames[index].prediction_age_seconds[joint])
+                age_factor = 1.0 - min(0.75, max(0.0, age) / 0.55) if math.isfinite(age) else 0.25
+                residuals.append(0.18 * trust * age_factor * measurement_delta)
+            if 1 < index < len(frames) - 2 and not scene_cuts[index - 1] and not scene_cuts[index + 2]:
+                previous_velocity = frames[index - 1].analysis_points[joint] - frames[index - 2].analysis_points[joint]
+                following_velocity = frames[index + 2].analysis_points[joint] - frames[index + 1].analysis_points[joint]
+                jerk_residual = float(np.linalg.norm(
+                    (right - left) - (following_velocity - previous_velocity) * 0.5
+                )) / velocity_scale
+                residuals.append(0.12 * motion_factor * min(jerk_residual, 1.0))
         for (first, second), reference in bone_references.items():
             if not (frames[index].analysis_usable[first] and frames[index].analysis_usable[second]):
                 continue
@@ -1015,15 +1474,32 @@ def _trajectory_objective(
             delta = 0.20
             huber = 0.5 * relative * relative if relative <= delta else delta * (relative - 0.5 * delta)
             residuals.append(0.8 * huber)
+        for first, middle, last in COUPLED_JOINT_CHAINS:
+            if last >= body_joint_count or not all(
+                frames[index].analysis_usable[joint]
+                for joint in (first, middle, last)
+            ):
+                continue
+            current_angle = _chain_angle(frames[index].analysis_points, first, middle, last)
+            previous_angle = _chain_angle(frames[index - 1].analysis_points, first, middle, last)
+            following_angle = _chain_angle(frames[index + 1].analysis_points, first, middle, last)
+            if None not in (current_angle, previous_angle, following_angle):
+                topology_residual = abs(
+                    float(current_angle) - (float(previous_angle) + float(following_angle)) * 0.5
+                ) / 180.0
+                residuals.append(0.35 * min(topology_residual, 1.0))
     return float(np.mean(residuals)) if residuals else 0.0
 
 
 __all__ = [
     "ConsensusFusionResult", "FrameAudit", "GlobalOptimizationResult",
     "HardSegment", "IterationDecision", "PoseAuditResult", "PoseError",
+    "Repairability",
     "PoseErrorCode", "PoseHypothesis", "audit_pose_sequence",
     "compare_iteration_quality", "detect_angle_glitches",
     "detect_grip_flicker", "fuse_pose_hypotheses", "group_hard_segments",
-    "optimize_global_trajectories", "select_critical_segments",
+    "normalize_joint_age_vector", "normalize_joint_mask",
+    "optimize_global_trajectories", "PoseAuditInputError",
+    "select_critical_segments",
     "select_best_iteration",
 ]

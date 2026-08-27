@@ -22,5 +22,5 @@ use valid Angle Engine values calculated from the analysis skeleton.
   diagnostics.
 
 Hand landmark geometry may be translated toward the RTMW wrist only when the
-Grip V4 alignment gate accepts the assignment. It is never relabeled as a body
+Grip V5 alignment gate accepts the assignment. It is never relabeled as a body
 measurement.

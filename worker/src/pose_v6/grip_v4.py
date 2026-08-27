@@ -1,4 +1,4 @@
-"""Temporal Grip V4 built on validated MediaPipe hand geometry."""
+"""Temporal Grip V5 built on validated multi-pass hand geometry."""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ class GripFrameV4:
     candidate_state: GripStateV4
     palm_quality: float
     finger_quality: float
+    landmark_coverage: float
     object_evidence: float
     temporal_stability: float
     occluded: bool
@@ -59,8 +60,11 @@ class GripFrameV4:
             "candidate_state": self.candidate_state.value,
             "palm_quality": round(self.palm_quality, 6),
             "finger_quality": round(self.finger_quality, 6),
+            "grip_landmark_coverage": round(self.landmark_coverage, 6),
             "object_evidence": round(self.object_evidence, 6),
             "temporal_stability": round(self.temporal_stability, 6),
+            "grip_state_confidence": round(self.confidence, 6),
+            "grip_state_stability": round(self.temporal_stability, 6),
             "occluded": self.occluded,
             "wrist_alignment": self.wrist_alignment,
             "features": self.features,
@@ -107,6 +111,9 @@ def analyze_grip_v4(
         palm_quality = float(np.clip(graph.palm_quality, 0.0, 1.0))
         finger_values = [value.quality for value in graph.fingers.values() if value.state != FingerVisibility.LOST]
         finger_quality = float(np.mean(finger_values)) if finger_values else 0.0
+        landmark_coverage = (
+            len(finger_values) / len(graph.fingers) if graph.fingers else 0.0
+        )
         object_evidence = _object_evidence(graph)
         trustworthy = graph.visible and palm_quality >= 0.45 and finger_quality >= 0.35
         if not trustworthy:
@@ -143,6 +150,7 @@ def analyze_grip_v4(
             confidence *= max(0.25, 1.0 - unknown_seconds / max(maximum_unknown_gap_seconds, 1e-6))
         output.append(GripFrameV4(
             confirmed, confidence, raw_candidate, palm_quality, finger_quality,
+            landmark_coverage,
             object_evidence, temporal_stability, raw_candidate == GripStateV4.UNKNOWN,
             wrist_alignment_diagnostic(side, graph, temporal_frames[index]),
             _features(graph),
@@ -224,6 +232,16 @@ def summarize_grip_v4(frames: Sequence[GripFrameV4], durations: Sequence[float])
         "grip_temporal_stability_score": round(
             max(0.0, 1.0 - single_frame_flicker_count / max(1, len(frames) - 2)), 6
         ) if frames else 0.0,
+        "grip_state_confidence_mean": round(
+            float(np.mean([frame.confidence for frame in frames])), 6
+        ) if frames else 0.0,
+        "grip_state_stability_mean": round(
+            float(np.mean([frame.temporal_stability for frame in frames])), 6
+        ) if frames else 0.0,
+        "grip_landmark_coverage_ratio": round(
+            float(np.mean([frame.landmark_coverage for frame in frames])), 6
+        ) if frames else 0.0,
+        "grip_engine_version": "grip-v5.0",
     }
 
 

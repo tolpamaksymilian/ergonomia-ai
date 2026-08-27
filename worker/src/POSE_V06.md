@@ -1,7 +1,14 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: worker `0.12.0-beta.1`, Pose `pose-v6.4.0-beta.1`, schema `6.0`.
+Wersje: worker `0.13.0-beta.1`, Pose `pose-v6.5.0-beta.1`, schema `6.0`.
 Wersja aplikacji nie jest zmieniana przez iterację worker-only.
+
+Minor `6.5` naprawia produkcyjny crash finalnego audytu dla wielu jointów z
+przekroczonym wiekiem predykcji, formalizuje kontrakty kształtów i oddziela
+opcjonalną diagnostykę od obowiązkowej walidacji finalnej geometrii. Profil
+`ULTRA` zwiększa wyłącznie selektywny budżet ROI, kontekst czasowy i iteracje
+solvera. Globalny solver V2 uwzględnia łańcuchy kończyn, a Angle V3 i Grip V5
+dodają jawne miary niepewności/pokrycia bez deklaracji accuracy.
 
 Minor `6.4` dodaje sterowany mapą błędów Pass 2 i Pass 3, wieloskalowy konsensus
 per joint, porównanie jakości z rollbackiem i warunkiem zbieżności, ograniczony
