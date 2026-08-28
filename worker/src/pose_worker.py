@@ -49,6 +49,16 @@ from pose_v3.tracking import (
 )
 from ergonomics.processor import compute_overlay_metrics_from_frame
 try:
+    from worker.src.pose_artifact_storage import (
+        compress_json_artifact,
+        upload_compressed_json,
+    )
+except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution
+    from pose_artifact_storage import (
+        compress_json_artifact,
+        upload_compressed_json,
+    )
+try:
     from worker.src.pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
     from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
     from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
@@ -7762,6 +7772,7 @@ def upload_pose_results(
     settings: PoseWorkerSettings,
     analysis: dict[str, Any],
     result: PoseProcessingResult,
+    logger: logging.Logger,
 ) -> tuple[str, str, str]:
     user_id = str(analysis["user_id"])
     analysis_id = str(analysis["id"])
@@ -7779,12 +7790,44 @@ def upload_pose_results(
         video_storage_path,
         "video/mp4",
     )
-    upload_result_file(
-        supabase,
-        settings.results_bucket,
+    json_size_bytes = result.json_path.stat().st_size
+    logger.info(
+        "Pose JSON przed uploadem: bytes=%d MB=%.3f path=%s",
+        json_size_bytes,
+        json_size_bytes / (1024 * 1024),
         result.json_path,
-        json_storage_path,
-        "application/json",
+    )
+    compressed_json = compress_json_artifact(result.json_path, json_storage_path)
+    logger.info(
+        "Pose JSON po gzip: bytes=%d MB=%.3f path=%s storage_path=%s",
+        compressed_json.compressed_size_bytes,
+        compressed_json.compressed_size_bytes / (1024 * 1024),
+        compressed_json.compressed_path,
+        compressed_json.storage_path,
+    )
+    try:
+        upload_compressed_json(
+            supabase.storage.from_(settings.results_bucket),
+            compressed_json,
+        )
+    except Exception:
+        logger.exception(
+            "Upload skompresowanego Pose JSON nie powiódł się: "
+            "source_bytes=%d gzip_bytes=%d path=%s storage_path=%s. "
+            "Lokalne artefakty zostają zachowane.",
+            compressed_json.source_size_bytes,
+            compressed_json.compressed_size_bytes,
+            compressed_json.compressed_path,
+            compressed_json.storage_path,
+        )
+        raise
+    json_storage_path = compressed_json.storage_path
+    diagnostics_size_bytes = result.diagnostics_path.stat().st_size
+    logger.info(
+        "Pose diagnostics przed uploadem: bytes=%d MB=%.3f path=%s",
+        diagnostics_size_bytes,
+        diagnostics_size_bytes / (1024 * 1024),
+        result.diagnostics_path,
     )
     upload_result_file(
         supabase,
@@ -7884,6 +7927,7 @@ def process_analysis(
         parents=True,
         exist_ok=True,
     )
+    preserve_job_directory = False
 
     logger.info(
         "Rozpoczynam Pose Pipeline V6 / Worker %s: %s — %s",
@@ -7952,16 +7996,21 @@ def process_analysis(
             "uploading-pose-results-v6",
         )
 
-        (
-            video_storage_path,
-            json_storage_path,
-            thumbnail_storage_path,
-        ) = upload_pose_results(
-            supabase,
-            settings,
-            analysis,
-            result,
-        )
+        try:
+            (
+                video_storage_path,
+                json_storage_path,
+                thumbnail_storage_path,
+            ) = upload_pose_results(
+                supabase,
+                settings,
+                analysis,
+                result,
+                logger,
+            )
+        except Exception:
+            preserve_job_directory = True
+            raise
 
         update_progress(
             supabase,
@@ -8011,6 +8060,7 @@ def process_analysis(
         if (
             job_directory.exists()
             and not settings.keep_worker_files
+            and not preserve_job_directory
         ):
             shutil.rmtree(
                 job_directory,

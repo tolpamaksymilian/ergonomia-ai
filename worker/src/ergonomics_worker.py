@@ -30,6 +30,10 @@ from ergonomics.integration import (
 )
 from ergonomics.processor import process_pose_file
 from ergonomics.schemas import METRIC_NAMES
+try:
+    from worker.src.pose_artifact_storage import decompress_json_payload
+except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution
+    from pose_artifact_storage import decompress_json_payload
 
 
 WORKER_DIRECTORY = Path(__file__).resolve().parents[1]
@@ -233,7 +237,13 @@ def download_pose_document(
         raise EmptyPoseFileError("Pobrany pose-keypoints.json jest pusty.")
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    destination_path.write_bytes(payload)
+    try:
+        decoded_payload = decompress_json_payload(payload)
+    except (OSError, EOFError) as error:
+        raise InvalidPoseJsonError(
+            f"Nie można zdekompresować pose-keypoints.json.gz: {error}"
+        ) from error
+    destination_path.write_bytes(decoded_payload)
     if destination_path.stat().st_size <= 0:
         raise EmptyPoseFileError("Zapisany pose-keypoints.json jest pusty.")
 
