@@ -134,12 +134,37 @@ class IterativeRefinementConfig:
 
 
 @dataclass(frozen=True)
+class HighMotionConfig:
+    enabled: bool = True
+    temporal_supersampling_factor: int = 3
+    limb_crop_scales: tuple[float, ...] = (1.0, 1.20)
+    maximum_endpoint_age_delta_seconds: float = 0.075
+    minimum_image_evidence_quality: float = 0.18
+    maximum_rtmw_batch_size: int = 8
+
+    def validate(self) -> None:
+        if self.temporal_supersampling_factor not in {1, 2, 3, 4, 5}:
+            raise ValueError("temporal supersampling factor must be in range 1..5")
+        if not self.limb_crop_scales:
+            raise ValueError("high-motion limb crop scales cannot be empty")
+        if any(not 0.8 <= value <= 1.6 for value in self.limb_crop_scales):
+            raise ValueError("high-motion limb crop scales must be in range 0.8..1.6")
+        if not 0.0 <= self.maximum_endpoint_age_delta_seconds <= 0.25:
+            raise ValueError("endpoint age delta must be in range 0..0.25")
+        if not 0.0 <= self.minimum_image_evidence_quality <= 1.0:
+            raise ValueError("minimum image evidence quality must be in range 0..1")
+        if not 1 <= self.maximum_rtmw_batch_size <= 32:
+            raise ValueError("RTMW batch size must be in range 1..32")
+
+
+@dataclass(frozen=True)
 class PoseV6Config:
     profile: str = "ACCURATE"
     temporal: TemporalPolicy = field(default_factory=TemporalPolicy)
     optical_flow: OpticalFlowConfig = field(default_factory=OpticalFlowConfig)
     motion: MotionConfig = field(default_factory=MotionConfig)
     iterative: IterativeRefinementConfig = field(default_factory=IterativeRefinementConfig)
+    high_motion: HighMotionConfig = field(default_factory=HighMotionConfig)
     recovery_roi_scale: float = 1.22
     refinement_fast_motion_enabled: bool = True
 
@@ -152,6 +177,7 @@ class PoseV6Config:
         self.optical_flow.validate()
         self.motion.validate()
         self.iterative.validate()
+        self.high_motion.validate()
 
 
 def load_pose_v6_config() -> PoseV6Config:
@@ -208,6 +234,28 @@ def load_pose_v6_config() -> PoseV6Config:
                 (0.80, 0.85, 0.92, 1.0, 1.08, 1.18, 1.30, 1.45, 1.60, 1.72)
                 if ultra else (0.85, 0.92, 1.0, 1.15, 1.30, 1.45, 1.60)
             ),
+        ),
+        high_motion=HighMotionConfig(
+            enabled=_boolean("POSE_HIGH_MOTION_RECOVERY_ENABLED", True),
+            temporal_supersampling_factor=int(_number(
+                "POSE_TEMPORAL_SUPERSAMPLING_FACTOR",
+                5.0 if ultra else (1.0 if balanced else 3.0),
+                1.0,
+                5.0,
+            )),
+            limb_crop_scales=(
+                (0.92, 1.0, 1.20, 1.40)
+                if ultra else ((1.0,) if balanced else (1.0, 1.20))
+            ),
+            maximum_endpoint_age_delta_seconds=_number(
+                "POSE_ENDPOINT_AGE_DELTA_SECONDS", 0.075, 0.0, 0.25,
+            ),
+            minimum_image_evidence_quality=_number(
+                "POSE_MIN_IMAGE_EVIDENCE_QUALITY", 0.18, 0.0, 1.0,
+            ),
+            maximum_rtmw_batch_size=int(_number(
+                "POSE_RTM_MAX_BATCH_SIZE", 8.0, 1.0, 32.0,
+            )),
         ),
         recovery_roi_scale=_number("POSE_RECOVERY_ROI_SCALE", 1.22, 1.0, 2.0),
         refinement_fast_motion_enabled=_boolean("POSE_REFINEMENT_FAST_MOTION_ENABLED", True),

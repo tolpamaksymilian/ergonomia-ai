@@ -1,9 +1,61 @@
-# Pose Pipeline V6.5 — deep offline analysis and production hardening
+# Pose Pipeline V6.6 — high-motion master quality pass
 
 Pose V6 extends the existing YOLOX-X, RTMW WholeBody, MediaPipe hand and
 biomechanical validation pipeline. It does not change the AI models. Its role
 is to preserve the identity and visual continuity of the locked worker during
 short detector/keypoint gaps while keeping analytical provenance explicit.
+
+## V6.6 high-motion contract
+
+V6.6 targets rare but visually catastrophic limb failures rather than average
+coverage. Every final bone carries endpoint effective time, prediction age,
+source pass, track ID and coordinate space. `AtomicBoneEndpointContract`
+rejects different-time, non-original-pixel and catastrophic-length endpoint
+pairs. `LimbChainConsistencyPass` then repairs shoulder–elbow–wrist or
+hip–knee–ankle as one chain, or removes the unsafe distal segment. It never
+connects one current endpoint to one stale endpoint. The renderer receives a
+single frozen final skeleton and may only hold/predict both endpoints together.
+
+All RTMLib observations are declared as source-image `ORIGINAL_PIXELS`.
+`coordinate_space.py` provides invertible original/crop/model/normalized
+transforms and enforces a one-conversion rule. RTMLib's top-down bbox API
+already maps its output back to source pixels, so the V6.6 limb pass does not
+apply a second crop offset.
+
+FAST/EXTREME motion and audited critical frames receive a selective
+`HighMotionRecoveryPass`. It uses previous/current/future native observations,
+support-only temporal trajectories, motion-aware whole-chain crops and
+multi-scale RTMW inference. Candidate trust combines model quality, native
+image evidence, bidirectional trajectory agreement, canonical bone lengths and
+a velocity-directional reach gate. The arm crop changes only arm joints and the
+leg crop only its leg/foot joints. RTMW crop batches default to eight and are
+split on an explicit CUDA OOM signal; the profile is not silently downgraded.
+
+ACCURATE creates 3x temporal trajectory support and uses two limb crop scales.
+ULTRA creates 5x support and uses four crop scales. BALANCED uses factor 1.
+Synthetic samples have provenance `TEMPORAL_SUPERSAMPLE_SUPPORT`, are never
+measurements and never increase the coverage denominator. They guide search
+direction; final native-frame results remain validated against native
+RTMW/image evidence. No pixel-level RIFE result is claimed: the repository has
+no validated interpolation weights/backend, so V6.6 uses bounded Hermite
+trajectory support instead.
+
+`ffprobe` best-effort PTS drives native timestamps when available; constant FPS
+is an explicit diagnostic fallback. Every frame in the selected native active
+range is read once in Pass 1, without a hidden inference stride. Motion,
+velocity, acceleration and jerk use real timestamp deltas.
+
+Motion blur is a technical local-edge evidence indicator, not a probability.
+Strong blur lowers RTMW trust and increases reliance on sharp-neighbour
+bidirectional support, but synthetic pixels are not presented as measurements.
+
+The existing pyramidal LK forward/backward cycle remains the validated flow
+backend. RAFT/GMFlow and a person-mask expert were not enabled because no local,
+licensed/configured weights and same-video benchmark exist. ViTPose-H,
+DWPose WholeBody and RTMPose-X are likewise reported in the model decision
+matrix but remain disabled until weights, canonical mapping, VRAM and a real
+same-video benchmark are validated. RTMW-DW-X-L 384x288 remains primary and is
+actually executed for the selective V6.6 limb re-pass.
 
 ## Quality contract
 
@@ -124,7 +176,7 @@ reset continuity.
 The defaults target the `ACCURATE` profile. The small optional surface is
 documented in `worker/.env.example`: recovery/hard-lost/interpolation/render
 times, optical-flow validation, fast-motion threshold, recovery ROI scale and
-the bounded V6.5 pass/repair budgets. `POSE_V6_PROFILE=ACCURATE` remains the
+the bounded V6.5/V6.6 pass/repair budgets. `POSE_V6_PROFILE=ACCURATE` remains the
 default. `ULTRA` increases selective ROI variants, temporal context and solver
 iterations without repeatedly processing the whole film. The quality score is
 a technical internal data score, not accuracy.
@@ -159,3 +211,17 @@ Synthetic tests validate detector gaps, bbox prediction, scene-cut/hard-lost
 boundaries, interpolation, optical-flow validation, kinematic reconstruction,
 fast motion, persistent per-bone rendering, geometry jumps, angle glitches and
 grip hysteresis/occlusion. They do not require GPU models.
+
+The V6.6 regression suite additionally covers crop round trips, double
+conversion, endpoint-age mismatch, wrong high-confidence ankle, true fast arm
+and leg motion, 5x support provenance, blur support, atomic rendering,
+immutable final skeletons and a complete synthetic high-motion chain-to-render
+path. A local real-video comparison can be run with:
+
+```powershell
+worker\.venv\Scripts\python.exe worker\tools\analyze_local_video.py `
+  --input C:\path\sample.mp4 --output .runtime\pose-v66 --compare-profiles
+```
+
+It writes `accurate/`, `ultra/`, `comparison.json`, `comparison.md` and up to
+30 original/overlay/debug/reason bundles in each `worst-frames/` directory.

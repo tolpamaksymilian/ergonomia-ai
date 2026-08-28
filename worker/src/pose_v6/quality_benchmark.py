@@ -45,6 +45,20 @@ KPI_NAMES = (
     "hand_ms",
     "render_ms",
     "total_ms",
+    "high_motion_pass_ms",
+    "catastrophic_bone_outlier_count",
+    "final_limb_chain_break_count",
+    "main_skeleton_high_motion_coverage_ratio",
+    "high_motion_geometry_valid_ratio",
+    "wrist_high_motion_valid_ratio",
+    "ankle_high_motion_valid_ratio",
+    "high_motion_repair_success_ratio",
+    "temporal_supersample_usage_ratio",
+    "deep_flow_usage_ratio",
+    "expert_pose_usage_ratio",
+    "worst_1_percent_frame_quality",
+    "bone_length_residual_percentile_95",
+    "bone_length_residual_percentile_99",
 )
 
 

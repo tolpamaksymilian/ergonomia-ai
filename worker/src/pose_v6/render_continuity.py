@@ -31,6 +31,9 @@ class PersistentBone:
     source: RenderSource
     age_seconds: float
     safety_rejected: bool
+    rejection_reason: str | None = None
+    endpoint_age_delta: float = 0.0
+    bone_length_ratio_to_canonical: float | None = None
 
     @property
     def visible(self) -> bool:
@@ -61,6 +64,8 @@ class _Memory:
     timestamp: float | None = None
     measured_timestamp: float | None = None
     confidence: float = 0.0
+    track_id: str | None = None
+    bone_length_ratio_to_canonical: float | None = None
 
 
 class PersistentBoneRenderer:
@@ -92,12 +97,26 @@ class PersistentBoneRenderer:
         frame_height: int,
         hard_lost: bool = False,
         scene_cut: bool = False,
+        atomic_accepted: bool = True,
+        atomic_reason: str | None = None,
+        endpoint_age_delta: float = 0.0,
+        bone_length_ratio_to_canonical: float | None = None,
+        track_id: str | None = None,
     ) -> PersistentBone:
         if scene_cut:
             self.reset()
         memory = self._memory.setdefault(name, _Memory())
+        if (
+            memory.track_id is not None
+            and track_id is not None
+            and memory.track_id != track_id
+        ):
+            memory = _Memory()
+            self._memory[name] = memory
         source = _combined_source(first_source, second_source)
-        direct_safe = _safe_segment(first, second, expected_length, frame_width, frame_height)
+        direct_safe = atomic_accepted and _safe_segment(
+            first, second, expected_length, frame_width, frame_height,
+        )
         direct = first is not None and second is not None and confidence >= self.minimum_quality and direct_safe
         if direct:
             first_array = np.asarray(first, dtype=np.float32)
@@ -108,15 +127,30 @@ class PersistentBoneRenderer:
                 memory.second_velocity = (second_array - memory.second) / delta
             memory.first = first_array.copy(); memory.second = second_array.copy()
             memory.bbox = _bbox(bbox); memory.timestamp = timestamp_seconds
+            memory.track_id = track_id
             if source != RenderSource.KINEMATIC_PREDICTED or memory.measured_timestamp is None:
                 memory.measured_timestamp = timestamp_seconds
             memory.confidence = float(np.clip(confidence, 0.0, 1.0))
-            return PersistentBone(name, _point(first_array), _point(second_array), 1.0, memory.confidence, source, 0.0, False)
+            memory.bone_length_ratio_to_canonical = bone_length_ratio_to_canonical
+            return PersistentBone(
+                name, _point(first_array), _point(second_array), 1.0,
+                memory.confidence, source, 0.0, False, None,
+                endpoint_age_delta, bone_length_ratio_to_canonical,
+            )
         if memory.first is None or memory.second is None or memory.measured_timestamp is None:
-            return PersistentBone(name, None, None, 0.0, 0.0, RenderSource.HIDDEN, 0.0, first is not None and second is not None and not direct_safe)
+            return PersistentBone(
+                name, None, None, 0.0, 0.0, RenderSource.HIDDEN, 0.0,
+                first is not None and second is not None and not direct_safe,
+                atomic_reason if not atomic_accepted else "GEOMETRY_SAFETY_REJECTED",
+                endpoint_age_delta, bone_length_ratio_to_canonical,
+            )
         age = max(0.0, timestamp_seconds - memory.measured_timestamp)
         if hard_lost or age > self.persistence_seconds:
-            return PersistentBone(name, None, None, 0.0, 0.0, RenderSource.HIDDEN, age, False)
+            return PersistentBone(
+                name, None, None, 0.0, 0.0, RenderSource.HIDDEN, age,
+                not atomic_accepted, atomic_reason,
+                endpoint_age_delta, bone_length_ratio_to_canonical,
+            )
         previous_timestamp = memory.timestamp if memory.timestamp is not None else timestamp_seconds
         delta = max(0.0, timestamp_seconds - previous_timestamp)
         predicted_first = memory.first + memory.first_velocity * delta
@@ -132,13 +166,22 @@ class PersistentBoneRenderer:
         )
         safe = _safe_segment(predicted_first, predicted_second, expected_length, frame_width, frame_height)
         if not safe:
-            return PersistentBone(name, None, None, 0.0, 0.0, RenderSource.HIDDEN, age, True)
+            return PersistentBone(
+                name, None, None, 0.0, 0.0, RenderSource.HIDDEN, age, True,
+                atomic_reason or "PREDICTED_GEOMETRY_SAFETY_REJECTED",
+                endpoint_age_delta, bone_length_ratio_to_canonical,
+            )
         decay = max(0.68, 1.0 - age / max(self.persistence_seconds, 1e-6) * 0.28)
         memory.first = predicted_first; memory.second = predicted_second
         if current_bbox is not None:
             memory.bbox = current_bbox
         memory.timestamp = timestamp_seconds
-        return PersistentBone(name, _point(predicted_first), _point(predicted_second), decay, memory.confidence * decay, RenderSource.HELD, age, False)
+        return PersistentBone(
+            name, _point(predicted_first), _point(predicted_second), decay,
+            memory.confidence * decay, RenderSource.HELD, age,
+            not atomic_accepted, atomic_reason,
+            endpoint_age_delta, memory.bone_length_ratio_to_canonical,
+        )
 
 
 def summarize_render_sources(

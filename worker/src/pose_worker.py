@@ -53,11 +53,20 @@ try:
     from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
     from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from worker.src.pose_v6.coordinate_space import CoordinateSpaceError, original_pixel_candidate
     from worker.src.pose_v6.contracts import validate_final_skeleton_contract
     from worker.src.pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
-    from worker.src.pose_v6.expert_backend import assess_local_expert_candidates
+    from worker.src.pose_v6.expert_backend import assess_local_expert_candidates, pose_model_evaluation_table
     from worker.src.pose_v6.grip_v4 import analyze_grip_v4
+    from worker.src.pose_v6.high_motion import (
+        CORE_LIMB_CHAINS,
+        build_limb_crops,
+        compute_joint_kinematics,
+        estimate_motion_blur,
+        expected_chain_lengths,
+        validate_chain_candidate,
+    )
     from worker.src.pose_v6.integration import augment_pose_document_v6
     from worker.src.pose_v6.iterative_refinement import (
         PoseHypothesis,
@@ -74,19 +83,38 @@ try:
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
     from worker.src.pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
     from worker.src.pose_v6.serialization import PoseOutputSerializationError, write_pose_document
+    from worker.src.pose_v6.limb_consistency import (
+        attach_temporal_metadata,
+        enforce_limb_chain_consistency,
+        freeze_temporal_frames,
+    )
+    from worker.src.pose_v6.temporal_supersampling import (
+        HighMotionTemporalSupersampling,
+        bidirectional_native_prediction,
+    )
     from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from worker.src.pose_v6.timeline import probe_native_frame_timeline
     from worker.src.pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
     from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
     from pose_v6.anatomical_stability import project_anatomical_sequence
     from pose_v6.angle_engine import stabilize_angle_sequence
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
+    from pose_v6.coordinate_space import CoordinateSpaceError, original_pixel_candidate
     from pose_v6.contracts import validate_final_skeleton_contract
     from pose_v6.coverage import build_frame_layer_contract, coalesce_short_timeline_gaps, summarize_layer_coverage
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
-    from pose_v6.expert_backend import assess_local_expert_candidates
+    from pose_v6.expert_backend import assess_local_expert_candidates, pose_model_evaluation_table
     from pose_v6.grip_v4 import analyze_grip_v4
+    from pose_v6.high_motion import (
+        CORE_LIMB_CHAINS,
+        build_limb_crops,
+        compute_joint_kinematics,
+        estimate_motion_blur,
+        expected_chain_lengths,
+        validate_chain_candidate,
+    )
     from pose_v6.integration import augment_pose_document_v6
     from pose_v6.iterative_refinement import (
         PoseHypothesis,
@@ -103,8 +131,18 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.optical_flow import track_point_forward_backward
     from pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
     from pose_v6.serialization import PoseOutputSerializationError, write_pose_document
+    from pose_v6.limb_consistency import (
+        attach_temporal_metadata,
+        enforce_limb_chain_consistency,
+        freeze_temporal_frames,
+    )
+    from pose_v6.temporal_supersampling import (
+        HighMotionTemporalSupersampling,
+        bidirectional_native_prediction,
+    )
     from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from pose_v6.timeline import probe_native_frame_timeline
     from pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 from pose_v5.camera_motion import CameraMotionEstimator
 from pose_v5.config import CameraMotionConfig, PoseV5Config, RefinementConfig
@@ -1261,6 +1299,7 @@ class StrictWholebodyModel:
             "detector": 0.0,
             "pose": 0.0,
         }
+        self.last_batch_diagnostics: dict[str, dict[str, object]] = {}
 
     def __call__(
         self,
@@ -1269,6 +1308,7 @@ class StrictWholebodyModel:
         frame_height, frame_width = frame.shape[:2]
         self.last_object_detections = []
         self.last_timing_seconds = {"detector": 0.0, "pose": 0.0}
+        self.last_batch_diagnostics = {}
 
         detector_started_at = time.perf_counter()
         detection_result = self.detector(frame)
@@ -1427,6 +1467,7 @@ class StrictWholebodyModel:
         bounding_boxes: list[np.ndarray],
         *,
         timing_key: str = "pose",
+        maximum_batch_size: int = 8,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Run RTMW only on explicit, already bounded person ROIs."""
 
@@ -1445,8 +1486,37 @@ class StrictWholebodyModel:
                 safe_boxes.append(values)
         if not safe_boxes:
             return self.empty_result()
+        batch_limit = max(1, min(int(maximum_batch_size), 32))
+        batch_sizes: list[int] = []
+        oom_retry_count = 0
+
+        def infer_batch(
+            boxes: list[np.ndarray],
+        ) -> list[tuple[np.ndarray, np.ndarray]]:
+            nonlocal oom_retry_count
+            try:
+                raw_points, raw_scores = self.pose_model(frame, bboxes=boxes)
+                normalized = normalize_pose_arrays(raw_points, raw_scores)
+                batch_sizes.append(len(boxes))
+                return [normalized]
+            except RuntimeError as error:
+                message = str(error).lower()
+                out_of_memory = any(token in message for token in (
+                    "out of memory", "cuda_error_out_of_memory", "failed to allocate",
+                ))
+                if not out_of_memory or len(boxes) <= 1:
+                    raise
+                oom_retry_count += 1
+                midpoint = max(1, len(boxes) // 2)
+                return [
+                    *infer_batch(boxes[:midpoint]),
+                    *infer_batch(boxes[midpoint:]),
+                ]
+
         pose_started_at = time.perf_counter()
-        keypoints, scores = self.pose_model(frame, bboxes=safe_boxes)
+        chunks: list[tuple[np.ndarray, np.ndarray]] = []
+        for start in range(0, len(safe_boxes), batch_limit):
+            chunks.extend(infer_batch(safe_boxes[start:start + batch_limit]))
         elapsed = time.perf_counter() - pose_started_at
         self.last_timing_seconds[timing_key] = (
             self.last_timing_seconds.get(timing_key, 0.0) + elapsed
@@ -1455,7 +1525,24 @@ class StrictWholebodyModel:
             self.last_timing_seconds["pose"] = (
                 self.last_timing_seconds.get("pose", 0.0) + elapsed
             )
-        return normalize_pose_arrays(keypoints, scores)
+        batch_diagnostics = getattr(self, "last_batch_diagnostics", None)
+        if not isinstance(batch_diagnostics, dict):
+            batch_diagnostics = {}
+            self.last_batch_diagnostics = batch_diagnostics
+        batch_diagnostics[timing_key] = {
+            "requested_bbox_count": len(safe_boxes),
+            "configured_maximum_batch_size": batch_limit,
+            "executed_batch_sizes": batch_sizes,
+            "oom_retry_count": oom_retry_count,
+            "quality_profile_reduced": False,
+        }
+        usable = [item for item in chunks if item[0].shape[0] > 0]
+        if not usable:
+            return self.empty_result()
+        return (
+            np.concatenate([item[0] for item in usable], axis=0),
+            np.concatenate([item[1] for item in usable], axis=0),
+        )
 
     @staticmethod
     def empty_result() -> tuple[np.ndarray, np.ndarray]:
@@ -3201,6 +3288,463 @@ def _apply_pose_v6_optical_flow(
     return output
 
 
+def _run_high_motion_recovery_pass(
+    video_path: Path,
+    records: list[dict[str, Any]],
+    model: StrictWholebodyModel,
+    settings: PoseWorkerSettings,
+    config: PoseV6Config,
+    *,
+    frame_width: int,
+    frame_height: int,
+    critical_frame_indexes: set[int],
+    logger: logging.Logger,
+) -> dict[str, object]:
+    """Run batched limb-context RTMW only where motion evidence warrants it."""
+
+    summary: dict[str, object] = {
+        "enabled": config.high_motion.enabled,
+        "profile": config.profile,
+        "temporal_supersampling_factor": config.high_motion.temporal_supersampling_factor,
+        "high_motion_frame_count": 0,
+        "specialist_frame_count": 0,
+        "attempted_chain_count": 0,
+        "accepted_chain_count": 0,
+        "rejected_chain_count": 0,
+        "high_motion_joint_error_count": 0,
+        "limb_crop_candidate_count": 0,
+        "coordinate_space_reject_count": 0,
+        "motion_blur_frame_count": 0,
+        "temporal_supersample_usage_ratio": 0.0,
+        "temporal_support_chain_use_count": 0,
+        "rtmw_oom_retry_count": 0,
+        "rtmw_executed_batch_sizes": [],
+        "temporal_support": {},
+        "backend": "RTMW-primary-limb-context-multiscale",
+        "expert_pose_used": False,
+    }
+    if not config.high_motion.enabled or not records:
+        return summary
+
+    points = [np.asarray(record["raw_points"], dtype=np.float32) for record in records]
+    scores = [np.asarray(record["raw_scores"], dtype=np.float32) for record in records]
+    timestamps = [float(record["source_timestamp_seconds"]) for record in records]
+    high_motion_indexes = {
+        index for index, record in enumerate(records)
+        if str(record["motion_v6"]["state"]) in {
+            MotionState.FAST_MOTION.value,
+            MotionState.EXTREME_MOTION.value,
+        }
+    }
+    specialist_indexes = high_motion_indexes | critical_frame_indexes
+    summary["high_motion_frame_count"] = len(high_motion_indexes)
+    summary["specialist_frame_count"] = len(specialist_indexes)
+    if not specialist_indexes:
+        return summary
+
+    eligible_intervals = {
+        index for index in range(max(0, len(records) - 1))
+        if index in specialist_indexes or index + 1 in specialist_indexes
+    }
+    try:
+        supersampling = HighMotionTemporalSupersampling(
+            config.high_motion.temporal_supersampling_factor,
+        ).generate(
+            points,
+            scores,
+            timestamps,
+            eligible_intervals=eligible_intervals,
+        )
+        summary["temporal_support"] = supersampling.to_dict()
+        summary["temporal_supersample_usage_ratio"] = round(
+            len(specialist_indexes) / len(records), 6,
+        ) if supersampling.support_sample_count else 0.0
+    except ValueError as error:
+        supersampling = None
+        summary["temporal_support"] = {
+            "available": False,
+            "reason": type(error).__name__,
+            "support_is_measurement": False,
+        }
+
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        summary["available"] = False
+        summary["reason"] = "VIDEO_OPEN_FAILED"
+        return summary
+    try:
+        for frame_index in sorted(specialist_indexes):
+            record = records[frame_index]
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(record["source_frame_index"]))
+            success, frame = capture.read()
+            if not success or frame is None or frame.size == 0:
+                continue
+            blur = estimate_motion_blur(frame, record.get("render_bbox_array"))
+            error_causes = record.setdefault("high_motion_error_causes_v66", [])
+            if blur.strongly_blurred:
+                error_causes.append("MOTION_BLUR")
+            summary["motion_blur_frame_count"] = int(
+                summary["motion_blur_frame_count"]
+            ) + int(blur.strongly_blurred)
+            predicted = bidirectional_native_prediction(
+                points, scores, timestamps, frame_index,
+            )
+            predicted_points = predicted[0] if predicted is not None else None
+            previous_points = points[frame_index - 1] if frame_index > 0 else None
+            body_scale = max(float(record["pose_graph"].body_scale), 1.0)
+            is_extreme = str(record["motion_v6"]["state"]) == MotionState.EXTREME_MOTION.value
+            affected_chains = _affected_high_motion_chains(
+                records,
+                frame_index,
+                body_scale=body_scale,
+                minimum_score=settings.body_presence_threshold,
+                force_all=(frame_index in critical_frame_indexes or is_extreme or blur.strongly_blurred),
+            )
+            if not affected_chains:
+                continue
+            all_crops = []
+            for chain_name in affected_chains:
+                support_velocity = (
+                    supersampling.motion_vector_at_native(
+                        frame_index, CORE_LIMB_CHAINS[chain_name],
+                    )
+                    if supersampling is not None else None
+                )
+                if support_velocity is not None:
+                    summary["temporal_support_chain_use_count"] = int(
+                        summary["temporal_support_chain_use_count"]
+                    ) + 1
+                all_crops.extend(build_limb_crops(
+                    chain_name,
+                    record["raw_points"],
+                    record["raw_scores"],
+                    previous_points=previous_points,
+                    body_scale=body_scale,
+                    frame_width=frame_width,
+                    frame_height=frame_height,
+                    scales=config.high_motion.limb_crop_scales,
+                    support_velocity=support_velocity,
+                ))
+            if not all_crops:
+                continue
+            summary["attempted_chain_count"] = int(
+                summary["attempted_chain_count"]
+            ) + len(affected_chains)
+            candidate_points, candidate_scores = model.infer_on_bboxes(
+                frame,
+                [crop.bbox_xyxy for crop in all_crops],
+                timing_key="pose_high_motion",
+                maximum_batch_size=config.high_motion.maximum_rtmw_batch_size,
+            )
+            batch_diagnostics = model.last_batch_diagnostics.get(
+                "pose_high_motion", {}
+            )
+            summary["rtmw_batch_diagnostics"] = batch_diagnostics
+            summary["rtmw_oom_retry_count"] = int(
+                summary["rtmw_oom_retry_count"]
+            ) + int(batch_diagnostics.get("oom_retry_count", 0))
+            executed_sizes = summary["rtmw_executed_batch_sizes"]
+            if isinstance(executed_sizes, list):
+                executed_sizes.extend(batch_diagnostics.get("executed_batch_sizes", []))
+            candidate_count = min(len(candidate_points), len(candidate_scores), len(all_crops))
+            summary["limb_crop_candidate_count"] = int(
+                summary["limb_crop_candidate_count"]
+            ) + candidate_count
+            accepted_in_frame: set[str] = set()
+            for chain_name in affected_chains:
+                chain_indexes = tuple(
+                    index for index in range(len(all_crops))
+                    if all_crops[index].chain_name == chain_name and index < candidate_count
+                )
+                expected = _record_expected_chain_lengths(record, chain_name, body_scale)
+                baseline_valid, _, baseline_quality = validate_chain_candidate(
+                    chain_name,
+                    record["raw_points"],
+                    record["raw_scores"],
+                    expected_lengths=expected,
+                    predicted_points=predicted_points,
+                    previous_points=previous_points,
+                    body_scale=body_scale,
+                    fast_motion=True,
+                    minimum_score=0.01,
+                )
+                best: tuple[float, np.ndarray, np.ndarray, dict[str, object]] | None = None
+                for candidate_index in chain_indexes:
+                    chain = CORE_LIMB_CHAINS[chain_name]
+                    full_chain = (
+                        (5, 7, 9)
+                        if chain_name == "left_arm"
+                        else (6, 8, 10)
+                        if chain_name == "right_arm"
+                        else (11, 13, 15, 17, 18, 19)
+                        if chain_name == "left_leg"
+                        else (12, 14, 16, 20, 21, 22)
+                    )
+                    filtered_scores = np.zeros_like(candidate_scores[candidate_index], dtype=np.float32)
+                    filtered_points = np.zeros_like(candidate_points[candidate_index], dtype=np.float32)
+                    for joint in full_chain:
+                        if joint < len(filtered_scores):
+                            filtered_scores[joint] = candidate_scores[candidate_index, joint]
+                            filtered_points[joint] = candidate_points[candidate_index, joint]
+                    try:
+                        packet = original_pixel_candidate(
+                            filtered_points,
+                            filtered_scores,
+                            source=f"high-motion-{chain_name}",
+                            frame_width=frame_width,
+                            frame_height=frame_height,
+                        )
+                    except CoordinateSpaceError:
+                        summary["coordinate_space_reject_count"] = int(
+                            summary["coordinate_space_reject_count"]
+                        ) + 1
+                        error_causes.append("COORDINATE_SPACE_MISMATCH")
+                        continue
+                    adjusted_points = packet.points.copy()
+                    root = chain[0]
+                    if (
+                        float(record["raw_scores"][root]) > 0.0
+                        and float(packet.scores[root]) > 0.0
+                    ):
+                        root_offset = record["raw_points"][root] - packet.points[root]
+                        if float(np.linalg.norm(root_offset)) > body_scale * 0.18:
+                            continue
+                        adjusted_points[list(full_chain)] += root_offset
+                    valid, decisions, candidate_quality = validate_chain_candidate(
+                        chain_name,
+                        adjusted_points,
+                        packet.scores,
+                        expected_lengths=expected,
+                        predicted_points=predicted_points,
+                        previous_points=previous_points,
+                        body_scale=body_scale,
+                        fast_motion=True,
+                    )
+                    if not valid:
+                        summary["high_motion_joint_error_count"] = int(
+                            summary["high_motion_joint_error_count"]
+                        ) + sum(not decision.accepted for decision in decisions)
+                        error_causes.extend(
+                            decision.reason
+                            for decision in decisions
+                            if decision.reason is not None
+                        )
+                        continue
+                    support_agreement = _chain_support_agreement(
+                        adjusted_points,
+                        predicted_points,
+                        chain,
+                        body_scale,
+                    )
+                    evidence_quality = max(
+                        config.high_motion.minimum_image_evidence_quality,
+                        blur.image_evidence_quality,
+                    )
+                    trust = candidate_quality * (0.62 + 0.38 * evidence_quality) * support_agreement
+                    diagnostics = {
+                        "crop_scale": all_crops[candidate_index].scale,
+                        "candidate_quality": round(candidate_quality, 6),
+                        "image_evidence_quality": round(blur.image_evidence_quality, 6),
+                        "support_agreement": round(support_agreement, 6),
+                        "trust": round(trust, 6),
+                        "coordinate_space": "ORIGINAL_PIXELS",
+                        "conversion_count": packet.conversion_count,
+                    }
+                    if best is None or trust > best[0]:
+                        best = trust, adjusted_points, packet.scores, diagnostics
+                if best is None:
+                    error_causes.append(f"{chain_name}:LIMB_CROP_DISAGREEMENT")
+                    continue
+                required_gain = config.iterative.minimum_quality_gain
+                should_accept = (
+                    not baseline_valid
+                    or best[0] >= baseline_quality + required_gain
+                    or (
+                        blur.strongly_blurred
+                        and best[0] >= baseline_quality - 0.02
+                        and float(best[3]["support_agreement"]) >= 0.72
+                    )
+                )
+                if not should_accept:
+                    error_causes.append(f"{chain_name}:LIMB_CROP_DISAGREEMENT")
+                    continue
+                _, selected_points, selected_scores, candidate_diagnostics = best
+                chain = CORE_LIMB_CHAINS[chain_name]
+                full_chain = (
+                    chain
+                    if "arm" in chain_name
+                    else (11, 13, 15, 17, 18, 19)
+                    if chain_name == "left_leg"
+                    else (12, 14, 16, 20, 21, 22)
+                )
+                accepted_joint_indexes: set[int] = set()
+                for joint in full_chain:
+                    if joint >= len(selected_scores) or selected_scores[joint] <= 0.0:
+                        continue
+                    if joint == chain[0] and record["raw_scores"][joint] > 0.0:
+                        continue
+                    record["raw_points"][joint] = selected_points[joint]
+                    record["raw_scores"][joint] = min(
+                        1.0,
+                        float(selected_scores[joint])
+                        * (0.70 + 0.30 * blur.image_evidence_quality),
+                    )
+                    accepted_joint_indexes.add(joint)
+                if not accepted_joint_indexes:
+                    continue
+                record["refined_measurement"] = True
+                record["refined_joint_indexes"] = frozenset({
+                    *record["refined_joint_indexes"], *accepted_joint_indexes,
+                })
+                accepted_in_frame.add(chain_name)
+                record.setdefault("high_motion_recovery_v66", {})[chain_name] = {
+                    "accepted": True,
+                    "source": "HIGH_MOTION_LIMB_CROP_CONSENSUS",
+                    "selected_pass": 4,
+                    "accepted_joint_indexes": sorted(accepted_joint_indexes),
+                    **candidate_diagnostics,
+                }
+            accepted_count = len(accepted_in_frame)
+            summary["accepted_chain_count"] = int(
+                summary["accepted_chain_count"]
+            ) + accepted_count
+            summary["rejected_chain_count"] = int(
+                summary["rejected_chain_count"]
+            ) + max(0, len(affected_chains) - accepted_count)
+    except (cv2.error, RuntimeError, ValueError, TypeError, IndexError) as error:
+        logger.warning(
+            "Pose V6.6 high-motion recovery degraded: %s", type(error).__name__,
+        )
+        summary["degraded"] = True
+        summary["degraded_reason"] = type(error).__name__
+    finally:
+        capture.release()
+    attempts = int(summary["attempted_chain_count"])
+    summary["high_motion_repair_count"] = int(summary["accepted_chain_count"])
+    summary["high_motion_repair_success_ratio"] = round(
+        int(summary["accepted_chain_count"]) / attempts, 6,
+    ) if attempts else 0.0
+    return summary
+
+
+def _affected_high_motion_chains(
+    records: list[dict[str, Any]],
+    frame_index: int,
+    *,
+    body_scale: float,
+    minimum_score: float,
+    force_all: bool,
+) -> tuple[str, ...]:
+    if force_all:
+        return tuple(CORE_LIMB_CHAINS)
+    record = records[frame_index]
+    previous = records[frame_index - 1] if frame_index > 0 else None
+    selected: list[str] = []
+    for name, chain in CORE_LIMB_CHAINS.items():
+        weak = any(float(record["raw_scores"][joint]) < minimum_score for joint in chain)
+        displacement = 0.0
+        if previous is not None:
+            valid = [
+                joint for joint in chain
+                if float(record["raw_scores"][joint]) > 0.0
+                and float(previous["raw_scores"][joint]) > 0.0
+            ]
+            displacement = max((
+                float(np.linalg.norm(
+                    record["raw_points"][joint] - previous["raw_points"][joint]
+                )) / body_scale
+                for joint in valid
+            ), default=0.0)
+        jerk_outlier = _chain_has_isolated_jerk(
+            records, frame_index, chain, body_scale=body_scale,
+        )
+        if weak or displacement >= 0.035 or jerk_outlier:
+            selected.append(name)
+            causes = record.setdefault("high_motion_error_causes_v66", [])
+            if weak:
+                causes.append(f"{name}:LOW_CHAIN_QUALITY")
+            if displacement >= 0.035:
+                causes.append(f"{name}:LARGE_DISPLACEMENT")
+            if jerk_outlier:
+                causes.append(f"{name}:ISOLATED_JERK")
+    return tuple(selected)
+
+
+def _chain_has_isolated_jerk(
+    records: list[dict[str, Any]],
+    frame_index: int,
+    chain: tuple[int, int, int],
+    *,
+    body_scale: float,
+) -> bool:
+    """Flag an isolated direction/acceleration discontinuity, not raw speed."""
+
+    start = max(0, frame_index - 2)
+    end = min(len(records), frame_index + 3)
+    if end - start < 4 or body_scale <= 1.0:
+        return False
+    timestamps = [
+        float(records[index]["source_timestamp_seconds"])
+        for index in range(start, end)
+    ]
+    deltas = np.diff(np.asarray(timestamps, dtype=np.float64))
+    if not np.isfinite(deltas).all() or np.any(deltas <= 0.0):
+        return False
+    characteristic_dt = float(np.median(deltas))
+    local_index = frame_index - start
+    for joint in chain[1:]:
+        if any(
+            float(records[index]["raw_scores"][joint]) <= 0.0
+            or not np.isfinite(records[index]["raw_points"][joint]).all()
+            for index in range(start, end)
+        ):
+            continue
+        kinematics = compute_joint_kinematics(
+            [records[index]["raw_points"][joint] for index in range(start, end)],
+            timestamps,
+        )
+        impulse = (
+            kinematics[local_index].jerk_magnitude
+            * characteristic_dt ** 3
+            / body_scale
+        )
+        if math.isfinite(impulse) and impulse >= 0.10:
+            return True
+    return False
+
+
+def _record_expected_chain_lengths(
+    record: dict[str, Any],
+    chain_name: str,
+    body_scale: float,
+) -> tuple[float, float]:
+    learned: dict[str, float | None] = {}
+    for name, bone in record["pose_graph"].bones.items():
+        learned[name] = (
+            float(bone.reference_length) * body_scale
+            if bone.reference_length is not None else None
+        )
+    return expected_chain_lengths(chain_name, body_scale, learned)
+
+
+def _chain_support_agreement(
+    candidate: np.ndarray,
+    support: np.ndarray | None,
+    chain: tuple[int, int, int],
+    body_scale: float,
+) -> float:
+    if support is None:
+        return 0.78
+    residuals = [
+        float(np.linalg.norm(candidate[joint] - support[joint])) / body_scale
+        for joint in chain[1:]
+        if np.isfinite(support[joint]).all()
+    ]
+    if not residuals:
+        return 0.78
+    return float(np.clip(1.0 - np.median(residuals) / 0.32, 0.15, 1.0))
+
+
 def process_pose_video(
     supabase: Client | None,
     settings: PoseWorkerSettings,
@@ -3213,7 +3757,7 @@ def process_pose_video(
     logger: logging.Logger,
 ) -> PoseProcessingResult:
     """
-    Pose Pipeline V6.5 działa wieloprzebiegowo i rozdziela RAW, ANALYSIS oraz RENDER.
+    Pose Pipeline V6.6 działa wieloprzebiegowo i rozdziela RAW, ANALYSIS oraz RENDER.
 
     Przebieg 1:
     - RTMW wyznacza ciało,
@@ -3236,9 +3780,26 @@ def process_pose_video(
     fps = float(capture.get(cv2.CAP_PROP_FPS))
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    source_frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     if fps <= 0 or width <= 0 or height <= 0:
         capture.release()
         raise RuntimeError("Film ma nieprawidłowe parametry techniczne.")
+    timeline = probe_native_frame_timeline(
+        video_path,
+        fallback_fps=fps,
+        expected_frame_count=max(
+            source_frame_count,
+            int(analysis.get("source_frame_count") or 0),
+            active_segment.end_frame + 1,
+        ),
+    )
+    logger.info(
+        "Pose V6.6 timeline: source=%s fallback=%s gaps=%s frames=%s",
+        timeline.source,
+        timeline.fallback_used,
+        timeline.frame_gap_count,
+        len(timeline.timestamps),
+    )
 
     raw_output_video_path = job_directory / "pose-overlay-raw.mp4"
     output_video_path = job_directory / "pose-overlay.mp4"
@@ -3376,7 +3937,7 @@ def process_pose_video(
                 scene_cut_count += 1
 
             inference_started_at = time.perf_counter()
-            source_timestamp = source_frame_index / fps
+            source_timestamp = timeline.timestamp(source_frame_index, fps)
             keypoints_array, scores_array = model(frame)
             selection_bbox = (
                 previous_bbox
@@ -3483,6 +4044,10 @@ def process_pose_video(
                 left_hand_roi=None,
                 right_hand_roi=None,
             )
+            motion_blur_v66 = estimate_motion_blur(
+                frame,
+                candidate.bbox if candidate is not None else previous_bbox,
+            )
 
             current_motion = (
                 motion_analyzer.update(
@@ -3501,6 +4066,7 @@ def process_pose_video(
                 and (
                     prevalidation_image_quality.global_quality.motion_blur
                     or prevalidation_image_quality.body_quality.motion_blur
+                    or motion_blur_v66.strongly_blurred
                 )
             ):
                 current_motion = MotionObservation(
@@ -3695,7 +4261,9 @@ def process_pose_video(
                     "prevalidation_motion_blur": bool(
                         prevalidation_image_quality.global_quality.motion_blur
                         or prevalidation_image_quality.body_quality.motion_blur
+                        or motion_blur_v66.strongly_blurred
                     ),
+                    "motion_blur_v66": motion_blur_v66.to_dict(),
                     "camera_motion": camera_motion,
                     "pose_graph": graph_frame,
                     "hand_union_roi": combined_hand_roi,
@@ -4576,7 +5144,7 @@ def process_pose_video(
                     pass3_audit = audit_current_pose()
         except (cv2.error, ValueError, TypeError, RuntimeError) as error:
             logger.warning(
-                "Pose V6.5 Pass 3 unavailable for %s; best Pass 2 state retained: %s.",
+                "Pose V6.6 Pass 3 unavailable for %s; best Pass 2 state retained: %s.",
                 analysis_id, type(error).__name__,
             )
             for index, (points_before, scores_before) in enumerate(pass2_snapshots):
@@ -4618,7 +5186,53 @@ def process_pose_video(
             pass3_capture.release()
             pass3_seconds = time.perf_counter() - pass3_started_at
 
+    high_motion_started_at = time.perf_counter()
+    critical_frame_indexes = {
+        frame_index
+        for segment in critical_segments
+        for frame_index in range(segment.start_frame, segment.end_frame + 1)
+    }
+    high_motion_summary = _run_high_motion_recovery_pass(
+        video_path,
+        body_records,
+        model,
+        settings,
+        pose_v6_config,
+        frame_width=width,
+        frame_height=height,
+        critical_frame_indexes=critical_frame_indexes,
+        logger=logger,
+    )
+    high_motion_seconds = time.perf_counter() - high_motion_started_at
+    if int(high_motion_summary.get("accepted_chain_count", 0)) > 0:
+        replay_graph = BiomechanicalPoseGraph(pose_graph.config)
+        for record in body_records:
+            replayed = replay_graph.update(
+                raw_points=record["raw_points"],
+                raw_scores=record["raw_scores"],
+                bbox=record["bbox_array"],
+                tracking=record["tracking_decision"],
+                frame_width=width,
+                frame_height=height,
+                timestamp_seconds=float(record["source_timestamp_seconds"]),
+                relative_depth=None,
+                motion_gate_multiplier=float(
+                    record["motion_v6"].get("gate_multiplier", 1.0)
+                ),
+            )
+            record["pose_graph"] = replayed
+            validated_points = np.zeros((KEYPOINT_COUNT, 2), dtype=np.float32)
+            validated_scores = np.zeros((KEYPOINT_COUNT,), dtype=np.float32)
+            body_count = min(BODY_POINT_COUNT, replayed.analysis_points.shape[0])
+            validated_points[:body_count] = replayed.analysis_points[:body_count]
+            validated_scores[:body_count] = replayed.analysis_scores[:body_count]
+            record["smoothed_points"] = validated_points
+            record["smoothed_scores"] = validated_scores
+        pose_graph = replay_graph
+        pass3_audit = audit_current_pose()
+
     expert_candidates = assess_local_expert_candidates()
+    expert_model_evaluation = pose_model_evaluation_table(expert_candidates)
     expert_segments = select_critical_segments(
         pass3_audit,
         maximum_ratio=pose_v6_config.iterative.expert_resolution_ratio,
@@ -4852,6 +5466,80 @@ def process_pose_video(
             ) + int(local_repair_result.summary.get("rollback_count", 0))
     global_optimization_result.summary["final_local_repair"] = local_repair_summary
     global_optimization_seconds = time.perf_counter() - global_optimization_started_at
+    final_expected_lengths: list[dict[str, float | None]] = []
+    track_ids: list[str] = []
+    track_epoch = 0
+    previous_track_active = False
+    for record in body_records:
+        current_track_active = str(record["tracking_state"]) not in {
+            TrackingState.LOST.value,
+            TrackingState.REACQUIRING.value,
+        }
+        scene_cut = bool(
+            record["camera_motion"] is not None
+            and record["camera_motion"].scene_cut
+        )
+        if current_track_active and (not previous_track_active or scene_cut):
+            track_epoch += 1
+        track_ids.append(f"{analysis_id}:track-{track_epoch}")
+        previous_track_active = current_track_active
+
+    for index, (record, temporal) in enumerate(zip(body_records, temporal_frames)):
+        pass3_indexes = set(
+            record.get("pass3_fusion", {}).get("accepted_joint_indexes", [])
+            if isinstance(record.get("pass3_fusion"), dict) else []
+        )
+        high_motion_indexes: set[int] = set()
+        high_motion_record = record.get("high_motion_recovery_v66")
+        if isinstance(high_motion_record, dict):
+            for value in high_motion_record.values():
+                if isinstance(value, dict) and value.get("accepted") is True:
+                    high_motion_indexes.update(value.get("accepted_joint_indexes", []))
+        source_passes: list[str] = []
+        for joint_index, source in enumerate(temporal.sources):
+            if source not in {PointSource.MEASURED, PointSource.REFINED_MEASUREMENT}:
+                source_passes.append(f"temporal-{source.value.lower()}")
+            elif joint_index in high_motion_indexes:
+                source_passes.append("pass4-high-motion-limb")
+            elif joint_index in pass3_indexes:
+                source_passes.append("pass3-critical")
+            elif joint_index in record["refined_joint_indexes"]:
+                source_passes.append("pass2-refinement")
+            else:
+                source_passes.append("pass1-primary")
+        temporal_frames[index] = attach_temporal_metadata(
+            temporal,
+            timestamp_seconds=float(record["source_timestamp_seconds"]),
+            source_passes=source_passes,
+            track_id=track_ids[index],
+        )
+        graph = record["pose_graph"]
+        expected: dict[str, float | None] = {}
+        for name, bone in graph.bones.items():
+            canonical = anatomical_result.profile.expected_pixels(
+                {
+                    "left_lower_leg": "left_shin",
+                    "right_lower_leg": "right_shin",
+                }.get(name, name),
+                float(graph.body_scale),
+            )
+            expected[name] = canonical if canonical is not None else (
+                bone.reference_length * float(graph.body_scale)
+                if bone.reference_length is not None else None
+            )
+        final_expected_lengths.append(expected)
+
+    limb_chain_result = enforce_limb_chain_consistency(
+        temporal_frames,
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        BODY_BONES,
+        final_expected_lengths,
+        maximum_endpoint_age_delta=(
+            pose_v6_config.high_motion.maximum_endpoint_age_delta_seconds
+        ),
+    )
+    temporal_frames = list(limb_chain_result.frames)
     for index, record in enumerate(body_records):
         record["trajectory_refinement"] = trajectory_result.frame_diagnostics[index]
         record["global_trajectory_optimization"] = (
@@ -4911,6 +5599,13 @@ def process_pose_video(
             dtype=bool,
         )
         record["temporal_v6"] = temporal
+        record["final_track_id_v66"] = track_ids[index]
+        record["limb_chain_v66"] = limb_chain_result.frame_diagnostics[index]
+        record["high_motion_error_causes_v66"] = sorted(set([
+            *record.get("high_motion_error_causes_v66", []),
+            *record["limb_chain_v66"].get("rejection_reasons", []),
+        ]))
+        record["atomic_bones_v66"] = limb_chain_result.bone_decisions[index]
         record["temporal_joints_v6"] = temporal.joint_metadata(JOINT_NAMES)
         pass2_joint_diagnostics = (
             record["refinement_fusion"].get("joint_diagnostics", [])
@@ -5274,7 +5969,7 @@ def process_pose_video(
             raw_hand_frames = hand_snapshots
             grip_reanalysis_summary["rollback_count"] = 1
             logger.warning(
-                "Pose V6.5 hand re-pass unavailable for %s; previous grip state retained: %s.",
+                "Pose V6.6 hand re-pass unavailable for %s; previous grip state retained: %s.",
                 analysis_id, type(error).__name__,
             )
         finally:
@@ -5409,6 +6104,20 @@ def process_pose_video(
         [str(record["motion_v6"]["state"]) for record in body_records],
     )
 
+    temporal_frames = list(freeze_temporal_frames(temporal_frames))
+    for record, temporal in zip(body_records, temporal_frames):
+        record["temporal_v6"] = temporal
+    pre_render_skeleton_contract = validate_final_skeleton_contract(
+        temporal_frames,
+        expected_frame_count=processed_frames,
+        body_joint_count=BODY_POINT_COUNT,
+        identity_scores=[
+            float(record["tracking_identity_score"]) for record in body_records
+        ],
+        require_immutable=True,
+        require_v66_metadata=True,
+    )
+
     writer = create_video_writer(
         raw_output_video_path,
         fps,
@@ -5525,6 +6234,16 @@ def process_pose_video(
                     frame_height=height,
                     hard_lost=body_record["tracking_state"] == TrackingState.LOST.value,
                     scene_cut=False,
+                    atomic_accepted=body_record["atomic_bones_v66"][bone_name].accepted,
+                    atomic_reason=body_record["atomic_bones_v66"][bone_name].reason,
+                    endpoint_age_delta=(
+                        body_record["atomic_bones_v66"][bone_name].endpoint_age_delta
+                    ),
+                    bone_length_ratio_to_canonical=(
+                        body_record["atomic_bones_v66"][bone_name]
+                        .bone_length_ratio_to_canonical
+                    ),
+                    track_id=str(body_record["final_track_id_v66"]),
                 )
             render_v6_frames.append(bone_overrides)
             layer_contract = build_frame_layer_contract(
@@ -5593,6 +6312,25 @@ def process_pose_video(
                     1,
                     cv2.LINE_AA,
                 )
+                rejected_bones = sum(
+                    not item.accepted
+                    for item in body_record["atomic_bones_v66"].values()
+                )
+                cv2.putText(
+                    rendered_frame,
+                    (
+                        f"blur={body_record['motion_blur_v66']['motion_blur_score']:.2f} "
+                        f"max_age={float(np.max(temporal.prediction_age_seconds)):.3f}s "
+                        f"atomic_reject={rejected_bones} "
+                        f"track={body_record['final_track_id_v66'].rsplit('-', 1)[-1]}"
+                    ),
+                    (18, 98),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.40,
+                    (125, 205, 245),
+                    1,
+                    cv2.LINE_AA,
+                )
                 cv2.putText(
                     rendered_frame,
                     (
@@ -5628,6 +6366,22 @@ def process_pose_video(
                     "bone_prediction_age_seconds": {
                         name: round(item.age_seconds, 6)
                         for name, item in bone_overrides.items()
+                    },
+                    "bone_endpoint_age_delta": {
+                        name: round(item.endpoint_age_delta, 6)
+                        for name, item in bone_overrides.items()
+                    },
+                    "bone_length_ratio_to_canonical": {
+                        name: (
+                            round(item.bone_length_ratio_to_canonical, 6)
+                            if item.bone_length_ratio_to_canonical is not None else None
+                        )
+                        for name, item in bone_overrides.items()
+                    },
+                    "bone_rejection_reasons": {
+                        name: item.rejection_reason
+                        for name, item in bone_overrides.items()
+                        if item.rejection_reason is not None
                     },
                 }
             )
@@ -5677,11 +6431,18 @@ def process_pose_video(
                     "bbox_source": body_record["bbox_source"],
                     "refinement_fusion": body_record.get("refinement_fusion"),
                     "pass3_fusion": body_record.get("pass3_fusion"),
+                    "high_motion_recovery_v66": body_record.get(
+                        "high_motion_recovery_v66"
+                    ),
                     "trajectory_refinement": body_record.get("trajectory_refinement"),
                     "global_trajectory_optimization": body_record.get(
                         "global_trajectory_optimization"
                     ),
                     "motion_v6": body_record["motion_v6"],
+                    "motion_blur_v66": body_record["motion_blur_v66"],
+                    "high_motion_error_causes_v66": body_record[
+                        "high_motion_error_causes_v66"
+                    ],
                     "track_started": body_record["track_started"],
                     "track_ended": body_record["track_ended"],
                     "tracking_state": body_record["tracking_state"],
@@ -5713,8 +6474,19 @@ def process_pose_video(
                     "body_interpolated": body_record["body_interpolated"].astype(bool).tolist(),
                     "temporal_v6": {
                         "analysis_render_separated": True,
+                        "coordinate_space": "ORIGINAL_PIXELS",
+                        "track_id": body_record["final_track_id_v66"],
                         "joints": body_record["temporal_joints_v6"],
                         "analysis_bones": body_record["temporal_bones_v6"],
+                        "atomic_bones_v66": {
+                            name: decision.to_dict()
+                            for name, decision in body_record[
+                                "atomic_bones_v66"
+                            ].items()
+                        },
+                        "limb_chain_consistency_v66": body_record[
+                            "limb_chain_v66"
+                        ],
                         "analysis_source_counts": dict(
                             Counter(
                                 source.value
@@ -5924,14 +6696,7 @@ def process_pose_video(
         overlay_metric_frames,
         output_timestamps,
     )
-    final_skeleton_contract = validate_final_skeleton_contract(
-        temporal_frames,
-        expected_frame_count=processed_frames,
-        body_joint_count=BODY_POINT_COUNT,
-        identity_scores=[
-            float(record["tracking_identity_score"]) for record in body_records
-        ],
-    )
+    final_skeleton_contract = pre_render_skeleton_contract
     final_audit_degraded: dict[str, object] | None = None
     try:
         final_audit = audit_pose_sequence(
@@ -6127,6 +6892,151 @@ def process_pose_video(
             for record in body_records
         ],
     )
+    high_motion_frame_indexes = [
+        index for index, record in enumerate(body_records)
+        if str(record["motion_v6"]["state"]) in {
+            MotionState.FAST_MOTION.value,
+            MotionState.EXTREME_MOTION.value,
+        }
+    ]
+    main_bone_names = {
+        "shoulders", "left_upper_arm", "left_forearm", "right_upper_arm",
+        "right_forearm", "hips", "left_thigh", "left_lower_leg",
+        "right_thigh", "right_lower_leg",
+    }
+    high_motion_main_possible = len(high_motion_frame_indexes) * len(main_bone_names)
+    high_motion_main_visible = sum(
+        render_v6_frames[index][name].visible
+        for index in high_motion_frame_indexes
+        for name in main_bone_names
+        if name in render_v6_frames[index]
+    )
+    geometry_possible = len(high_motion_frame_indexes) * 8
+    geometry_valid = sum(
+        decision.accepted
+        for index in high_motion_frame_indexes
+        for name, decision in limb_chain_result.bone_decisions[index].items()
+        if name in {
+            "left_upper_arm", "left_forearm", "right_upper_arm", "right_forearm",
+            "left_thigh", "left_lower_leg", "right_thigh", "right_lower_leg",
+        }
+    )
+    wrist_possible = len(high_motion_frame_indexes) * 2
+    ankle_possible = len(high_motion_frame_indexes) * 2
+    wrist_valid = sum(
+        temporal_frames[index].render_scores[joint] > 0.0
+        for index in high_motion_frame_indexes for joint in (9, 10)
+    )
+    ankle_valid = sum(
+        temporal_frames[index].render_scores[joint] > 0.0
+        for index in high_motion_frame_indexes for joint in (15, 16)
+    )
+    catastrophic_rendered = sum(
+        bone.visible
+        and bone.bone_length_ratio_to_canonical is not None
+        and bone.bone_length_ratio_to_canonical > 1.85
+        for frame in render_v6_frames for bone in frame.values()
+    )
+    combined_repair_attempts = (
+        int(high_motion_summary.get("attempted_chain_count", 0))
+        + int(limb_chain_result.summary["chain_repair_attempt_count"])
+    )
+    combined_repair_successes = (
+        int(high_motion_summary.get("accepted_chain_count", 0))
+        + int(limb_chain_result.summary["chain_repair_success_count"])
+    )
+    high_motion_kpis = {
+        **limb_chain_result.summary,
+        "high_motion_frame_count": len(high_motion_frame_indexes),
+        "high_motion_joint_error_count": int(
+            high_motion_summary.get("high_motion_joint_error_count", 0)
+        ),
+        "high_motion_repair_count": int(
+            high_motion_summary.get("accepted_chain_count", 0)
+        ) + int(limb_chain_result.summary["high_motion_repair_count"]),
+        "high_motion_repair_success_ratio": round(
+            combined_repair_successes / combined_repair_attempts, 6,
+        ) if combined_repair_attempts else 1.0,
+        "main_skeleton_high_motion_coverage_ratio": round(
+            high_motion_main_visible / high_motion_main_possible, 6,
+        ) if high_motion_main_possible else 0.0,
+        "high_motion_geometry_valid_ratio": round(
+            geometry_valid / geometry_possible, 6,
+        ) if geometry_possible else 0.0,
+        "wrist_high_motion_valid_ratio": round(
+            wrist_valid / wrist_possible, 6,
+        ) if wrist_possible else 0.0,
+        "ankle_high_motion_valid_ratio": round(
+            ankle_valid / ankle_possible, 6,
+        ) if ankle_possible else 0.0,
+        "temporal_supersample_usage_ratio": high_motion_summary.get(
+            "temporal_supersample_usage_ratio", 0.0,
+        ),
+        "deep_flow_usage_ratio": 0.0,
+        "expert_pose_usage_ratio": 0.0,
+        "catastrophic_bone_outlier_count": int(catastrophic_rendered),
+        "accepted_geometry_target": {
+            "catastrophic_bone_outlier_count": 0,
+            "final_limb_chain_break_count": 0,
+        },
+    }
+    render_v6_summary["high_motion_v66"] = high_motion_kpis
+    temporal_v6_summary["high_motion_recovery_v66"] = high_motion_summary
+    temporal_v6_summary["limb_chain_consistency_v66"] = limb_chain_result.summary
+    frame_quality_values = sorted(
+        float(frame.quality_score) for frame in final_audit.frames
+    )
+    worst_count = max(1, int(math.ceil(len(frame_quality_values) * 0.01)))
+    bone_residuals = [
+        abs(float(decision.bone_length_ratio_to_canonical) - 1.0)
+        for frame in limb_chain_result.bone_decisions
+        for decision in frame.values()
+        if decision.bone_length_ratio_to_canonical is not None
+        and math.isfinite(float(decision.bone_length_ratio_to_canonical))
+    ]
+    catastrophic_penalty = min(0.80, catastrophic_rendered * 0.35)
+    chain_penalty = min(
+        0.45,
+        int(limb_chain_result.summary["final_limb_chain_break_count"]) * 0.08,
+    )
+    stale_penalty = min(
+        0.20,
+        int(limb_chain_result.summary["stale_endpoint_reject_count"]) * 0.01,
+    )
+    quality_v3 = max(
+        0.0,
+        float(final_audit.quality_score)
+        - catastrophic_penalty
+        - chain_penalty
+        - stale_penalty,
+    )
+    quality_v3_summary = {
+        "version": "pose-quality-v3",
+        "quality_score": round(quality_v3, 6),
+        "quality_score_is_accuracy": False,
+        "worst_1_percent_frame_quality": round(
+            float(np.mean(frame_quality_values[:worst_count])), 6,
+        ),
+        "bone_length_residual_percentile_95": round(
+            float(np.percentile(bone_residuals, 95)), 6,
+        ) if bone_residuals else 0.0,
+        "bone_length_residual_percentile_99": round(
+            float(np.percentile(bone_residuals, 99)), 6,
+        ) if bone_residuals else 0.0,
+        "catastrophic_penalty": round(catastrophic_penalty, 6),
+        "chain_break_penalty": round(chain_penalty, 6),
+        "stale_endpoint_penalty": round(stale_penalty, 6),
+        "worst_case_weighted": True,
+    }
+    iterative_v66_summary = {
+        **iterative_v65_summary,
+        "version": "iterative-refinement-v3",
+        "pose_final_quality_score": round(quality_v3, 6),
+        "quality_v3": quality_v3_summary,
+        "high_motion_recovery": high_motion_summary,
+        "limb_chain_consistency": limb_chain_result.summary,
+        "high_motion_kpis": high_motion_kpis,
+    }
     grip_valid_coverage_ratio = round(
         (
             sum(frame.state.value != "UNKNOWN" for frame in left_grip_v4.frames)
@@ -6163,11 +7073,12 @@ def process_pose_video(
         coalesced_layer_contracts,
         fps=fps,
     )
-    temporal_worst_frames = rank_temporal_worst_frames(body_records)
+    temporal_worst_frames = rank_temporal_worst_frames(body_records, limit=30)
     runtime_breakdown = {
         "pass1_ms": round(1000.0 * pass1_seconds, 3),
         "pass2_ms": round(1000.0 * pass2_seconds, 3),
         "pass3_ms": round(1000.0 * pass3_seconds, 3),
+        "high_motion_pass_ms": round(1000.0 * high_motion_seconds, 3),
         "expert_pass_ms": round(1000.0 * expert_pass_seconds, 3),
         "global_optimization_ms": round(1000.0 * global_optimization_seconds, 3),
         "person_detection_ms": round(1000.0 * sum(
@@ -6230,6 +7141,10 @@ def process_pose_video(
             "predictions_are_measurements": False,
             "missing_values_are_carried_forward": False,
             "render_only_is_analysis_usable": False,
+            "final_skeleton_is_immutable": True,
+            "final_fusion_coordinate_space": "ORIGINAL_PIXELS",
+            "atomic_bone_endpoint_contract": "atomic-bone-endpoint-v1",
+            "temporal_supersamples_are_measurements": False,
             "point_sources": [source.value for source in PointSource],
             "timeline_states": [
                 "MEASURED", "REFINED_MODEL", "TEMPORALLY_RECONSTRUCTED",
@@ -6247,6 +7162,7 @@ def process_pose_video(
             "duration_seconds": float(
                 analysis.get("source_duration_seconds") or 0
             ),
+            "native_frame_timeline": timeline.to_dict(),
         },
         "active_segment": {
             "source_start_frame": active_segment.start_frame,
@@ -6292,6 +7208,12 @@ def process_pose_video(
             ],
             "main_skeleton_render_coverage_ratio": render_v6_summary[
                 "main_skeleton_render_coverage_ratio"
+            ],
+            "main_skeleton_high_motion_coverage_ratio": high_motion_kpis[
+                "main_skeleton_high_motion_coverage_ratio"
+            ],
+            "high_motion_geometry_valid_ratio": high_motion_kpis[
+                "high_motion_geometry_valid_ratio"
             ],
             "angle_usable_coverage_ratio": angle_v2.summary[
                 "angle_usable_coverage_ratio"
@@ -6412,6 +7334,34 @@ def process_pose_video(
                 "anatomical_projection": "canonical-normalized-constrained-chain-v1",
                 "angle_engine": "angle-engine-v3.0",
                 "grip_engine": "grip-v5.0",
+                "coordinate_space_contract": "pose-coordinate-space-v1",
+                "atomic_endpoint_contract": "atomic-bone-endpoint-v1",
+                "final_chain_consistency": "limb-chain-consistency-v1",
+                "native_frame_timeline": timeline.to_dict(),
+                "high_motion": {
+                    "enabled": pose_v6_config.high_motion.enabled,
+                    "temporal_supersampling_factor": (
+                        pose_v6_config.high_motion.temporal_supersampling_factor
+                    ),
+                    "temporal_support_is_measurement": False,
+                    "limb_crop_scales": list(
+                        pose_v6_config.high_motion.limb_crop_scales
+                    ),
+                    "maximum_rtmw_batch_size": (
+                        pose_v6_config.high_motion.maximum_rtmw_batch_size
+                    ),
+                    "maximum_endpoint_age_delta_seconds": (
+                        pose_v6_config.high_motion
+                        .maximum_endpoint_age_delta_seconds
+                    ),
+                    "motion_blur_awareness": True,
+                    "directional_motion_gate": True,
+                    "deep_flow_enabled": False,
+                    "deep_flow_reason": (
+                        "no repository-configured RAFT/GMFlow weights or "
+                        "validated backend; pyramidal LK cycle check remains active"
+                    ),
+                },
                 "iterative_refinement": {
                     "enabled": pose_v6_config.iterative.enabled,
                     "pass2_maximum_ratio": pose_v6_config.iterative.pass2_maximum_ratio,
@@ -6428,6 +7378,7 @@ def process_pose_video(
                     "expert_model_assessment": [
                         candidate.to_dict() for candidate in expert_candidates
                     ],
+                    "expert_model_evaluation_v66": list(expert_model_evaluation),
                     "rtmw_hard_frame_batching": "multi-bbox-single-call",
                     "inference_device": "cuda",
                 },
@@ -6508,6 +7459,8 @@ def process_pose_video(
             },
             "regional_quality": region_quality_coverage(frames_data, fps=fps),
             "quality": quality_summary,
+            "quality_v3": quality_v3_summary,
+            "high_motion_v66": high_motion_kpis,
             "holding": {
                 "version": "holding-v3",
                 "left": {
@@ -6554,6 +7507,7 @@ def process_pose_video(
             },
             "iterative_v64": iterative_v64_summary,
             "iterative_v65": iterative_v65_summary,
+            "iterative_v66": iterative_v66_summary,
             "temporal_v6": temporal_v6_summary,
             "render_v6": render_v6_summary,
             "timeline_v6": timeline_v6_summary,
@@ -6649,7 +7603,7 @@ def process_pose_video(
                 *[int(item["frame_index"]) for item in temporal_worst_frames],
             ]
         )
-    )[:20]
+    )[:30]
 
     diagnostics_document = {
         "schema_version": "4.0",
@@ -6662,12 +7616,20 @@ def process_pose_video(
         "runtime_breakdown_seconds": runtime_breakdown,
         "iterative_v64": iterative_v64_summary,
         "iterative_v65": iterative_v65_summary,
+        "iterative_v66": iterative_v66_summary,
         "tracking": result_document["summary"]["tracking"],
         "scene_cut_count": scene_cut_count,
         "refinement": result_document["refinement"],
         "regional_quality": region_quality_coverage(result_document["frames"], fps=fps),
         "body": pose_graph_summary,
         "quality": quality_summary,
+        "quality_v3": quality_v3_summary,
+        "high_motion_v66": {
+            "recovery": high_motion_summary,
+            "kpis": high_motion_kpis,
+            "limb_chain_consistency": limb_chain_result.summary,
+        },
+        "native_frame_timeline": timeline.to_dict(),
         "video": {
             "mean_blur_quality": round(
                 float(np.mean([
@@ -7102,7 +8064,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.5"
+        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.6"
     )
     parser.add_argument(
         "--once",

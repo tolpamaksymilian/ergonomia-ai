@@ -31,12 +31,18 @@ class TemporalFrame:
     analysis_usable: np.ndarray
     prediction_age_seconds: np.ndarray
     flow_errors: np.ndarray
+    frame_timestamp_seconds: float | None = None
+    effective_timestamps: np.ndarray | None = None
+    source_passes: tuple[str, ...] = ()
+    coordinate_spaces: tuple[str, ...] = ()
+    track_id: str | None = None
 
     def joint_metadata(self, names: tuple[str, ...]) -> dict[str, dict[str, object]]:
         output: dict[str, dict[str, object]] = {}
         count = min(len(names), len(self.sources))
         for index in range(count):
             point = self.render_points[index]
+            effective_timestamps = self.effective_timestamps
             output[names[index]] = {
                 "source": self.sources[index].value,
                 "analysis_usable": bool(self.analysis_usable[index]),
@@ -44,6 +50,22 @@ class TemporalFrame:
                 "prediction_age_seconds": round(float(self.prediction_age_seconds[index]), 6),
                 "flow_error": round(float(self.flow_errors[index]), 6) if math.isfinite(float(self.flow_errors[index])) else None,
                 "render_coordinates": [round(float(point[0]), 3), round(float(point[1]), 3)] if self.render_scores[index] > 0.0 else None,
+                "effective_timestamp": (
+                    round(float(effective_timestamps[index]), 6)
+                    if effective_timestamps is not None
+                    and index < len(effective_timestamps)
+                    and math.isfinite(float(effective_timestamps[index]))
+                    else None
+                ),
+                "source_pass": (
+                    self.source_passes[index]
+                    if index < len(self.source_passes) else None
+                ),
+                "coordinate_space": (
+                    self.coordinate_spaces[index]
+                    if index < len(self.coordinate_spaces) else None
+                ),
+                "track_id": self.track_id,
             }
         return output
 
@@ -159,7 +181,27 @@ def merge_flow_result(
     ages[joint_index] = max(0.0, age_seconds)
     errors[joint_index] = max(0.0, flow_error)
     sources[joint_index] = PointSource.FLOW_TRACKED
-    return TemporalFrame(analysis_points, analysis_scores, render_points, render_scores, tuple(sources), usable, ages, errors)
+    effective_timestamps = (
+        frame.effective_timestamps.copy()
+        if frame.effective_timestamps is not None else None
+    )
+    if effective_timestamps is not None and joint_index < len(effective_timestamps):
+        effective_timestamps[joint_index] = (
+            float(frame.frame_timestamp_seconds) - max(0.0, age_seconds)
+            if frame.frame_timestamp_seconds is not None else math.nan
+        )
+    source_passes = list(frame.source_passes)
+    if source_passes and joint_index < len(source_passes):
+        source_passes[joint_index] = "optical-flow"
+    return TemporalFrame(
+        analysis_points, analysis_scores, render_points, render_scores,
+        tuple(sources), usable, ages, errors,
+        frame.frame_timestamp_seconds,
+        effective_timestamps,
+        tuple(source_passes),
+        frame.coordinate_spaces,
+        frame.track_id,
+    )
 
 
 def validate_analysis_bones(
@@ -244,6 +286,12 @@ def reject_reconstructed_analysis_joints(
         usable,
         frame.prediction_age_seconds.copy(),
         frame.flow_errors.copy(),
+        frame.frame_timestamp_seconds,
+        frame.effective_timestamps.copy()
+        if frame.effective_timestamps is not None else None,
+        frame.source_passes,
+        frame.coordinate_spaces,
+        frame.track_id,
     )
 
 

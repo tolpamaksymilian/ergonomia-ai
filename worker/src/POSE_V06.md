@@ -1,7 +1,16 @@
 # Pose Pipeline V6 — High Motion Accuracy i Temporal Continuity
 
-Wersje: worker `0.13.0-beta.1`, Pose `pose-v6.5.0-beta.1`, schema `6.0`.
+Wersje: worker `0.14.0-beta.1`, Pose `pose-v6.6.0-beta.1`, schema `6.0`.
 Wersja aplikacji nie jest zmieniana przez iterację worker-only.
+
+Minor `6.6` dodaje atomowy kontrakt endpointów i finalny pass spójności
+łańcuchów kończyn. Wszystkie kandydaty finalnej fuzji są jawnie oznaczone jako
+`ORIGINAL_PIXELS`, a round-trip crop/model oraz one-conversion rule mają testy
+regresyjne. Szybkie i krytyczne fragmenty otrzymują selektywny batched RTMW na
+cropach całego ramienia lub nogi, kierunkową bramkę zasięgu, motion-blur
+evidence oraz support temporalny 3x w ACCURATE i 5x w ULTRA. Support nie jest
+pomiarem i nie zwiększa coverage. Renderer dostaje zamrożony final skeleton,
+więc nie rysuje aktualnego jointa połączonego ze starym endpointem.
 
 Minor `6.5` naprawia produkcyjny crash finalnego audytu dla wielu jointów z
 przekroczonym wiekiem predykcji, formalizuje kontrakty kształtów i oddziela

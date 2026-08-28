@@ -1,10 +1,11 @@
-"""Run the production Pose V6.5 core for a local video without Supabase."""
+"""Run the production Pose V6.6 core for a local video without Supabase."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -22,7 +23,10 @@ from assessment.integration import process_assessment_files  # noqa: E402
 from report.integration import build_report_file  # noqa: E402
 from risk.processor import process_risk_file  # noqa: E402
 from pose_v3.hand_pipeline import MediaPipeHandEngine  # noqa: E402
-from pose_v6.quality_benchmark import collect_quality_kpis  # noqa: E402
+from pose_v6.quality_benchmark import (  # noqa: E402
+    collect_quality_kpis,
+    compare_quality_documents,
+)
 from pose_worker import (  # noqa: E402
     WORKER_VERSION,
     configure_logging,
@@ -36,7 +40,7 @@ from pose_worker import (  # noqa: E402
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lokalny real-video benchmark Pose V6.5 bez Supabase i kolejki."
+        description="Lokalny real-video benchmark Pose V6.6 bez Supabase i kolejki."
     )
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
     parser.add_argument(
@@ -46,7 +50,12 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--profile", choices=("BALANCED", "ACCURATE", "ULTRA"),
-        default="ACCURATE", help="Profil compute Pose V6.5.",
+        default="ACCURATE", help="Profil compute Pose V6.6.",
+    )
+    parser.add_argument(
+        "--compare-profiles",
+        action="store_true",
+        help="Uruchom kolejno ACCURATE i ULTRA oraz zapisz comparison.json/md.",
     )
     parser.add_argument("--debug-overlay", action="store_true")
     parser.add_argument("--refine", action=argparse.BooleanOptionalAction, default=None, help="Włącz lub wyłącz ograniczony Pass 2.")
@@ -77,6 +86,8 @@ def main() -> int:
     if not input_path.is_file() or input_path.stat().st_size <= 0:
         print(f"BŁĄD: wejściowy film nie istnieje albo jest pusty: {input_path}", file=sys.stderr)
         return 2
+    if arguments.compare_profiles:
+        return _run_profile_comparison(arguments, input_path, output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
 
     os.environ["POSE_V6_PROFILE"] = arguments.profile
@@ -181,7 +192,7 @@ def main() -> int:
     quality_summary_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "2.0",
                 "generated_by": "Ergonomia AI local Pose benchmark",
                 "worker_version": WORKER_VERSION,
                 "profile": arguments.profile,
@@ -209,12 +220,98 @@ def main() -> int:
     )
     if arguments.save_frames:
         _save_selected_frames(result.video_path, output_directory, diagnostics)
+    _save_worst_frames(
+        input_path,
+        result.video_path,
+        output_directory,
+        diagnostics,
+        limit=30,
+    )
     _print_summary(input_path, fps, frame_count, diagnostics)
     print(f"OUTPUT={output_directory}")
     print(f"QUALITY_SUMMARY={quality_summary_path}")
     print(f"PROFILE={arguments.profile}")
     print(f"WORKER_VERSION={WORKER_VERSION}")
     return 0
+
+
+def _run_profile_comparison(
+    arguments: argparse.Namespace,
+    input_path: Path,
+    output_directory: Path,
+) -> int:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    summaries: dict[str, dict[str, object]] = {}
+    for profile in ("ACCURATE", "ULTRA"):
+        profile_directory = output_directory / profile.lower()
+        command = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--input", str(input_path),
+            "--output", str(profile_directory),
+            "--profile", profile,
+        ]
+        if arguments.debug_overlay:
+            command.append("--debug-overlay")
+        if arguments.angles:
+            command.append("--angles")
+        if arguments.objects:
+            command.append("--objects")
+        if arguments.no_hands:
+            command.append("--no-hands")
+        if arguments.no_holding:
+            command.append("--no-holding")
+        if arguments.refine is not None:
+            command.append("--refine" if arguments.refine else "--no-refine")
+        completed = subprocess.run(command, check=False)
+        if completed.returncode != 0:
+            print(
+                f"BŁĄD: profil {profile} zakończył się kodem {completed.returncode}.",
+                file=sys.stderr,
+            )
+            return completed.returncode
+        summary_path = profile_directory / "quality-summary.json"
+        summaries[profile] = json.loads(summary_path.read_text(encoding="utf-8"))
+    comparison = compare_quality_documents(
+        summaries["ULTRA"], summaries["ACCURATE"],
+    )
+    comparison["comparison_mode"] = "accurate-vs-ultra"
+    comparison["profiles"] = {
+        "baseline": "ACCURATE",
+        "candidate": "ULTRA",
+    }
+    comparison["queue_or_supabase_touched"] = False
+    (output_directory / "comparison.json").write_text(
+        json.dumps(comparison, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    (output_directory / "comparison.md").write_text(
+        _comparison_markdown(comparison),
+        encoding="utf-8",
+    )
+    print(f"COMPARISON={output_directory / 'comparison.json'}")
+    return 0
+
+
+def _comparison_markdown(comparison: dict[str, object]) -> str:
+    candidate = comparison.get("candidate", {})
+    baseline = comparison.get("baseline", {})
+    delta = comparison.get("delta", {})
+    names = sorted(candidate) if isinstance(candidate, dict) else []
+    lines = [
+        "# Pose V6.6 — ACCURATE vs ULTRA",
+        "",
+        "Wartości są technicznymi KPI jakości, nie pomiarem dokładności względem ground truth.",
+        "",
+        "| KPI | ACCURATE | ULTRA | Delta |",
+        "|---|---:|---:|---:|",
+    ]
+    for name in names:
+        lines.append(
+            f"| {name} | {baseline.get(name)} | {candidate.get(name)} | "
+            f"{delta.get(name) if isinstance(delta, dict) else None} |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _print_summary(
@@ -326,6 +423,63 @@ def _save_selected_frames(
             index += 1
     finally:
         capture.release()
+
+
+def _save_worst_frames(
+    source_path: Path,
+    overlay_path: Path,
+    output_directory: Path,
+    diagnostics: dict[str, object],
+    *,
+    limit: int,
+) -> None:
+    ranked = diagnostics.get("temporal_worst_frames", [])
+    if not isinstance(ranked, list):
+        return
+    items = [item for item in ranked if isinstance(item, dict)][:limit]
+    if not items:
+        return
+    destination = output_directory / "worst-frames"
+    destination.mkdir(parents=True, exist_ok=True)
+    source_capture = cv2.VideoCapture(str(source_path))
+    overlay_capture = cv2.VideoCapture(str(overlay_path))
+    try:
+        for rank, item in enumerate(items, start=1):
+            analysis_index = item.get("frame_index")
+            source_index = item.get("source_frame_index", analysis_index)
+            if not isinstance(analysis_index, int) or not isinstance(source_index, int):
+                continue
+            source_capture.set(cv2.CAP_PROP_POS_FRAMES, source_index)
+            overlay_capture.set(cv2.CAP_PROP_POS_FRAMES, analysis_index)
+            source_ok, source_frame = source_capture.read()
+            overlay_ok, overlay_frame = overlay_capture.read()
+            if not source_ok or source_frame is None or not overlay_ok or overlay_frame is None:
+                continue
+            stem = f"{rank:02d}-frame-{analysis_index:06d}"
+            cv2.imwrite(str(destination / f"{stem}-original.jpg"), source_frame)
+            cv2.imwrite(str(destination / f"{stem}-overlay.jpg"), overlay_frame)
+            debug = overlay_frame.copy()
+            reasons = item.get("reasons", [])
+            reason_text = ", ".join(str(value) for value in reasons) or "LOWEST_COMPOSITE_QUALITY"
+            cv2.rectangle(debug, (0, 0), (debug.shape[1], 62), (5, 12, 20), -1)
+            cv2.putText(
+                debug,
+                f"rank={rank} frame={analysis_index} score={item.get('score')}",
+                (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (230, 245, 255), 1, cv2.LINE_AA,
+            )
+            cv2.putText(
+                debug,
+                reason_text[:120],
+                (12, 49), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (80, 210, 255), 1, cv2.LINE_AA,
+            )
+            cv2.imwrite(str(destination / f"{stem}-debug.jpg"), debug)
+            (destination / f"{stem}-reason.json").write_text(
+                json.dumps(item, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+    finally:
+        source_capture.release()
+        overlay_capture.release()
 
 
 if __name__ == "__main__":

@@ -74,6 +74,35 @@ def rank_temporal_worst_frames(records: Sequence[Mapping[str, object]], *, limit
             motion_score = 2.0 if state == MotionState.EXTREME_MOTION.value else 1.0 if state == MotionState.FAST_MOTION.value else 0.0
         identity = record.get("tracking_identity_score")
         uncertainty = 1.0 - float(identity) if isinstance(identity, (int, float)) else 1.0
-        score = miss * 2.0 + motion_score + uncertainty
-        ranked.append((score, index, {"frame_index": index, "score": round(score, 6), "detector_miss": bool(miss), "motion_state": motion.get("state") if isinstance(motion, Mapping) else None, "identity_uncertainty": round(uncertainty, 6)}))
+        blur = record.get("motion_blur_v66")
+        blur_score = (
+            float(blur.get("motion_blur_score", 0.0))
+            if isinstance(blur, Mapping) else 0.0
+        )
+        chain = record.get("limb_chain_v66")
+        chain_reasons = (
+            [str(value) for value in chain.get("rejection_reasons", [])]
+            if isinstance(chain, Mapping) else []
+        )
+        chain_penalty = min(3.0, len(chain_reasons) * 0.8)
+        score = miss * 2.0 + motion_score + uncertainty + blur_score + chain_penalty
+        reasons = []
+        if miss:
+            reasons.append("PERSON_DETECTOR_MISS")
+        if motion_score:
+            reasons.append(str(motion.get("state")))
+        if blur_score >= 0.68:
+            reasons.append("MOTION_BLUR")
+        reasons.extend(chain_reasons)
+        ranked.append((score, index, {
+            "frame_index": index,
+            "source_frame_index": record.get("source_frame_index"),
+            "timestamp_seconds": record.get("source_timestamp_seconds"),
+            "score": round(score, 6),
+            "detector_miss": bool(miss),
+            "motion_state": motion.get("state") if isinstance(motion, Mapping) else None,
+            "motion_blur_score": round(blur_score, 6),
+            "identity_uncertainty": round(uncertainty, 6),
+            "reasons": sorted(set(reasons)),
+        }))
     return [item[2] for item in sorted(ranked, key=lambda value: (-value[0], value[1]))[:limit]]

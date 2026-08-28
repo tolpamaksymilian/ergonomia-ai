@@ -15,6 +15,8 @@ class FinalSkeletonContractReport:
     frame_count: int
     joint_count: int
     identity_checked: bool
+    immutable_checked: bool = False
+    v66_metadata_checked: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -24,6 +26,11 @@ class FinalSkeletonContractReport:
             "identity_checked": self.identity_checked,
             "coordinates_finite_for_usable_joints": True,
             "serialization_shapes_valid": True,
+            "immutable_final_skeleton": self.immutable_checked,
+            "coordinate_space_contract": (
+                "ORIGINAL_PIXELS" if self.v66_metadata_checked else None
+            ),
+            "atomic_endpoint_metadata_valid": self.v66_metadata_checked,
         }
 
 
@@ -56,6 +63,8 @@ def validate_final_skeleton_contract(
     expected_frame_count: int,
     body_joint_count: int,
     identity_scores: Sequence[float] | None = None,
+    require_immutable: bool = False,
+    require_v66_metadata: bool = False,
 ) -> FinalSkeletonContractReport:
     """Validate geometry and serialization invariants before artifact writing.
 
@@ -92,11 +101,76 @@ def validate_final_skeleton_contract(
             ("flow_errors", frame.flow_errors),
         ):
             _require_joint_vector(values, body_joint_count, field, frame_index)
+            if require_immutable and np.asarray(values).flags.writeable:
+                raise FinalSkeletonContractError(
+                    field=field,
+                    frame_index=frame_index,
+                    actual_shape=tuple(int(value) for value in np.asarray(values).shape),
+                    expected="immutable ndarray",
+                )
+        if require_immutable:
+            for field, values in (
+                ("analysis_points", frame.analysis_points),
+                ("render_points", frame.render_points),
+            ):
+                if np.asarray(values).flags.writeable:
+                    raise FinalSkeletonContractError(
+                        field=field,
+                        frame_index=frame_index,
+                        actual_shape=tuple(int(value) for value in np.asarray(values).shape),
+                        expected="immutable ndarray",
+                    )
         if len(frame.sources) < body_joint_count:
             raise FinalSkeletonContractError(
                 field="sources", frame_index=frame_index,
                 actual_shape=(len(frame.sources),), expected=f"at least ({body_joint_count},)",
             )
+        if require_v66_metadata:
+            if frame.frame_timestamp_seconds is None or not np.isfinite(
+                float(frame.frame_timestamp_seconds)
+            ):
+                raise FinalSkeletonContractError(
+                    field="frame_timestamp_seconds", frame_index=frame_index,
+                    actual_shape=None, expected="finite native timestamp",
+                )
+            if frame.effective_timestamps is None:
+                raise FinalSkeletonContractError(
+                    field="effective_timestamps", frame_index=frame_index,
+                    actual_shape=None, expected=f"({body_joint_count},)",
+                )
+            _require_joint_vector(
+                frame.effective_timestamps,
+                body_joint_count,
+                "effective_timestamps",
+                frame_index,
+            )
+            if not np.isfinite(
+                np.asarray(frame.effective_timestamps[:body_joint_count], dtype=np.float64)
+            ).all():
+                raise FinalSkeletonContractError(
+                    field="effective_timestamps", frame_index=frame_index,
+                    actual_shape=None, expected="finite endpoint timestamps",
+                )
+            if len(frame.source_passes) < body_joint_count:
+                raise FinalSkeletonContractError(
+                    field="source_passes", frame_index=frame_index,
+                    actual_shape=(len(frame.source_passes),),
+                    expected=f"at least ({body_joint_count},)",
+                )
+            if len(frame.coordinate_spaces) < body_joint_count or any(
+                str(value) != "ORIGINAL_PIXELS"
+                for value in frame.coordinate_spaces[:body_joint_count]
+            ):
+                raise FinalSkeletonContractError(
+                    field="coordinate_spaces", frame_index=frame_index,
+                    actual_shape=(len(frame.coordinate_spaces),),
+                    expected=f"{body_joint_count} ORIGINAL_PIXELS entries",
+                )
+            if frame.track_id is None or not str(frame.track_id).strip():
+                raise FinalSkeletonContractError(
+                    field="track_id", frame_index=frame_index,
+                    actual_shape=None, expected="non-empty final track id",
+                )
 
         analysis_scores = np.asarray(frame.analysis_scores[:body_joint_count], dtype=np.float64)
         render_scores = np.asarray(frame.render_scores[:body_joint_count], dtype=np.float64)
@@ -139,6 +213,8 @@ def validate_final_skeleton_contract(
     return FinalSkeletonContractReport(
         frame_count=len(frames), joint_count=body_joint_count,
         identity_checked=identity_scores is not None,
+        immutable_checked=require_immutable,
+        v66_metadata_checked=require_v66_metadata,
     )
 
 

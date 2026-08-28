@@ -1,5 +1,22 @@
 # Worker changelog
 
+## 0.14.0-beta.1
+
+- Pose `pose-v6.6.0-beta.1` adds an atomic endpoint and final limb-chain
+  contract that prevents a current joint from being connected to a stale,
+  differently timed or differently transformed endpoint.
+- Final fusion is explicitly `ORIGINAL_PIXELS`; crop/model round trips and the
+  one-conversion rule are covered by regression tests.
+- FAST/EXTREME and critical frames receive support-only 3x (ACCURATE) or 5x
+  (ULTRA) temporal trajectories plus batched full-chain RTMW crops, directional
+  reach gates, motion-blur evidence and isolated-jerk detection.
+- The renderer consumes frozen final skeleton arrays and records atomic
+  rejections instead of drawing catastrophic geometry. Schema remains `6.0`.
+- Local video benchmark V2 exports the 30 worst frames and can compare
+  ACCURATE with ULTRA without queue, Storage or Supabase access.
+- No unvalidated expert/deep-flow weights were enabled; their readiness and
+  technical reason remain explicit in diagnostics.
+
 ## 0.13.0-beta.1
 
 - Pose `pose-v6.5.0-beta.1` fixes the real-video final-audit crash caused by
