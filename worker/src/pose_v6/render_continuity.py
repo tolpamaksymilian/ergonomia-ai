@@ -34,6 +34,14 @@ class PersistentBone:
     rejection_reason: str | None = None
     endpoint_age_delta: float = 0.0
     bone_length_ratio_to_canonical: float | None = None
+    first_source: str | None = None
+    second_source: str | None = None
+    first_source_pass: str | None = None
+    second_source_pass: str | None = None
+    track_id: str | None = None
+    effective_timestamp_seconds: float | None = None
+    bone_length_pixels: float | None = None
+    canonical_length_pixels: float | None = None
 
     @property
     def visible(self) -> bool:
@@ -102,6 +110,9 @@ class PersistentBoneRenderer:
         endpoint_age_delta: float = 0.0,
         bone_length_ratio_to_canonical: float | None = None,
         track_id: str | None = None,
+        first_source_pass: str | None = None,
+        second_source_pass: str | None = None,
+        effective_timestamp_seconds: float | None = None,
     ) -> PersistentBone:
         if scene_cut:
             self.reset()
@@ -136,6 +147,22 @@ class PersistentBoneRenderer:
                 name, _point(first_array), _point(second_array), 1.0,
                 memory.confidence, source, 0.0, False, None,
                 endpoint_age_delta, bone_length_ratio_to_canonical,
+                first_source, second_source, first_source_pass,
+                second_source_pass, track_id, effective_timestamp_seconds,
+                float(np.linalg.norm(second_array - first_array)),
+                expected_length,
+            )
+        # The frozen final skeleton is authoritative. A cache entry may bridge
+        # a genuine missing measurement, but it must never replace a segment
+        # explicitly rejected by the final atomic/anatomical contract.
+        if not atomic_accepted:
+            return PersistentBone(
+                name, None, None, 0.0, 0.0, RenderSource.HIDDEN, 0.0,
+                True, atomic_reason or "FINAL_SKELETON_REJECTED",
+                endpoint_age_delta, bone_length_ratio_to_canonical,
+                first_source, second_source, first_source_pass,
+                second_source_pass, track_id, effective_timestamp_seconds,
+                None, expected_length,
             )
         if memory.first is None or memory.second is None or memory.measured_timestamp is None:
             return PersistentBone(

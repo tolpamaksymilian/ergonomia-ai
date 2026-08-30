@@ -1,11 +1,35 @@
-# Pose Pipeline V6.6 — high-motion master quality pass
+# Pose Pipeline V6.7 — real temporal expert pass
 
 Pose V6 extends the existing YOLOX-X, RTMW WholeBody, MediaPipe hand and
-biomechanical validation pipeline. It does not change the AI models. Its role
+biomechanical validation pipeline. V6.7 adds two licensed temporal experts only
+for hard-motion segments. Its role
 is to preserve the identity and visual continuity of the locked worker during
 short detector/keypoint gaps while keeping analytical provenance explicit.
 
-## V6.6 high-motion contract
+## V6.7 temporal expert contract
+
+TAR-ViTPose Base is a real five-frame pose measurement backend. Its official
+Apache-2.0 checkpoint is decoded in original source pixels and mapped only to
+COCO17 core body joints; V6.7 can replace only shoulders, elbows, wrists, hips,
+knees and ankles. It never supplies RTMW face, hand or foot-extension points.
+
+TAPNext++ TRecViT-B 512 is an Apache-2.0 learned point tracker executed forward
+from the preceding strong anchor and backward from the following strong anchor.
+It is evidence, not a pose measurement. A tracker-only point can never become
+analytically usable. RTMW and TAR agreement wins over a wrong track; TAR plus
+bidirectional track agreement can reject an RTMW outlier, and the symmetric
+case rejects a TAR outlier. Conflicts without independent support are rejected.
+Every accepted chain still passes the canonical length/reach gate.
+
+The full inference models are loaded sequentially so they do not occupy GPU
+memory together. Model sources and weights are installed explicitly with
+`worker/tools/install_temporal_experts.py`; the worker never downloads them.
+Track-On-R remains a challenger because its required DINOv3 asset is gated.
+SEA-RAFT is deferred. CoTracker3 and Sapiens V1 are excluded from this
+commercial pipeline by their non-commercial terms, and RIFE is not treated as
+a pose/point expert.
+
+## V6.6 high-motion contract retained
 
 V6.6 targets rare but visually catastrophic limb failures rather than average
 coverage. Every final bone carries endpoint effective time, prediction age,
@@ -49,13 +73,9 @@ Motion blur is a technical local-edge evidence indicator, not a probability.
 Strong blur lowers RTMW trust and increases reliance on sharp-neighbour
 bidirectional support, but synthetic pixels are not presented as measurements.
 
-The existing pyramidal LK forward/backward cycle remains the validated flow
-backend. RAFT/GMFlow and a person-mask expert were not enabled because no local,
-licensed/configured weights and same-video benchmark exist. ViTPose-H,
-DWPose WholeBody and RTMPose-X are likewise reported in the model decision
-matrix but remain disabled until weights, canonical mapping, VRAM and a real
-same-video benchmark are validated. RTMW-DW-X-L 384x288 remains primary and is
-actually executed for the selective V6.6 limb re-pass.
+The existing pyramidal LK forward/backward cycle remains available for bounded
+gap recovery. RTMW-DW-X-L 384x288 remains primary and is still executed for the
+selective V6.6 limb re-pass after the V6.7 temporal consensus.
 
 ## Quality contract
 
@@ -130,11 +150,7 @@ mandatory.
 Grip flicker can trigger a local expanded-ROI MediaPipe re-pass. Angle spikes
 mark their source shoulder/elbow/wrist or hip/knee/ankle joints for model
 reanalysis; the worker does not hide bad geometry by editing only the derived
-angle. No secondary expert model is enabled. `expert_backend.py` defines the
-required inference and canonical-layout contract and assesses ViTPose-H
-WholeBody, DWPose WholeBody and RTMPose-X WholeBody as locally unavailable: the
-repository has no configured weights, validated canonical mapping or same-video
-benchmark. Nothing is downloaded implicitly and RTMW remains primary.
+angle. V6.7's TAR/TAP provenance remains additive and RTMW remains primary.
 
 Hard-frame ROI variants are submitted to the existing CUDA RTMW backend in a
 single multi-bbox call per source frame. This keeps the additional compute on
@@ -176,7 +192,7 @@ reset continuity.
 The defaults target the `ACCURATE` profile. The small optional surface is
 documented in `worker/.env.example`: recovery/hard-lost/interpolation/render
 times, optical-flow validation, fast-motion threshold, recovery ROI scale and
-the bounded V6.5/V6.6 pass/repair budgets. `POSE_V6_PROFILE=ACCURATE` remains the
+the bounded V6.5/V6.6/V6.7 pass/repair budgets. `POSE_V6_PROFILE=ACCURATE` remains the
 default. `ULTRA` increases selective ROI variants, temporal context and solver
 iterations without repeatedly processing the whole film. The quality score is
 a technical internal data score, not accuracy.
@@ -189,7 +205,7 @@ coverage alone from hiding a geometry regression.
 
 Pass 1 covers the active video once. Pass 2 is capped at 30% hard frames; Pass
 3 is capped at the worst unresolved 5%. The expert-resolution candidate budget
-is capped at 0–3%, but execution remains disabled until a backend is validated.
+is capped at 0–3%; V6.7 executes it only where the hard-motion selector asks.
 Final repair is local to padded error segments, not a fourth whole-video pass.
 Convergence and minimum gain skip work early; ACCURATE allows three optimizer
 iterations and ULTRA five by default. `pose-keypoints.json` reports
@@ -225,3 +241,16 @@ worker\.venv\Scripts\python.exe worker\tools\analyze_local_video.py `
 
 It writes `accurate/`, `ultra/`, `comparison.json`, `comparison.md` and up to
 30 original/overlay/debug/reason bundles in each `worst-frames/` directory.
+
+V6.7 adds a four-way real-video ablation:
+
+```powershell
+worker\.venv\Scripts\python.exe worker\tools\analyze_local_video.py `
+  --input C:\path\sample.mp4 --output .runtime\pose-v67 `
+  --compare-temporal-modes --debug-overlay
+```
+
+The modes are `RTMW_ONLY`, `V66`, `V67_TAR` and `V67_TAR_TAPNEXT`. Worst-frame
+reason JSON contains RTMW/TAR candidates, forward/backward TAP coordinates,
+fusion provenance and anatomy decisions. The debug JPEG uses separate symbols
+for those sources. These are technical comparisons, not ground-truth accuracy.

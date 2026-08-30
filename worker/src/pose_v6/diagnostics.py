@@ -85,7 +85,19 @@ def rank_temporal_worst_frames(records: Sequence[Mapping[str, object]], *, limit
             if isinstance(chain, Mapping) else []
         )
         chain_penalty = min(3.0, len(chain_reasons) * 0.8)
-        score = miss * 2.0 + motion_score + uncertainty + blur_score + chain_penalty
+        expert = record.get("temporal_expert_v67")
+        expert_rejections = 0
+        if isinstance(expert, Mapping):
+            fusion = expert.get("fusion")
+            if isinstance(fusion, Mapping):
+                expert_rejections = sum(
+                    isinstance(value, Mapping) and not bool(value.get("accepted", False))
+                    for value in fusion.values()
+                )
+        score = (
+            miss * 2.0 + motion_score + uncertainty + blur_score + chain_penalty
+            + min(2.0, expert_rejections * 0.12)
+        )
         reasons = []
         if miss:
             reasons.append("PERSON_DETECTOR_MISS")
@@ -94,6 +106,8 @@ def rank_temporal_worst_frames(records: Sequence[Mapping[str, object]], *, limit
         if blur_score >= 0.68:
             reasons.append("MOTION_BLUR")
         reasons.extend(chain_reasons)
+        if expert_rejections:
+            reasons.append("TEMPORAL_EXPERT_REJECTIONS")
         ranked.append((score, index, {
             "frame_index": index,
             "source_frame_index": record.get("source_frame_index"),
@@ -103,6 +117,8 @@ def rank_temporal_worst_frames(records: Sequence[Mapping[str, object]], *, limit
             "motion_state": motion.get("state") if isinstance(motion, Mapping) else None,
             "motion_blur_score": round(blur_score, 6),
             "identity_uncertainty": round(uncertainty, 6),
+            "temporal_expert_rejection_count": expert_rejections,
+            "temporal_expert_v67": expert if isinstance(expert, Mapping) else None,
             "reasons": sorted(set(reasons)),
         }))
     return [item[2] for item in sorted(ranked, key=lambda value: (-value[0], value[1]))[:limit]]

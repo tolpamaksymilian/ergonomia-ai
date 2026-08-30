@@ -1,5 +1,20 @@
 # Worker changelog
 
+## 0.15.0-beta.1
+
+- Pose `pose-v6.7.0-beta.1` executes the official TAR-ViTPose Base five-frame
+  pose model and TAPNext++ 512 bidirectional learned point tracker only on
+  selected high-motion/critical segments.
+- TAR is mapped only to COCO17 core body joints. TAPNext++ is trajectory
+  evidence and can never manufacture a pose measurement; accepted image
+  candidates retain explicit model/track/anatomy decision provenance.
+- The frozen final skeleton is authoritative: an atomically rejected segment
+  is hidden rather than replaced by a stale renderer cache entry.
+- Added pinned artifact installation, real model smoke tooling and four-mode
+  local ablation (`RTMW_ONLY`, `V66`, `V67_TAR`, `V67_TAR_TAPNEXT`).
+- Pose schema remains additively compatible at `6.0`; YOLOX, RTMW, hands,
+  ergonomics, risk and report contracts are unchanged.
+
 ## 0.14.0-beta.1
 
 - Pose `pose-v6.6.0-beta.1` adds an atomic endpoint and final limb-chain

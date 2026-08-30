@@ -103,6 +103,7 @@ try:
         bidirectional_native_prediction,
     )
     from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
+    from worker.src.pose_v6.temporal_expert_pass import run_temporal_expert_pass
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
     from worker.src.pose_v6.timeline import probe_native_frame_timeline
     from worker.src.pose_v6.trajectory_refinement import refine_fixed_lag_sequence
@@ -151,6 +152,7 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
         bidirectional_native_prediction,
     )
     from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
+    from pose_v6.temporal_expert_pass import run_temporal_expert_pass
     from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
     from pose_v6.timeline import probe_native_frame_timeline
     from pose_v6.trajectory_refinement import refine_fixed_lag_sequence
@@ -3310,7 +3312,7 @@ def _run_high_motion_recovery_pass(
     critical_frame_indexes: set[int],
     logger: logging.Logger,
 ) -> dict[str, object]:
-    """Run batched limb-context RTMW only where motion evidence warrants it."""
+    """Run V6.7 temporal experts, then the existing RTMW limb-context pass."""
 
     summary: dict[str, object] = {
         "enabled": config.high_motion.enabled,
@@ -3330,8 +3332,13 @@ def _run_high_motion_recovery_pass(
         "rtmw_oom_retry_count": 0,
         "rtmw_executed_batch_sizes": [],
         "temporal_support": {},
-        "backend": "RTMW-primary-limb-context-multiscale",
+        "backend": "RTMW+TAR-ViTPose-B+TAPNext++-512",
         "expert_pose_used": False,
+        "temporal_expert_v67": {
+            "enabled": False,
+            "backend_executed": False,
+            "reason": "NOT_ATTEMPTED",
+        },
     }
     if not config.high_motion.enabled or not records:
         return summary
@@ -3346,11 +3353,158 @@ def _run_high_motion_recovery_pass(
             MotionState.EXTREME_MOTION.value,
         }
     }
-    specialist_indexes = high_motion_indexes | critical_frame_indexes
+    catastrophic_indexes = {
+        index for index, record in enumerate(records)
+        if _record_has_catastrophic_raw_chain(record)
+    }
+    specialist_indexes = (
+        high_motion_indexes | critical_frame_indexes | catastrophic_indexes
+    )
     summary["high_motion_frame_count"] = len(high_motion_indexes)
     summary["specialist_frame_count"] = len(specialist_indexes)
+    summary["temporal_expert_trigger_counts"] = {
+        "high_or_extreme_motion": len(high_motion_indexes),
+        "critical_or_hard_limb_segment": len(critical_frame_indexes),
+        "catastrophic_raw_chain": len(catastrophic_indexes),
+    }
     if not specialist_indexes:
         return summary
+
+    # The temporal expert pass consumes only real source frames. TAR contributes
+    # image measurements while TAPNext++ supplies bidirectional trajectory
+    # evidence. Every selected chain is still passed through the same anatomical
+    # validation used by the primary RTMW recovery path.
+    try:
+        expert_result = run_temporal_expert_pass(
+            video_path,
+            records,
+            specialist_indexes,
+            repository_root=Path(__file__).resolve().parents[2],
+            device=os.getenv("POSE_TEMPORAL_EXPERT_DEVICE", "cuda").strip() or "cuda",
+        )
+        summary["temporal_expert_v67"] = dict(expert_result.summary)
+        summary["expert_pose_used"] = bool(
+            expert_result.summary.get("backend_executed", False)
+        )
+        expert_accepted_chains = 0
+        expert_accepted_joints = 0
+        for frame_index, frame_result in expert_result.frames.items():
+            record = records[frame_index]
+            record["temporal_expert_v67"] = frame_result.to_dict()
+            record["temporal_expert_v67"]["rtmw_candidate"] = {
+                str(joint): {
+                    "point": [
+                        round(float(record["raw_points"][joint][0]), 3),
+                        round(float(record["raw_points"][joint][1]), 3),
+                    ],
+                    "quality": round(float(record["raw_scores"][joint]), 6),
+                }
+                for joint in CORE_LIMB_CHAINS["left_arm"]
+                + CORE_LIMB_CHAINS["right_arm"]
+                + CORE_LIMB_CHAINS["left_leg"]
+                + CORE_LIMB_CHAINS["right_leg"]
+            }
+            tracker_support = np.full_like(record["raw_points"], np.nan, dtype=np.float32)
+            body_scale = max(float(record["pose_graph"].body_scale), 1.0)
+            for joint, evidence in frame_result.tracker.items():
+                support_point, _, _ = evidence.consensus(
+                    maximum_distance=body_scale * 0.12,
+                )
+                if support_point is not None and joint < len(tracker_support):
+                    tracker_support[joint] = support_point
+            record["temporal_tracker_support_v67"] = tracker_support
+            previous_points = (
+                records[frame_index - 1]["raw_points"] if frame_index > 0 else None
+            )
+            accepted_frame_chains: list[str] = []
+            accepted_frame_joints: set[int] = set()
+            for chain_name, chain in CORE_LIMB_CHAINS.items():
+                decisions = [frame_result.fusion.get(joint) for joint in chain]
+                if not any(decision is not None and decision.accepted for decision in decisions):
+                    continue
+                candidate_points = np.asarray(record["raw_points"], dtype=np.float32).copy()
+                candidate_scores = np.asarray(record["raw_scores"], dtype=np.float32).copy()
+                proposed: set[int] = set()
+                for joint, decision in zip(chain, decisions):
+                    if decision is None or not decision.accepted or decision.point is None:
+                        continue
+                    candidate_points[joint] = np.asarray(decision.point, dtype=np.float32)
+                    candidate_scores[joint] = float(decision.quality)
+                    proposed.add(joint)
+                if not proposed:
+                    continue
+                expected = _record_expected_chain_lengths(record, chain_name, body_scale)
+                valid, validation, candidate_quality = validate_chain_candidate(
+                    chain_name,
+                    candidate_points,
+                    candidate_scores,
+                    expected_lengths=expected,
+                    # Tracker agreement has already selected the image
+                    # measurement. The anatomy gate must not receive NaN for
+                    # joints that TAPNext++ could not track.
+                    predicted_points=None,
+                    previous_points=previous_points,
+                    body_scale=body_scale,
+                    fast_motion=True,
+                    minimum_score=0.01,
+                )
+                chain_diagnostic = {
+                    "accepted": bool(valid),
+                    "candidate_quality": round(float(candidate_quality), 6),
+                    "proposed_joint_indexes": sorted(proposed),
+                    "validation": [
+                        {
+                            "accepted": decision.accepted,
+                            "reason": decision.reason,
+                            "bone_length_ratio_to_canonical": (
+                                round(float(decision.bone_length_ratio_to_canonical), 6)
+                                if decision.bone_length_ratio_to_canonical is not None
+                                else None
+                            ),
+                            "directional_residual": (
+                                round(float(decision.directional_residual), 6)
+                                if decision.directional_residual is not None else None
+                            ),
+                        }
+                        for decision in validation
+                    ],
+                }
+                record["temporal_expert_v67"].setdefault("chains", {})[
+                    chain_name
+                ] = chain_diagnostic
+                if not valid:
+                    continue
+                for joint in proposed:
+                    record["raw_points"][joint] = candidate_points[joint]
+                    record["raw_scores"][joint] = candidate_scores[joint]
+                accepted_frame_chains.append(chain_name)
+                accepted_frame_joints.update(proposed)
+            if accepted_frame_joints:
+                record["refined_measurement"] = True
+                record["refined_joint_indexes"] = frozenset({
+                    *record["refined_joint_indexes"], *accepted_frame_joints,
+                })
+                record["temporal_expert_v67"]["accepted_chain_names"] = accepted_frame_chains
+                record["temporal_expert_v67"]["accepted_joint_indexes"] = sorted(
+                    accepted_frame_joints
+                )
+                expert_accepted_chains += len(accepted_frame_chains)
+                expert_accepted_joints += len(accepted_frame_joints)
+        temporal_summary = summary["temporal_expert_v67"]
+        if isinstance(temporal_summary, dict):
+            temporal_summary["anatomically_accepted_chain_count"] = expert_accepted_chains
+            temporal_summary["anatomically_accepted_joint_count"] = expert_accepted_joints
+    except (FileNotFoundError, ImportError, OSError, RuntimeError, TypeError, ValueError) as error:
+        logger.warning(
+            "Pose V6.7 temporal expert pass degraded: %s: %s",
+            type(error).__name__, error,
+        )
+        summary["temporal_expert_v67"] = {
+            "enabled": True,
+            "backend_executed": False,
+            "reason": "TEMPORAL_EXPERT_RUNTIME_ERROR",
+            "error_type": type(error).__name__,
+        }
 
     eligible_intervals = {
         index for index in range(max(0, len(records) - 1))
@@ -3400,6 +3554,13 @@ def _run_high_motion_recovery_pass(
                 points, scores, timestamps, frame_index,
             )
             predicted_points = predicted[0] if predicted is not None else None
+            expert_track_support = record.get("temporal_tracker_support_v67")
+            if isinstance(expert_track_support, np.ndarray):
+                if predicted_points is None:
+                    predicted_points = expert_track_support.copy()
+                else:
+                    supported = np.isfinite(expert_track_support).all(axis=1)
+                    predicted_points[supported] = expert_track_support[supported]
             previous_points = points[frame_index - 1] if frame_index > 0 else None
             body_scale = max(float(record["pose_graph"].body_scale), 1.0)
             is_extreme = str(record["motion_v6"]["state"]) == MotionState.EXTREME_MOTION.value
@@ -3635,6 +3796,28 @@ def _run_high_motion_recovery_pass(
         int(summary["accepted_chain_count"]) / attempts, 6,
     ) if attempts else 0.0
     return summary
+
+
+def _record_has_catastrophic_raw_chain(record: dict[str, Any]) -> bool:
+    points = np.asarray(record["raw_points"], dtype=np.float32)
+    scores = np.asarray(record["raw_scores"], dtype=np.float32)
+    body_scale = max(float(record["pose_graph"].body_scale), 1.0)
+    for chain_name, (root, middle, end) in CORE_LIMB_CHAINS.items():
+        if any(
+            joint >= len(points) or joint >= len(scores)
+            or float(scores[joint]) <= 0.0
+            or not np.isfinite(points[joint]).all()
+            for joint in (root, middle, end)
+        ):
+            continue
+        expected = _record_expected_chain_lengths(record, chain_name, body_scale)
+        ratios = (
+            float(np.linalg.norm(points[middle] - points[root])) / max(expected[0], 1e-6),
+            float(np.linalg.norm(points[end] - points[middle])) / max(expected[1], 1e-6),
+        )
+        if any(ratio > 1.85 or ratio < 0.25 for ratio in ratios):
+            return True
+    return False
 
 
 def _affected_high_motion_chains(
@@ -5247,19 +5430,20 @@ def process_pose_video(
         pass3_audit,
         maximum_ratio=pose_v6_config.iterative.expert_resolution_ratio,
     ) if pose_v6_config.iterative.enabled else []
+    temporal_expert_summary = high_motion_summary.get("temporal_expert_v67", {})
+    if not isinstance(temporal_expert_summary, dict):
+        temporal_expert_summary = {}
     expert_resolution_summary: dict[str, object] = {
         "enabled_by_profile": pose_v6_config.iterative.expert_resolution_ratio > 0.0,
         "maximum_frame_ratio": pose_v6_config.iterative.expert_resolution_ratio,
         "candidate_segment_count": len(expert_segments),
         "candidate_frame_count": sum(segment.frame_count for segment in expert_segments),
-        "executed_frame_count": 0,
-        "usage_ratio": 0.0,
-        "backend_executed": False,
-        "source_if_executed": "EXPERT_REFINED_MODEL",
-        "reason": (
-            "no repository-configured expert weights, validated canonical mapping, "
-            "or same-video quality benchmark"
-        ),
+        "executed_frame_count": int(temporal_expert_summary.get("executed_frame_count", 0)),
+        "usage_ratio": float(temporal_expert_summary.get("usage_ratio", 0.0)),
+        "backend_executed": bool(temporal_expert_summary.get("backend_executed", False)),
+        "source_if_executed": "TAR_TEMPORAL_MEASUREMENT+POINT_TRACK_SUPPORT",
+        "reason": temporal_expert_summary.get("reason", "NOT_EXECUTED"),
+        "temporal_expert_v67": temporal_expert_summary,
         "candidates": [candidate.to_dict() for candidate in expert_candidates],
     }
 
@@ -5505,12 +5689,18 @@ def process_pose_video(
             for value in high_motion_record.values():
                 if isinstance(value, dict) and value.get("accepted") is True:
                     high_motion_indexes.update(value.get("accepted_joint_indexes", []))
+        expert_indexes = set(
+            record.get("temporal_expert_v67", {}).get("accepted_joint_indexes", [])
+            if isinstance(record.get("temporal_expert_v67"), dict) else []
+        )
         source_passes: list[str] = []
         for joint_index, source in enumerate(temporal.sources):
             if source not in {PointSource.MEASURED, PointSource.REFINED_MEASUREMENT}:
                 source_passes.append(f"temporal-{source.value.lower()}")
             elif joint_index in high_motion_indexes:
                 source_passes.append("pass4-high-motion-limb")
+            elif joint_index in expert_indexes:
+                source_passes.append("temporal-expert-v67")
             elif joint_index in pass3_indexes:
                 source_passes.append("pass3-critical")
             elif joint_index in record["refined_joint_indexes"]:
@@ -6254,6 +6444,17 @@ def process_pose_video(
                         .bone_length_ratio_to_canonical
                     ),
                     track_id=str(body_record["final_track_id_v66"]),
+                    first_source_pass=(
+                        temporal.source_passes[first_index]
+                        if first_index < len(temporal.source_passes) else None
+                    ),
+                    second_source_pass=(
+                        temporal.source_passes[second_index]
+                        if second_index < len(temporal.source_passes) else None
+                    ),
+                    effective_timestamp_seconds=float(
+                        body_record["source_timestamp_seconds"]
+                    ),
                 )
             render_v6_frames.append(bone_overrides)
             layer_contract = build_frame_layer_contract(
@@ -6370,6 +6571,30 @@ def process_pose_video(
                     "bone_sources": {
                         name: item.source.value for name, item in bone_overrides.items()
                     },
+                    "bone_endpoint_sources": {
+                        name: {
+                            "first": item.first_source,
+                            "second": item.second_source,
+                            "first_pass": item.first_source_pass,
+                            "second_pass": item.second_source_pass,
+                        }
+                        for name, item in bone_overrides.items()
+                    },
+                    "bone_track_ids": {
+                        name: item.track_id for name, item in bone_overrides.items()
+                    },
+                    "bone_effective_timestamps": {
+                        name: item.effective_timestamp_seconds
+                        for name, item in bone_overrides.items()
+                    },
+                    "bone_lengths_pixels": {
+                        name: item.bone_length_pixels
+                        for name, item in bone_overrides.items()
+                    },
+                    "bone_canonical_lengths_pixels": {
+                        name: item.canonical_length_pixels
+                        for name, item in bone_overrides.items()
+                    },
                     "bone_visibility_states": {
                         name: item.visibility_state for name, item in bone_overrides.items()
                     },
@@ -6443,6 +6668,9 @@ def process_pose_video(
                     "pass3_fusion": body_record.get("pass3_fusion"),
                     "high_motion_recovery_v66": body_record.get(
                         "high_motion_recovery_v66"
+                    ),
+                    "temporal_expert_v67": body_record.get(
+                        "temporal_expert_v67"
                     ),
                     "trajectory_refinement": body_record.get("trajectory_refinement"),
                     "global_trajectory_optimization": body_record.get(
@@ -6983,7 +7211,13 @@ def process_pose_video(
             "temporal_supersample_usage_ratio", 0.0,
         ),
         "deep_flow_usage_ratio": 0.0,
-        "expert_pose_usage_ratio": 0.0,
+        "expert_pose_usage_ratio": float(
+            high_motion_summary.get("temporal_expert_v67", {}).get(
+                "usage_ratio", 0.0,
+            )
+            if isinstance(high_motion_summary.get("temporal_expert_v67"), dict)
+            else 0.0
+        ),
         "catastrophic_bone_outlier_count": int(catastrophic_rendered),
         "accepted_geometry_target": {
             "catastrophic_bone_outlier_count": 0,
@@ -6992,6 +7226,9 @@ def process_pose_video(
     }
     render_v6_summary["high_motion_v66"] = high_motion_kpis
     temporal_v6_summary["high_motion_recovery_v66"] = high_motion_summary
+    temporal_v6_summary["temporal_expert_v67"] = high_motion_summary.get(
+        "temporal_expert_v67", {}
+    )
     temporal_v6_summary["limb_chain_consistency_v66"] = limb_chain_result.summary
     frame_quality_values = sorted(
         float(frame.quality_score) for frame in final_audit.frames
@@ -8114,7 +8351,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.6"
+        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.7"
     )
     parser.add_argument(
         "--once",

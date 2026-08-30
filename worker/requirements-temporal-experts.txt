@@ -1,0 +1,5 @@
+# Optional Python pieces for Pose V6.7 temporal experts. TAR's inference-only
+# ViT is implemented checkpoint-compatibly in-repo, so MMPose/MMCV are not
+# runtime dependencies. Install after the CUDA-matched torch/torchvision stack.
+einops>=0.8,<1
+gdown>=5.2,<6

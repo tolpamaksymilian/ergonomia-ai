@@ -306,8 +306,8 @@ def test_renderer_never_mixes_current_and_stale_endpoint() -> None:
         endpoint_age_delta=0.2, track_id="one",
     )
     assert measured.source == RenderSource.MEASURED
-    assert rejected.source == RenderSource.HELD
-    assert rejected.second is not None and rejected.second[0] < 200.0
+    assert rejected.source == RenderSource.HIDDEN
+    assert rejected.second is None
     assert rejected.rejection_reason == "ENDPOINT_TIME_MISMATCH"
 
 

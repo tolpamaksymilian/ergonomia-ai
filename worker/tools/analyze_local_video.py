@@ -1,4 +1,4 @@
-"""Run the production Pose V6.6 core for a local video without Supabase."""
+"""Run the production Pose V6.7 core for a local video without Supabase."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from pose_worker import (  # noqa: E402
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lokalny real-video benchmark Pose V6.6 bez Supabase i kolejki."
+        description="Lokalny real-video benchmark Pose V6.7 bez Supabase i kolejki."
     )
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
     parser.add_argument(
@@ -56,6 +56,17 @@ def parse_arguments() -> argparse.Namespace:
         "--compare-profiles",
         action="store_true",
         help="Uruchom kolejno ACCURATE i ULTRA oraz zapisz comparison.json/md.",
+    )
+    parser.add_argument(
+        "--pipeline-mode",
+        choices=("RTMW_ONLY", "V66", "V67_TAR", "V67_TAR_TAPNEXT"),
+        default="V67_TAR_TAPNEXT",
+        help="Jawny wariant ablation benchmarku temporalnego.",
+    )
+    parser.add_argument(
+        "--compare-temporal-modes",
+        action="store_true",
+        help="Uruchom cztery tryby RTMW_ONLY/V66/V67_TAR/V67_TAR_TAPNEXT.",
     )
     parser.add_argument("--debug-overlay", action="store_true")
     parser.add_argument("--refine", action=argparse.BooleanOptionalAction, default=None, help="Włącz lub wyłącz ograniczony Pass 2.")
@@ -88,9 +99,12 @@ def main() -> int:
         return 2
     if arguments.compare_profiles:
         return _run_profile_comparison(arguments, input_path, output_directory)
+    if arguments.compare_temporal_modes:
+        return _run_temporal_comparison(arguments, input_path, output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
 
     os.environ["POSE_V6_PROFILE"] = arguments.profile
+    _configure_pipeline_mode(arguments.pipeline_mode)
     settings = load_settings(require_supabase=False)
     settings = replace(
         settings,
@@ -105,7 +119,9 @@ def main() -> int:
         draw_objects=settings.draw_objects or bool(arguments.objects),
         keep_worker_files=True,
         pose_v5_refinement_enabled=(
-            settings.pose_v5_refinement_enabled
+            False
+            if arguments.pipeline_mode == "RTMW_ONLY"
+            else settings.pose_v5_refinement_enabled
             if arguments.refine is None
             else bool(arguments.refine)
         ),
@@ -196,6 +212,7 @@ def main() -> int:
                 "generated_by": "Ergonomia AI local Pose benchmark",
                 "worker_version": WORKER_VERSION,
                 "profile": arguments.profile,
+                "pipeline_mode": arguments.pipeline_mode,
                 "input_file": input_path.name,
                 "processed_frames": result.processed_frames,
                 "accuracy_claimed": False,
@@ -231,6 +248,7 @@ def main() -> int:
     print(f"OUTPUT={output_directory}")
     print(f"QUALITY_SUMMARY={quality_summary_path}")
     print(f"PROFILE={arguments.profile}")
+    print(f"PIPELINE_MODE={arguments.pipeline_mode}")
     print(f"WORKER_VERSION={WORKER_VERSION}")
     return 0
 
@@ -250,6 +268,7 @@ def _run_profile_comparison(
             "--input", str(input_path),
             "--output", str(profile_directory),
             "--profile", profile,
+            "--pipeline-mode", arguments.pipeline_mode,
         ]
         if arguments.debug_overlay:
             command.append("--debug-overlay")
@@ -291,6 +310,67 @@ def _run_profile_comparison(
     )
     print(f"COMPARISON={output_directory / 'comparison.json'}")
     return 0
+
+
+def _run_temporal_comparison(
+    arguments: argparse.Namespace,
+    input_path: Path,
+    output_directory: Path,
+) -> int:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    modes = ("RTMW_ONLY", "V66", "V67_TAR", "V67_TAR_TAPNEXT")
+    summaries: dict[str, dict[str, object]] = {}
+    for mode in modes:
+        destination = output_directory / mode.lower()
+        command = [
+            sys.executable, str(Path(__file__).resolve()),
+            "--input", str(input_path), "--output", str(destination),
+            "--profile", arguments.profile, "--pipeline-mode", mode,
+        ]
+        if arguments.debug_overlay:
+            command.append("--debug-overlay")
+        if arguments.no_hands:
+            command.append("--no-hands")
+        completed = subprocess.run(command, check=False)
+        if completed.returncode != 0:
+            return completed.returncode
+        summaries[mode] = json.loads(
+            (destination / "quality-summary.json").read_text(encoding="utf-8")
+        )
+    comparison = {
+        "schema_version": "1.0",
+        "comparison_mode": "temporal-expert-ablation",
+        "baseline": "RTMW_ONLY",
+        "accuracy_claimed": False,
+        "modes": {
+            mode: collect_quality_kpis(document) for mode, document in summaries.items()
+        },
+    }
+    (output_directory / "temporal-comparison.json").write_text(
+        json.dumps(comparison, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return 0
+
+
+def _configure_pipeline_mode(mode: str) -> None:
+    if mode == "RTMW_ONLY":
+        os.environ["POSE_ITERATIVE_REFINEMENT_ENABLED"] = "false"
+        os.environ["POSE_HIGH_MOTION_RECOVERY_ENABLED"] = "false"
+        os.environ["POSE_FLOW_ENABLED"] = "false"
+        os.environ["POSE_TEMPORAL_EXPERT_ENABLED"] = "false"
+        os.environ["POSE_TAPNEXT_ENABLED"] = "false"
+    elif mode == "V66":
+        os.environ["POSE_TEMPORAL_EXPERT_ENABLED"] = "false"
+        os.environ["POSE_TAPNEXT_ENABLED"] = "false"
+    elif mode == "V67_TAR":
+        os.environ["POSE_TEMPORAL_EXPERT_ENABLED"] = "true"
+        os.environ["POSE_TAPNEXT_ENABLED"] = "false"
+    elif mode == "V67_TAR_TAPNEXT":
+        os.environ["POSE_TEMPORAL_EXPERT_ENABLED"] = "true"
+        os.environ["POSE_TAPNEXT_ENABLED"] = "true"
+    else:
+        raise ValueError(f"unsupported pipeline mode: {mode}")
 
 
 def _comparison_markdown(comparison: dict[str, object]) -> str:
@@ -459,6 +539,7 @@ def _save_worst_frames(
             cv2.imwrite(str(destination / f"{stem}-original.jpg"), source_frame)
             cv2.imwrite(str(destination / f"{stem}-overlay.jpg"), overlay_frame)
             debug = overlay_frame.copy()
+            _draw_temporal_expert_candidates(debug, item)
             reasons = item.get("reasons", [])
             reason_text = ", ".join(str(value) for value in reasons) or "LOWEST_COMPOSITE_QUALITY"
             cv2.rectangle(debug, (0, 0), (debug.shape[1], 62), (5, 12, 20), -1)
@@ -480,6 +561,40 @@ def _save_worst_frames(
     finally:
         source_capture.release()
         overlay_capture.release()
+
+
+def _draw_temporal_expert_candidates(
+    image: object,
+    item: dict[str, object],
+) -> None:
+    if not hasattr(image, "shape"):
+        return
+    expert = item.get("temporal_expert_v67")
+    if not isinstance(expert, dict):
+        return
+    sources = (
+        ("rtmw_candidate", (255, 210, 30), "RTMW"),
+        ("tar_candidate", (220, 60, 230), "TAR"),
+    )
+    for key, color, _ in sources:
+        values = expert.get(key)
+        if not isinstance(values, dict):
+            continue
+        for value in values.values():
+            point = value.get("point") if isinstance(value, dict) else None
+            if isinstance(point, list) and len(point) == 2:
+                cv2.circle(image, (round(float(point[0])), round(float(point[1]))), 4, color, 1, cv2.LINE_AA)
+    tracks = expert.get("tapnext_tracks")
+    if isinstance(tracks, dict):
+        for value in tracks.values():
+            if not isinstance(value, dict):
+                continue
+            forward = value.get("forward_point")
+            backward = value.get("backward_point")
+            if isinstance(forward, list) and len(forward) == 2:
+                cv2.drawMarker(image, (round(float(forward[0])), round(float(forward[1]))), (50, 230, 100), cv2.MARKER_CROSS, 8, 1)
+            if isinstance(backward, list) and len(backward) == 2:
+                cv2.drawMarker(image, (round(float(backward[0])), round(float(backward[1]))), (40, 150, 255), cv2.MARKER_TILTED_CROSS, 8, 1)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,4 @@
-"""Optional secondary-pose boundary and V6.6 readiness decision matrix.
-
-No secondary model is bundled or silently downloaded.  This module defines the
-contract required before a candidate can participate in production consensus.
-"""
+"""Temporal expert contracts and the explicit V6.7 model decision matrix."""
 
 from __future__ import annotations
 
@@ -110,48 +106,32 @@ class ExpertCandidateAssessment:
 def assess_local_expert_candidates(
     configured_weights: Mapping[str, Path | None] | None = None,
 ) -> tuple[ExpertCandidateAssessment, ...]:
-    """Report repository-local readiness; never downloads weights or guesses maps."""
+    """Report local TAR readiness; model artifacts are never downloaded here."""
 
-    weights = configured_weights or {}
-    candidates = (
-        "ViTPose-H WholeBody",
-        "DWPose WholeBody",
-        "RTMPose-X WholeBody",
-    )
-    return tuple(
-        ExpertCandidateAssessment(
-            candidate=name,
-            integrated=False,
-            configured_weights=(
-                name in weights
-                and weights[name] is not None
-                and Path(weights[name]).is_file()
-            ),
-            canonical_mapping_validated=False,
-            benchmark_validated=False,
-            reason=(
-                "no repository-configured weights, validated canonical joint "
-                "mapping, or same-video benchmark; RTMW remains primary"
-            ),
-            availability="class-reviewed-no-local-backend",
-            backend="requires-separate-export/runtime integration",
-            weights=(
-                "repository-local"
-                if name in weights
-                and weights[name] is not None
-                and Path(weights[name]).is_file()
-                else "not-repository-configured"
-            ),
-            wholebody=True,
-            joint_mapping="COCO-WholeBody-133 mapping not repository-validated",
-            vram_estimate="must be measured on target ONNX/TensorRT export",
-            hard_motion_suitability=(
-                "promising but unverified on the supplied motion pattern"
-            ),
-            decision="not enabled; no validated secondary inference asset",
-        )
-        for name in candidates
-    )
+    repository = Path(__file__).resolve().parents[3]
+    default = repository / "worker/models/temporal/tar-vitpose/tarvitpose_b_17.pt"
+    weights = configured_weights or {"TAR-ViTPose-B-17": default}
+    path = weights.get("TAR-ViTPose-B-17")
+    present = path is not None and Path(path).is_file()
+    return (ExpertCandidateAssessment(
+        candidate="TAR-ViTPose-B-17",
+        integrated=True,
+        configured_weights=present,
+        canonical_mapping_validated=True,
+        benchmark_validated=False,
+        reason=(
+            "real five-frame temporal pose backend; limited intentionally to "
+            "COCO17 core body joints and anatomy-gated before acceptance"
+        ),
+        availability="installed" if present else "artifact-missing",
+        backend="PyTorch CUDA; inference-only OpenMMLab ViT backbone",
+        weights="official Apache-2.0 checkpoint" if present else "not-installed",
+        wholebody=False,
+        joint_mapping="COCO17 indexes 0..16; only limb indexes 5..16 can replace RTMW",
+        vram_estimate="measured by each inference run",
+        hard_motion_suitability="five real-frame temporal observation",
+        decision="enabled for hard-motion consensus when artifacts are present",
+    ),)
 
 
 def pose_model_evaluation_table(
@@ -183,6 +163,41 @@ def pose_model_evaluation_table(
         "hard_motion_suitability": candidate.hard_motion_suitability,
         "decision": candidate.decision,
     } for candidate in candidates)
+    rows.extend((
+        {
+            "model": "TAPNext++-TRecViT-B-512",
+            "availability": "official-source-and-checkpoint-required",
+            "backend": "PyTorch CUDA recurrent point tracker",
+            "weights": "official Apache-2.0 checkpoint",
+            "wholebody": False,
+            "joint_mapping": "tracks only seeded COCO17 core limb points",
+            "vram_estimate": "measured by each inference run",
+            "hard_motion_suitability": "bidirectional temporal evidence",
+            "decision": "enabled as support; never a pose measurement",
+        },
+        {
+            "model": "Track-On-R",
+            "availability": "blocked-by-gated-DINOv3-weights",
+            "backend": "not integrated",
+            "weights": "DINOv3 access must be granted separately",
+            "wholebody": False,
+            "joint_mapping": "not applicable",
+            "vram_estimate": "not measured",
+            "hard_motion_suitability": "challenger only",
+            "decision": "not a production dependency",
+        },
+        {
+            "model": "SEA-RAFT",
+            "availability": "optional BSD-3-Clause",
+            "backend": "not integrated",
+            "weights": "not installed",
+            "wholebody": False,
+            "joint_mapping": "dense flow only",
+            "vram_estimate": "not measured",
+            "hard_motion_suitability": "fallback challenger if point tracking remains unresolved",
+            "decision": "deferred; TAPNext++ is the selected tracker",
+        },
+    ))
     return tuple(rows)
 
 
