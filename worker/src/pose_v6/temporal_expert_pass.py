@@ -26,6 +26,7 @@ class TemporalExpertFrameResult:
     tar: TarPoseObservation
     tracker: Mapping[int, TrackerEvidence]
     fusion: Mapping[int, JointFusionDecision]
+    tracker_reason: str = "NO_TRACK_EVIDENCE"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -46,6 +47,10 @@ class TemporalExpertFrameResult:
                         round(float(self.tar.points[index, 1]), 3),
                     ],
                     "quality": round(float(self.tar.scores[index]), 6),
+                    "spatial_status": (
+                        self.tar.point_statuses[index]
+                        if index < len(self.tar.point_statuses) else "UNKNOWN"
+                    ),
                 }
                 for index in CORE_LIMB_JOINTS
             },
@@ -64,6 +69,8 @@ class TemporalExpertFrameResult:
                 }
                 for index, evidence in self.tracker.items()
             },
+            "tracker_available": bool(self.tracker),
+            "tracker_reason": self.tracker_reason,
             "fusion": {
                 str(index): decision.to_dict()
                 for index, decision in self.fusion.items()
@@ -75,6 +82,19 @@ class TemporalExpertFrameResult:
 class TemporalExpertPassResult:
     frames: Mapping[int, TemporalExpertFrameResult]
     summary: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class TapAnchorSegment:
+    hard_start: int
+    hard_end: int
+    forward_anchor: int | None
+    backward_anchor: int | None
+    reason: str
+
+    @property
+    def available(self) -> bool:
+        return self.forward_anchor is not None and self.backward_anchor is not None
 
 
 def run_temporal_expert_pass(
@@ -127,10 +147,18 @@ def run_temporal_expert_pass(
         summary["missing_artifact_count"] = len(missing)
         return TemporalExpertPassResult({}, summary)
 
-    segments = _segments(specialist_indexes, len(records), padding=1)
+    anchor_search_frames = max(
+        1, int(os.getenv("POSE_TAPNEXT_ANCHOR_SEARCH_FRAMES", "12")),
+    )
+    anchor_segments = _tap_anchor_segments(
+        specialist_indexes, records, maximum_search_frames=anchor_search_frames,
+    )
     required_indexes = set()
-    for start, end in segments:
-        required_indexes.update(range(start, end + 1))
+    for segment in anchor_segments:
+        if segment.available:
+            required_indexes.update(range(
+                int(segment.forward_anchor), int(segment.backward_anchor) + 1,
+            ))
     for center in specialist_indexes:
         required_indexes.update(
             min(max(center + offset, 0), len(records) - 1)
@@ -169,17 +197,30 @@ def run_temporal_expert_pass(
     ), default=0)
 
     track_evidence: dict[int, dict[int, TrackerEvidence]] = {}
+    tracker_reasons: dict[int, str] = {
+        index: segment.reason
+        for segment in anchor_segments
+        for index in range(segment.hard_start, segment.hard_end + 1)
+    }
     tap_seconds = 0.0
     tap_peak = 0
-    if tap_enabled:
+    no_anchor_count = sum(not segment.available for segment in anchor_segments)
+    if tap_enabled and any(segment.available for segment in anchor_segments):
         tap_backend = TapNextPPBackend(tap_checkpoint, device=device)
         try:
-            for start, end in segments:
+            for segment in anchor_segments:
+                if not segment.available:
+                    continue
+                start = int(segment.forward_anchor)
+                end = int(segment.backward_anchor)
                 common_joints = tuple(
                     joint for joint in CORE_LIMB_JOINTS
-                    if _strong_joint(records[start], joint) and _strong_joint(records[end], joint)
+                    if _good_anchor_joint(records[start], joint)
+                    and _good_anchor_joint(records[end], joint)
                 )
                 if not common_joints:
+                    for index in range(segment.hard_start, segment.hard_end + 1):
+                        tracker_reasons[index] = "NO_COMMON_VALID_ANCHOR_JOINTS"
                     continue
                 segment_frames = [video_frames[index] for index in range(start, end + 1)]
                 start_points = np.stack([
@@ -198,17 +239,31 @@ def run_temporal_expert_pass(
                     tracks.backward.peak_vram_bytes or 0,
                 )
                 _merge_track_evidence(track_evidence, tracks, start, common_joints)
+                for index in range(segment.hard_start, segment.hard_end + 1):
+                    tracker_reasons[index] = "VALID_BIDIRECTIONAL_ANCHORS"
         finally:
             tap_backend.close()
     summary["tapnext_executed"] = bool(track_evidence)
     summary["tapnext_inference_seconds"] = round(tap_seconds, 6)
     summary["tapnext_peak_vram_bytes"] = tap_peak
     summary["bidirectional_tracking"] = True
+    summary["tap_anchor_search_frames"] = anchor_search_frames
+    summary["tap_anchor_segment_count"] = len(anchor_segments)
+    summary["tap_no_valid_anchor_segment_count"] = no_anchor_count
+    summary["tracker_available"] = bool(track_evidence)
+    summary["tracker_reason"] = (
+        "VALID_BIDIRECTIONAL_ANCHORS" if track_evidence
+        else "NO_VALID_ANCHOR" if no_anchor_count else "NO_COMMON_VALID_ANCHOR_JOINTS"
+    )
 
     frame_results: dict[int, TemporalExpertFrameResult] = {}
     for frame_index, tar in tar_observations.items():
         record = records[frame_index]
-        evidence = track_evidence.get(frame_index, {})
+        evidence = _validated_track_evidence(
+            track_evidence.get(frame_index, {}),
+            video_frames[frame_index].shape[1],
+            video_frames[frame_index].shape[0],
+        )
         decisions = fuse_core_frame(
             np.asarray(record["raw_points"], dtype=np.float32),
             np.asarray(record["raw_scores"], dtype=np.float32),
@@ -219,6 +274,7 @@ def run_temporal_expert_pass(
         )
         frame_results[frame_index] = TemporalExpertFrameResult(
             frame_index, tar, evidence, decisions,
+            tracker_reasons.get(frame_index, "NO_VALID_ANCHOR"),
         )
     accepted = sum(
         decision.accepted
@@ -257,6 +313,47 @@ def _segments(indexes: set[int], frame_count: int, *, padding: int) -> tuple[tup
         else:
             merged.append((start, end))
     return tuple(merged)
+
+
+def _tap_anchor_segments(
+    indexes: set[int],
+    records: Sequence[Mapping[str, object]],
+    *,
+    maximum_search_frames: int,
+    minimum_good_joints: int = 6,
+) -> tuple[TapAnchorSegment, ...]:
+    """Find native, trustworthy frames bracketing each contiguous hard run."""
+
+    if not indexes or not records:
+        return ()
+    runs = _segments(indexes, len(records), padding=0)
+    output: list[TapAnchorSegment] = []
+    for hard_start, hard_end in runs:
+        forward_anchor = next((
+            candidate
+            for candidate in range(
+                hard_start - 1,
+                max(-1, hard_start - maximum_search_frames - 1),
+                -1,
+            )
+            if len(_good_anchor_joints(records[candidate])) >= minimum_good_joints
+        ), None)
+        backward_anchor = next((
+            candidate
+            for candidate in range(
+                hard_end + 1,
+                min(len(records), hard_end + maximum_search_frames + 1),
+            )
+            if len(_good_anchor_joints(records[candidate])) >= minimum_good_joints
+        ), None)
+        if forward_anchor is None or backward_anchor is None:
+            reason = "NO_VALID_ANCHOR"
+        else:
+            reason = "VALID_BIDIRECTIONAL_ANCHORS"
+        output.append(TapAnchorSegment(
+            hard_start, hard_end, forward_anchor, backward_anchor, reason,
+        ))
+    return tuple(output)
 
 
 def _read_frames(
@@ -299,6 +396,34 @@ def _merge_track_evidence(
             )
 
 
+def _validated_track_evidence(
+    evidence: Mapping[int, TrackerEvidence],
+    frame_width: int,
+    frame_height: int,
+) -> dict[int, TrackerEvidence]:
+    """Reject tracker support outside native pixels before pose fusion.
+
+    TAP remains support-only; canonical bone, chain, velocity and side gates are
+    applied to the selected image measurement by the production anatomy pass.
+    """
+
+    output: dict[int, TrackerEvidence] = {}
+    for joint, item in evidence.items():
+        forward_valid = item.forward_visible and _point_in_frame(
+            item.forward_point, frame_width, frame_height,
+        )
+        backward_valid = item.backward_visible and _point_in_frame(
+            item.backward_point, frame_width, frame_height,
+        )
+        output[joint] = TrackerEvidence(
+            item.forward_point if forward_valid else None,
+            item.backward_point if backward_valid else None,
+            forward_valid,
+            backward_valid,
+        )
+    return output
+
+
 def _record_bbox(record: Mapping[str, object]) -> np.ndarray | None:
     for key in ("render_bbox_array", "bbox_array"):
         value = record.get(key)
@@ -310,14 +435,80 @@ def _record_bbox(record: Mapping[str, object]) -> np.ndarray | None:
     return None
 
 
-def _strong_joint(record: Mapping[str, object], joint: int) -> bool:
+def _good_anchor_joints(
+    record: Mapping[str, object], joint: int | None = None,
+) -> tuple[int, ...] | bool:
+    if joint is not None:
+        return _good_anchor_joint(record, joint)
+    return tuple(index for index in CORE_LIMB_JOINTS if _good_anchor_joint(record, index))
+
+
+def _good_anchor_joint(record: Mapping[str, object], joint: int) -> bool:
     points = np.asarray(record["raw_points"], dtype=np.float32)
     scores = np.asarray(record["raw_scores"], dtype=np.float32)
-    return (
+    if not (
         joint < len(points) and joint < len(scores)
-        and float(scores[joint]) >= 0.25
+        and float(scores[joint]) >= 0.60
         and bool(np.isfinite(points[joint]).all())
         and not bool(np.allclose(points[joint], 0.0))
+        and bool(record.get("detected", True))
+        and not bool(record.get("prevalidation_motion_blur", False))
+        and float(record.get("tracking_identity_score", 1.0)) >= 0.55
+    ):
+        return False
+    graph = record.get("pose_graph")
+    joints = getattr(graph, "joints", None)
+    if joints is None or joint >= len(joints):
+        return False
+    state = joints[joint]
+    source = str(getattr(getattr(state, "source", None), "value", getattr(state, "source", "")))
+    temporal = str(getattr(
+        getattr(state, "temporal_state", None), "value", getattr(state, "temporal_state", ""),
+    ))
+    occlusion = str(getattr(
+        getattr(state, "occlusion_state", None), "value", getattr(state, "occlusion_state", ""),
+    ))
+    rejection_reasons = tuple(str(value).upper() for value in getattr(
+        state, "rejection_reasons", (),
+    ))
+    if (
+        not bool(getattr(state, "valid", False))
+        or float(getattr(state, "quality", 0.0)) < 0.55
+        or source.lower() != "raw"
+        or temporal.upper() != "STABLE"
+        or occlusion.upper() != "VISIBLE"
+        or any("SIDE" in reason or "CROSS" in reason for reason in rejection_reasons)
+    ):
+        return False
+    joint_name = str(getattr(state, "name", ""))
+    related_bones = [
+        bone for bone in getattr(graph, "bones", {}).values()
+        if joint_name in {str(getattr(bone, "joint_a", "")), str(getattr(bone, "joint_b", ""))}
+    ]
+    return not related_bones or all(
+        bool(getattr(bone, "valid", False)) and float(getattr(bone, "quality", 0.0)) >= 0.45
+        for bone in related_bones
+    )
+
+
+def _strong_joint(record: Mapping[str, object], joint: int) -> bool:
+    """Backward-compatible alias for callers/tests predating strict anchors."""
+
+    return _good_anchor_joint(record, joint)
+
+
+def _point_in_frame(
+    point: tuple[float, float] | None,
+    frame_width: int,
+    frame_height: int,
+) -> bool:
+    if point is None:
+        return False
+    value = np.asarray(point, dtype=np.float64).reshape(-1)
+    return bool(
+        value.size == 2 and np.isfinite(value).all()
+        and 0.0 <= value[0] < frame_width
+        and 0.0 <= value[1] < frame_height
     )
 
 
@@ -329,5 +520,7 @@ def _configured_path(name: str, default: Path) -> Path:
 __all__ = [
     "TemporalExpertFrameResult",
     "TemporalExpertPassResult",
+    "TapAnchorSegment",
+    "_tap_anchor_segments",
     "run_temporal_expert_pass",
 ]

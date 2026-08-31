@@ -3473,6 +3473,20 @@ def _run_high_motion_recovery_pass(
                     chain_name
                 ] = chain_diagnostic
                 if not valid:
+                    for joint, fusion_decision in zip(chain, decisions):
+                        if (
+                            fusion_decision is not None
+                            and fusion_decision.accepted
+                            and fusion_decision.measurement_source is not None
+                            and "TAR" in fusion_decision.measurement_source
+                        ):
+                            tar_candidate = record["temporal_expert_v67"][
+                                "tar_candidate"
+                            ].get(str(joint))
+                            if isinstance(tar_candidate, dict):
+                                tar_candidate["final_validation_status"] = (
+                                    "ANATOMICAL_OUTLIER"
+                                )
                     continue
                 for joint in proposed:
                     record["raw_points"][joint] = candidate_points[joint]
@@ -3784,7 +3798,10 @@ def _run_high_motion_recovery_pass(
             ) + max(0, len(affected_chains) - accepted_count)
     except (cv2.error, RuntimeError, ValueError, TypeError, IndexError) as error:
         logger.warning(
-            "Pose V6.6 high-motion recovery degraded: %s", type(error).__name__,
+            "Pose V6.6 high-motion recovery degraded: %s: %s",
+            type(error).__name__,
+            error,
+            exc_info=True,
         )
         summary["degraded"] = True
         summary["degraded_reason"] = type(error).__name__

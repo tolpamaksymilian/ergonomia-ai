@@ -7,8 +7,17 @@ import numpy as np
 import pytest
 
 from worker.src.pose_v6.render_continuity import PersistentBoneRenderer, RenderSource
+from worker.src.pose_v6.high_motion import validate_chain_candidate
 from worker.src.pose_v6.tapnextpp_backend import BidirectionalTapTracks, TapTrackSequence
-from worker.src.pose_v6.tar_vitpose_backend import TarPoseObservation
+from worker.src.pose_v6.tar_vitpose_backend import (
+    TarPointStatus,
+    TarPoseObservation,
+    _classify_source_point,
+    _crop_to_source,
+    _crop_transform,
+    _source_to_crop,
+    _validate_decoded_points,
+)
 from worker.src.pose_v6.temporal_expert_fusion import (
     CORE_LIMB_JOINTS,
     PoseMeasurement,
@@ -17,7 +26,11 @@ from worker.src.pose_v6.temporal_expert_fusion import (
     fuse_joint_measurements,
 )
 from worker.src.pose_v6 import temporal_expert_pass
-from worker.src.pose_v6.temporal_expert_pass import _segments, run_temporal_expert_pass
+from worker.src.pose_v6.temporal_expert_pass import (
+    _segments,
+    _tap_anchor_segments,
+    run_temporal_expert_pass,
+)
 
 
 def _pose(point: tuple[float, float] | None, quality: float, source: str) -> PoseMeasurement:
@@ -31,6 +44,40 @@ def _track(
     visible: bool = True,
 ) -> TrackerEvidence:
     return TrackerEvidence(forward, backward or forward, visible, visible)
+
+
+def _good_graph(body_scale: float = 180.0) -> SimpleNamespace:
+    joints = tuple(SimpleNamespace(
+        name=(
+            "left_shoulder" if index == 5 else "right_shoulder" if index == 6
+            else "left_elbow" if index == 7 else "right_elbow" if index == 8
+            else "left_wrist" if index == 9 else "right_wrist" if index == 10
+            else "left_hip" if index == 11 else "right_hip" if index == 12
+            else "left_knee" if index == 13 else "right_knee" if index == 14
+            else "left_ankle" if index == 15 else "right_ankle" if index == 16
+            else f"joint_{index}"
+        ),
+        valid=True,
+        quality=0.9,
+        source="raw",
+        temporal_state="STABLE",
+        occlusion_state="VISIBLE",
+        rejection_reasons=(),
+    ) for index in range(17))
+    return SimpleNamespace(body_scale=body_scale, joints=joints, bones={})
+
+
+def _records(points: np.ndarray, scores: np.ndarray, count: int = 7) -> list[dict[str, object]]:
+    return [{
+        "source_frame_index": index,
+        "raw_points": points.copy(),
+        "raw_scores": scores.copy(),
+        "bbox_array": np.asarray((10, 10, 120, 190), dtype=np.float32),
+        "pose_graph": _good_graph(),
+        "detected": True,
+        "prevalidation_motion_blur": False,
+        "tracking_identity_score": 0.95,
+    } for index in range(count)]
 
 
 def test_tracker_cannot_create_a_pose_measurement() -> None:
@@ -95,6 +142,7 @@ def test_forward_backward_disagreement_does_not_resolve_pose_conflict() -> None:
     )
     assert not decision.accepted
     assert decision.tracker_support == "FORWARD_BACKWARD_DISAGREEMENT"
+    assert decision.tap_fb_consensus_score == 0.0
 
 
 def test_tracker_occlusion_does_not_turn_missing_support_into_low_risk_evidence() -> None:
@@ -171,6 +219,119 @@ def test_hard_motion_segments_have_real_anchor_padding_and_merge() -> None:
     assert _segments({0, 9}, 10, padding=1) == ((0, 1), (8, 9))
 
 
+def test_tar_crop_transform_round_trip_preserves_source_pixels() -> None:
+    transform = _crop_transform(np.asarray((20, 15, 140, 195), dtype=np.float32), 200, 240)
+    source = np.asarray((77.25, 123.5), dtype=np.float32)
+    restored = _crop_to_source(_source_to_crop(source, transform), transform)
+    assert np.allclose(restored, source, atol=1e-4)
+
+
+def test_tar_spatial_validation_rejects_out_of_frame_without_clamping() -> None:
+    points = np.asarray((
+        (50.0, 60.0),
+        (1.0, 80.0),
+        (-15.0, 40.0),
+        (180.0, 80.0),
+    ), dtype=np.float32)
+    scores, statuses = _validate_decoded_points(
+        points,
+        np.ones(4, dtype=np.float32),
+        frame_width=200,
+        frame_height=160,
+        person_context_xyxy=(20.0, 10.0, 150.0, 150.0),
+    )
+    assert statuses == (
+        TarPointStatus.VALID_IN_FRAME.value,
+        TarPointStatus.OUTSIDE_PERSON_CONTEXT.value,
+        TarPointStatus.OUT_OF_FRAME.value,
+        TarPointStatus.OUTSIDE_PERSON_CONTEXT.value,
+    )
+    assert scores.tolist() == [1.0, 0.0, 0.0, 0.0]
+    assert np.array_equal(points[2], np.asarray((-15.0, 40.0), dtype=np.float32))
+
+
+def test_tar_near_edge_is_explicit_but_remains_a_measurement() -> None:
+    status = _classify_source_point(
+        np.asarray((2.0, 80.0)), frame_width=200, frame_height=160,
+        person_context_xyxy=(0.0, 0.0, 150.0, 150.0),
+    )
+    assert status == TarPointStatus.VALID_NEAR_EDGE
+
+
+def test_tap_uses_last_and_first_truly_good_anchor_not_nearest_blurred_frame() -> None:
+    points = np.tile(np.asarray((50.0, 60.0), dtype=np.float32), (133, 1))
+    scores = np.ones(133, dtype=np.float32) * 0.9
+    records = _records(points, scores, 9)
+    records[2]["prevalidation_motion_blur"] = True
+    records[5]["prevalidation_motion_blur"] = True
+    segments = _tap_anchor_segments({3, 4}, records, maximum_search_frames=4)
+    assert len(segments) == 1
+    assert segments[0].forward_anchor == 1
+    assert segments[0].backward_anchor == 6
+    assert segments[0].reason == "VALID_BIDIRECTIONAL_ANCHORS"
+
+
+def test_tap_is_unavailable_when_no_valid_anchor_exists() -> None:
+    points = np.tile(np.asarray((50.0, 60.0), dtype=np.float32), (133, 1))
+    scores = np.ones(133, dtype=np.float32) * 0.9
+    records = _records(points, scores, 7)
+    for record in records:
+        record["prevalidation_motion_blur"] = True
+    segments = _tap_anchor_segments({2, 3, 4}, records, maximum_search_frames=3)
+    assert not segments[0].available
+    assert segments[0].reason == "NO_VALID_ANCHOR"
+
+
+def test_out_of_frame_tar_and_bad_tap_seed_cannot_create_spear_line() -> None:
+    # A valid RTMW leg remains intact. TAR's ankle is outside the image and the
+    # surrounding records offer no valid TAP anchor.
+    rtmw_points = np.zeros((133, 2), dtype=np.float32)
+    rtmw_scores = np.zeros(133, dtype=np.float32)
+    rtmw_points[[11, 13, 15]] = ((80, 70), (82, 115), (84, 155))
+    rtmw_scores[[11, 13, 15]] = 0.9
+    tar_points = rtmw_points[:17].copy()
+    tar_scores = rtmw_scores[:17].copy()
+    tar_points[15] = (-800.0, 900.0)
+    tar_scores, statuses = _validate_decoded_points(
+        tar_points, tar_scores, frame_width=200, frame_height=180,
+        person_context_xyxy=(30.0, 20.0, 150.0, 175.0),
+    )
+    decision = fuse_core_frame(
+        rtmw_points, rtmw_scores, tar_points, tar_scores, {}, body_scale=120.0,
+    )[15]
+    assert statuses[15] == TarPointStatus.OUT_OF_FRAME.value
+    assert decision.accepted and decision.measurement_source == "RTMW"
+    assert decision.point == pytest.approx((84.0, 155.0))
+
+    renderer = PersistentBoneRenderer(persistence_seconds=1.0, minimum_quality=0.1)
+    rendered = renderer.update(
+        "left_lower_leg", np.asarray((82.0, 115.0)), np.asarray(decision.point),
+        first_source="MEASURED", second_source="MEASURED", confidence=0.8,
+        timestamp_seconds=0.0, bbox=np.asarray((30, 20, 150, 175)),
+        expected_length=40.0, frame_width=200, frame_height=180,
+        atomic_accepted=True, track_id="operator-1",
+    )
+    assert rendered.visible
+    assert np.linalg.norm(
+        np.asarray(rendered.second) - np.asarray(rendered.first),
+    ) < 50.0
+
+
+def test_missing_tracker_prediction_does_not_abort_anatomy_gate() -> None:
+    points = np.zeros((133, 2), dtype=np.float32)
+    scores = np.zeros(133, dtype=np.float32)
+    points[[11, 13, 15]] = ((50, 50), (50, 100), (50, 150))
+    scores[[11, 13, 15]] = 0.9
+    predictions = np.full((133, 2), np.nan, dtype=np.float32)
+    valid, decisions, _ = validate_chain_candidate(
+        "left_leg", points, scores, expected_lengths=(50.0, 50.0),
+        predicted_points=predictions, previous_points=points.copy(),
+        body_scale=200.0, fast_motion=True,
+    )
+    assert valid
+    assert all(decision.accepted for decision in decisions)
+
+
 def test_renderer_cache_cannot_override_final_temporal_expert_joint() -> None:
     renderer = PersistentBoneRenderer(persistence_seconds=1.0, minimum_quality=0.1)
     renderer.update(
@@ -220,12 +381,8 @@ def test_mocked_backends_execute_hard_segment_to_fusion(
     for joint in range(17):
         points[joint] = (30.0 + joint * 2.0, 40.0 + joint * 3.0)
     scores = np.ones(133, dtype=np.float32) * 0.85
-    records = [{
-        "source_frame_index": index,
-        "raw_points": points.copy(), "raw_scores": scores.copy(),
-        "bbox_array": np.asarray((10, 10, 120, 190), dtype=np.float32),
-        "pose_graph": SimpleNamespace(body_scale=180.0),
-    } for index in range(7)]
+    records = _records(points, scores)
+    records[3]["raw_scores"][9] = 0.0
     frames = {index: np.zeros((200, 140, 3), dtype=np.uint8) for index in range(7)}
     monkeypatch.setattr(temporal_expert_pass, "_read_frames", lambda *_: frames)
 
@@ -256,7 +413,11 @@ def test_mocked_backends_execute_hard_segment_to_fusion(
     assert result.summary["backend_executed"] is True
     assert result.summary["tar_executed"] is True
     assert result.summary["tapnext_executed"] is True
+    assert result.summary["tracker_reason"] == "VALID_BIDIRECTIONAL_ANCHORS"
     assert set(result.frames) == {2, 3, 4}
+    repaired_dropout = result.frames[3].fusion[9]
+    assert repaired_dropout.measurement_source == "TAR_TEMPORAL"
+    assert "POINT_TRACK_SUPPORT" in repaired_dropout.provenance
     assert all(
         decision.accepted
         for frame in result.frames.values() for decision in frame.fusion.values()

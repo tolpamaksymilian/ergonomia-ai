@@ -204,8 +204,10 @@ coverage alone from hiding a geometry regression.
 ## Compute policy and diagnostics
 
 Pass 1 covers the active video once. Pass 2 is capped at 30% hard frames; Pass
-3 is capped at the worst unresolved 5%. The expert-resolution candidate budget
-is capped at 0–3%; V6.7 executes it only where the hard-motion selector asks.
+3 is capped at the worst unresolved 5%. The legacy deep-resolution audit budget
+is capped at 0–3%. V6.7 temporal experts use a separate selector and can run on
+every HIGH/EXTREME, critical-chain or catastrophic-chain frame; their measured
+usage ratio is reported instead of being misrepresented by the legacy cap.
 Final repair is local to padded error segments, not a fourth whole-video pass.
 Convergence and minimum gain skip work early; ACCURATE allows three optimizer
 iterations and ULTRA five by default. `pose-keypoints.json` reports

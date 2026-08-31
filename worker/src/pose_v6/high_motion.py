@@ -330,17 +330,26 @@ def validate_chain_candidate(
     end_velocity = values[end] - previous[end] if previous is not None else np.zeros(2)
     first = gate.evaluate(
         values[root], values[middle], expected_length=expected_lengths[0],
-        predicted=predicted[middle] if predicted is not None else None,
+        predicted=_optional_point(predicted, middle),
         velocity=middle_velocity, body_scale=body_scale, fast_motion=fast_motion,
     )
     second = gate.evaluate(
         values[middle], values[end], expected_length=expected_lengths[1],
-        predicted=predicted[end] if predicted is not None else None,
+        predicted=_optional_point(predicted, end),
         velocity=end_velocity, body_scale=body_scale, fast_motion=fast_motion,
     )
     return first.accepted and second.accepted, (first, second), float(
         min(quality[root], quality[middle], quality[end])
     )
+
+
+def _optional_point(values: np.ndarray | None, index: int) -> np.ndarray | None:
+    if values is None or index >= len(values):
+        return None
+    point = np.asarray(values[index], dtype=np.float32).reshape(-1)
+    if point.size != 2 or not np.isfinite(point).all():
+        return None
+    return point
 
 
 def _time_gradient(values: np.ndarray, times: np.ndarray) -> np.ndarray:

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
@@ -24,6 +25,16 @@ TAR_WINDOW_SIZE = 5
 TAR_CHECKPOINT_BYTES = 1_619_532_723
 
 
+class TarPointStatus(StrEnum):
+    """Spatial validity of a decoded TAR point in source-video pixels."""
+
+    VALID_IN_FRAME = "VALID_IN_FRAME"
+    VALID_NEAR_EDGE = "VALID_NEAR_EDGE"
+    OUT_OF_FRAME = "OUT_OF_FRAME"
+    OUTSIDE_PERSON_CONTEXT = "OUTSIDE_PERSON_CONTEXT"
+    ANATOMICAL_OUTLIER = "ANATOMICAL_OUTLIER"
+
+
 @dataclass(frozen=True)
 class TarPoseObservation:
     points: np.ndarray
@@ -32,6 +43,7 @@ class TarPoseObservation:
     peak_vram_bytes: int | None
     model_name: str = TAR_MODEL_NAME
     coordinate_space: str = "ORIGINAL_PIXELS"
+    point_statuses: tuple[str, ...] = field(default_factory=tuple)
 
 
 class TarVitPoseBackend:
@@ -107,7 +119,17 @@ class TarVitPoseBackend:
             peak_vram = None
         elapsed = time.perf_counter() - started
         points, scores = _decode_heatmaps(heatmaps, transform)
-        return TarPoseObservation(points, scores, elapsed, peak_vram)
+        center_height, center_width = frames_bgr[TAR_WINDOW_SIZE // 2].shape[:2]
+        scores, statuses = _validate_decoded_points(
+            points,
+            scores,
+            frame_width=center_width,
+            frame_height=center_height,
+            person_context_xyxy=transform.source_xyxy,
+        )
+        return TarPoseObservation(
+            points, scores, elapsed, peak_vram, point_statuses=statuses,
+        )
 
     def close(self) -> None:
         model = getattr(self, "model", None)
@@ -210,6 +232,69 @@ def _decode_heatmaps(
         peak = float(heatmap[y, x])
         scores[joint] = float(np.clip(peak, 0.0, 1.0)) if math.isfinite(peak) else 0.0
     return points, scores
+
+
+def _classify_source_point(
+    point: np.ndarray,
+    *,
+    frame_width: int,
+    frame_height: int,
+    person_context_xyxy: tuple[float, float, float, float],
+) -> TarPointStatus:
+    value = np.asarray(point, dtype=np.float64).reshape(-1)
+    if value.size != 2 or not np.isfinite(value).all():
+        return TarPointStatus.OUT_OF_FRAME
+    x, y = float(value[0]), float(value[1])
+    if x < 0.0 or y < 0.0 or x >= frame_width or y >= frame_height:
+        return TarPointStatus.OUT_OF_FRAME
+    x1, y1, x2, y2 = person_context_xyxy
+    if x < x1 or x > x2 or y < y1 or y > y2:
+        return TarPointStatus.OUTSIDE_PERSON_CONTEXT
+    edge_margin = max(4.0, min(frame_width, frame_height) * 0.02)
+    if (
+        x < edge_margin or y < edge_margin
+        or x >= frame_width - edge_margin or y >= frame_height - edge_margin
+    ):
+        return TarPointStatus.VALID_NEAR_EDGE
+    return TarPointStatus.VALID_IN_FRAME
+
+
+def _validate_decoded_points(
+    points: np.ndarray,
+    scores: np.ndarray,
+    *,
+    frame_width: int,
+    frame_height: int,
+    person_context_xyxy: tuple[float, float, float, float],
+) -> tuple[np.ndarray, tuple[str, ...]]:
+    validated_scores = np.asarray(scores, dtype=np.float32).copy()
+    statuses = tuple(
+        _classify_source_point(
+            point,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            person_context_xyxy=person_context_xyxy,
+        ).value
+        for point in np.asarray(points)
+    )
+    for index, status in enumerate(statuses):
+        if status not in {
+            TarPointStatus.VALID_IN_FRAME.value,
+            TarPointStatus.VALID_NEAR_EDGE.value,
+        }:
+            # Invalid image geometry is rejected, never clamped to a border.
+            validated_scores[index] = 0.0
+    return validated_scores, statuses
+
+
+def _source_to_crop(point: np.ndarray, transform: _CropTransform) -> np.ndarray:
+    value = np.asarray(point, dtype=np.float32).reshape(1, 1, 2)
+    return cv2.transform(value, transform.affine)[0, 0]
+
+
+def _crop_to_source(point: np.ndarray, transform: _CropTransform) -> np.ndarray:
+    value = np.asarray(point, dtype=np.float32).reshape(1, 1, 2)
+    return cv2.transform(value, transform.inverse_affine)[0, 0]
 
 
 def _import_torch():
@@ -409,6 +494,7 @@ __all__ = [
     "TAR_INPUT_SIZE",
     "TAR_MODEL_NAME",
     "TAR_WINDOW_SIZE",
+    "TarPointStatus",
     "TarPoseObservation",
     "TarVitPoseBackend",
 ]

@@ -77,6 +77,7 @@ class JointFusionDecision:
     rtmw_tar_distance_ratio: float | None
     tracker_measurement_distance_ratio: float | None
     tracker_support: str
+    tap_fb_consensus_score: float
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -95,6 +96,9 @@ class JointFusionDecision:
                 if self.tracker_measurement_distance_ratio is not None else None
             ),
             "tracker_support": self.tracker_support,
+            "tap_fb_consensus_score": round(
+                float(np.clip(self.tap_fb_consensus_score, 0.0, 1.0)), 6,
+            ),
         }
 
 
@@ -127,6 +131,7 @@ def fuse_joint_measurements(
         return JointFusionDecision(
             None, 0.0, False, None, "NO_IMAGE_MEASUREMENT",
             "TRACKER_CANNOT_REPLACE_POSE_MEASUREMENT", None, None, track_reason,
+            track_quality,
         )
 
     rtmw_point = _point(rtmw.point) if rtmw_valid else None
@@ -162,6 +167,7 @@ def fuse_joint_measurements(
             pose_distance_ratio,
             tracker_distance,
             track_reason,
+            track_quality,
         )
 
     candidates: list[tuple[PoseMeasurement, np.ndarray, float | None]] = []
@@ -187,6 +193,7 @@ def fuse_joint_measurements(
             pose_distance_ratio,
             distance,
             track_reason,
+            track_quality,
         )
     if len(supported) == 2:
         # Both candidates are near a reliable track. Select the closer image
@@ -201,6 +208,7 @@ def fuse_joint_measurements(
             pose_distance_ratio,
             distance,
             track_reason,
+            track_quality,
         )
 
     if len(candidates) == 1:
@@ -217,12 +225,13 @@ def fuse_joint_measurements(
                 pose_distance_ratio,
                 tracker_distance,
                 track_reason,
+                track_quality,
             )
 
     return JointFusionDecision(
         None, 0.0, False, None, "CONFLICTING_IMAGE_EVIDENCE",
         "POSE_MODELS_DISAGREE_WITHOUT_TRACK_CONSENSUS",
-        pose_distance_ratio, None, track_reason,
+        pose_distance_ratio, None, track_reason, track_quality,
     )
 
 
@@ -267,11 +276,12 @@ def _accepted(
     pose_distance: float | None,
     tracker_distance: float | None,
     tracker_support: str,
+    tap_fb_consensus_score: float,
 ) -> JointFusionDecision:
     return JointFusionDecision(
         (float(point[0]), float(point[1])), float(np.clip(quality, 0.0, 1.0)),
         True, source, provenance, reason, pose_distance, tracker_distance,
-        tracker_support,
+        tracker_support, tap_fb_consensus_score,
     )
 
 

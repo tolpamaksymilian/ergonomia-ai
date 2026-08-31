@@ -57,13 +57,13 @@ def test_low_confidence_error_does_not_trigger_heavy_repair_segment() -> None:
     assert segments == []
 
 
-def test_expert_candidates_are_explicitly_not_production_ready_without_assets() -> None:
+def test_expert_candidate_contract_reports_real_v67_tar_readiness() -> None:
     assessments = assess_local_expert_candidates()
-    assert {item.candidate for item in assessments} == {
-        "ViTPose-H WholeBody", "DWPose WholeBody", "RTMPose-X WholeBody",
-    }
+    assert {item.candidate for item in assessments} == {"TAR-ViTPose-B-17"}
+    assert all(item.integrated for item in assessments)
+    assert all(item.canonical_mapping_validated for item in assessments)
     assert not any(item.production_ready for item in assessments)
-    assert all(not item.configured_weights for item in assessments)
+    assert all(not item.benchmark_validated for item in assessments)
 
 
 def test_expert_canonical_contract_rejects_guessed_joint_layout() -> None:

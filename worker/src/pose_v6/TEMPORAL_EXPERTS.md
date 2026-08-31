@@ -25,6 +25,20 @@ strong native RTMW anchors on both sides of a hard-motion segment. The forward
 and backward tracks must agree within a body-scale-normalized gate before the
 track can support a measurement.
 
+An anchor must be a stable raw measurement with quality at least 0.60, visible
+geometry, valid incident bones, a stable identity score and no strong motion
+blur. V6.7 searches backward for the last such frame and forward for the first
+such frame (12 native frames by default). If either side is unavailable, TAP is
+not run for that segment and diagnostics report `NO_VALID_ANCHOR`. A one-way
+track is diagnostic only. Forward/backward points must agree within 0.12 of
+body scale; the resulting `tap_fb_consensus_score` is recorded explicitly.
+
+Decoded TAR coordinates retain their original value for diagnostics and are
+classified as `VALID_IN_FRAME`, `VALID_NEAR_EDGE`, `OUT_OF_FRAME` or
+`OUTSIDE_PERSON_CONTEXT`. Invalid spatial classes receive zero measurement
+quality and are never clamped to an image border. A later canonical-chain
+rejection is recorded as `ANATOMICAL_OUTLIER` and cannot reach the renderer.
+
 1. RTMW + TAR agreement selects a confidence-weighted image consensus.
 2. When RTMW and TAR disagree, a valid bidirectional track may select the one
    image measurement that agrees with the trajectory.
