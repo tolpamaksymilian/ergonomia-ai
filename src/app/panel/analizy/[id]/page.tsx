@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { gunzipSync } from "node:zlib";
 import {
   Activity,
   ArrowLeft,
@@ -16,6 +17,7 @@ import { DeleteAnalysisButton } from "@/components/analyses/delete-analysis-butt
 import { ErgonomicsMetricsCard } from "@/components/analyses/ergonomics-metrics-card";
 import { PrivateVideoPreview } from "@/components/analyses/private-video-preview";
 import { PoseResultsPreview } from "@/components/analyses/pose-results-preview";
+import { PoseProvenanceBadge, type PoseProvenance } from "@/components/analyses/pose-provenance-badge";
 import { RiskAssessmentCard } from "@/components/analyses/risk-assessment-card";
 import { AnalysisAvailability } from "@/components/analyses/analysis-availability";
 import { AnalysisReviewWorkspace } from "@/components/analyses/review/analysis-review-workspace";
@@ -58,6 +60,25 @@ export default async function AnalysisDetailsPage({
       progress,
       attempts,
       worker_id,
+      pose_analysis_run_id,
+      pose_artifact_generation_id,
+      actual_worker_version,
+      actual_pose_version,
+      actual_pose_schema,
+      actual_quality_profile,
+      actual_worker_instance_id,
+      pose_worker_started_at,
+      pose_processing_started_at,
+      pose_processing_finished_at,
+      actual_build_id,
+      primary_pose_model,
+      temporal_pose_expert,
+      trajectory_expert,
+      actual_hand_model,
+      temporal_experts_enabled,
+      temporal_experts_actually_used,
+      temporal_expert_frames_count,
+      pose_model_usage,
       source_video_path,
       source_file_name,
       source_mime_type,
@@ -147,6 +168,7 @@ export default async function AnalysisDetailsPage({
   const assignedCategories = (categoryLinks ?? []).flatMap((link) => link.category ? [link.category as unknown as AnalysisCategory] : []);
   const workstation = workstations.find((item) => item.id === analysis.workstation_id) ?? null;
   const metadata = { title: analysis.title, description: analysis.description, analysis_date: analysis.analysis_date, workstation, categories: assignedCategories, context: normalizeAnalysisContext(analysis.analysis_context) };
+  const poseProvenance = buildPoseProvenance(analysis);
 
   const signedUrlLifetimeSeconds = 10 * 60;
 
@@ -213,6 +235,17 @@ export default async function AnalysisDetailsPage({
     ]
       .filter(Boolean)
       .join(" ") || null;
+
+  const poseArtifactFile = analysis.result_json_path
+    ? await supabase.storage.from("analysis-results").download(poseManifestPath(analysis.result_json_path))
+    : { data: null, error: null };
+  const poseArtifactDocument = await parseStorageJson(poseArtifactFile.data);
+  const stalePoseArtifact = isStalePoseArtifact(
+    poseArtifactDocument,
+    analysis.pose_analysis_run_id,
+    analysis.actual_pose_version,
+    analysis.pose_artifact_generation_id,
+  );
 
 
   const {
@@ -300,6 +333,12 @@ export default async function AnalysisDetailsPage({
       fallbackProcessedFrames: analysis.pose_processed_frames,
     });
     const companyMethods = normalizeCompanyMethods(companyMethodsDocument);
+    const completedStaleArtifact = stalePoseArtifact || isStalePoseArtifact(
+      poseDocument,
+      analysis.pose_analysis_run_id,
+      analysis.actual_pose_version,
+      analysis.pose_artifact_generation_id,
+    );
 
     return (
       <AnalysisReviewWorkspace
@@ -308,6 +347,7 @@ export default async function AnalysisDetailsPage({
         metadata={metadata}
         workstations={workstations}
         categories={categories}
+        poseProvenance={{ ...poseProvenance, staleArtifact: completedStaleArtifact }}
         analysis={{
           id: analysis.id,
           title: analysis.title,
@@ -319,7 +359,7 @@ export default async function AnalysisDetailsPage({
           sourceHeight: analysis.source_height,
         }}
         urls={{
-          overlay: resultVideoUrl,
+          overlay: completedStaleArtifact ? null : resultVideoUrl,
           original: signedVideoUrl,
           thumbnail: thumbnailUrl,
           poseJson: resultJsonUrl,
@@ -415,6 +455,8 @@ export default async function AnalysisDetailsPage({
             />
           </div>
         </section>
+
+        <div className="mt-4 max-w-3xl"><PoseProvenanceBadge value={{ ...poseProvenance, staleArtifact: stalePoseArtifact }} active={["queued", "processing"].includes(analysis.status)} /></div>
 
         <div className="mt-6"><AnalysisContextEditor analysisId={analysis.id} metadata={metadata} workstations={workstations} categories={categories} /></div>
 
@@ -513,7 +555,7 @@ export default async function AnalysisDetailsPage({
                   )}
 
                 <PoseResultsPreview
-                  videoUrl={resultVideoUrl}
+                  videoUrl={stalePoseArtifact ? null : resultVideoUrl}
                   thumbnailUrl={thumbnailUrl}
                   jsonUrl={resultJsonUrl}
                   poseModel={analysis.pose_model}
@@ -790,10 +832,61 @@ function Background() {
 async function parseStorageJson(file: Blob | null): Promise<unknown> {
   if (!file || file.size === 0) return null;
   try {
-    return JSON.parse(await file.text()) as unknown;
+    const payload = Buffer.from(await file.arrayBuffer());
+    const decoded = payload[0] === 0x1f && payload[1] === 0x8b
+      ? gunzipSync(payload).toString("utf8")
+      : payload.toString("utf8");
+    return JSON.parse(decoded) as unknown;
   } catch {
     return null;
   }
+}
+
+function buildPoseProvenance(analysis: Record<string, unknown>): PoseProvenance {
+  return {
+    workerVersion: stringOrNull(analysis.actual_worker_version),
+    poseVersion: stringOrNull(analysis.actual_pose_version),
+    poseSchema: stringOrNull(analysis.actual_pose_schema),
+    qualityProfile: stringOrNull(analysis.actual_quality_profile),
+    workerInstanceId: stringOrNull(analysis.actual_worker_instance_id),
+    workerStartedAt: stringOrNull(analysis.pose_worker_started_at),
+    processingStartedAt: stringOrNull(analysis.pose_processing_started_at),
+    processingFinishedAt: stringOrNull(analysis.pose_processing_finished_at),
+    buildId: stringOrNull(analysis.actual_build_id),
+    runId: stringOrNull(analysis.pose_analysis_run_id),
+    artifactGenerationId: stringOrNull(analysis.pose_artifact_generation_id),
+    primaryPoseModel: stringOrNull(analysis.primary_pose_model),
+    temporalPoseExpert: stringOrNull(analysis.temporal_pose_expert),
+    trajectoryExpert: stringOrNull(analysis.trajectory_expert),
+    handModel: stringOrNull(analysis.actual_hand_model),
+    temporalExpertsEnabled: booleanOrNull(analysis.temporal_experts_enabled),
+    temporalExpertsActuallyUsed: booleanOrNull(analysis.temporal_experts_actually_used),
+    temporalExpertFramesCount: finiteNumber(analysis.temporal_expert_frames_count),
+    modelUsage: isUnknownRecord(analysis.pose_model_usage) ? analysis.pose_model_usage : null,
+  };
+}
+
+function isStalePoseArtifact(value: unknown, expectedRunId: unknown, expectedPoseVersion: unknown, expectedGenerationId: unknown) {
+  const runId = stringOrNull(expectedRunId);
+  const poseVersion = stringOrNull(expectedPoseVersion);
+  const generationId = stringOrNull(expectedGenerationId);
+  if (!runId && !poseVersion && !generationId) return false;
+  if (!isUnknownRecord(value)) return true;
+  return (runId !== null && stringOrNull(value.analysis_run_id) !== runId)
+    || (poseVersion !== null && stringOrNull(value.pose_version) !== poseVersion)
+    || (generationId !== null && stringOrNull(value.artifact_generation_id) !== generationId);
+}
+
+function poseManifestPath(resultJsonPath: string) {
+  return resultJsonPath.replace(/pose-keypoints\.json(?:\.gz)?$/, "pose-artifacts-manifest.json");
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function booleanOrNull(value: unknown) {
+  return typeof value === "boolean" ? value : null;
 }
 
 function finiteNumber(value: unknown): number | null {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import json
 import logging
 import math
 import os
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -60,6 +62,11 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution
     )
 try:
     from worker.src.pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from worker.src.pose_v6.provenance import (
+        PoseRunProvenance,
+        create_pose_run_provenance,
+        temporal_model_usage,
+    )
     from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
     from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
     from worker.src.pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
@@ -109,6 +116,11 @@ try:
     from worker.src.pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
     from pose_v6 import POSE_SCHEMA_VERSION, POSE_VERSION, WORKER_VERSION
+    from pose_v6.provenance import (
+        PoseRunProvenance,
+        create_pose_run_provenance,
+        temporal_model_usage,
+    )
     from pose_v6.anatomical_stability import project_anatomical_sequence
     from pose_v6.angle_engine import stabilize_angle_sequence
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
@@ -212,6 +224,8 @@ WORKER_DIRECTORY = Path(__file__).resolve().parents[1]
 ENV_PATH = WORKER_DIRECTORY / ".env"
 DATA_DIRECTORY = WORKER_DIRECTORY / "data" / "pose-jobs"
 LOG_DIRECTORY = WORKER_DIRECTORY / "logs"
+REPOSITORY_ROOT = WORKER_DIRECTORY.parent
+WORKER_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 QUALITY_VERSION = POSE_VERSION
 TRACKING_METHOD = (
@@ -469,6 +483,7 @@ class PoseProcessingResult:
     active_segment: ActiveSegment
     left_hand_summary: HandTrackSummary
     right_hand_summary: HandTrackSummary
+    model_usage: dict[str, object]
 
 
 def get_required_environment_variable(name: str) -> str:
@@ -1201,14 +1216,34 @@ def create_supabase_client(settings: PoseWorkerSettings) -> Client:
 def claim_next_pose_analysis(
     supabase: Client,
     worker_id: str,
+    provenance: PoseRunProvenance,
 ) -> dict[str, Any] | None:
     response = supabase.rpc(
-        "claim_next_pose_analysis",
-        {"p_worker_id": worker_id},
+        "claim_next_pose_analysis_v2",
+        {
+            "p_worker_id": worker_id,
+            "p_worker_version": provenance.worker_version,
+            "p_pose_version": provenance.pose_version,
+            "p_pose_schema": provenance.pose_schema,
+            "p_quality_profile": provenance.quality_profile,
+            "p_worker_started_at": provenance.worker_started_at,
+            "p_build_id": provenance.build_id,
+            "p_analysis_run_id": provenance.analysis_run_id,
+            "p_artifact_generation_id": provenance.artifact_generation_id,
+            "p_primary_pose_model": provenance.primary_pose_model,
+            "p_temporal_pose_expert": provenance.temporal_pose_expert,
+            "p_trajectory_expert": provenance.trajectory_expert,
+            "p_hand_model": provenance.hand_model,
+            "p_temporal_experts_enabled": provenance.temporal_experts_enabled,
+        },
     ).execute()
 
     rows = response.data or []
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    analysis = dict(rows[0])
+    analysis["_run_provenance"] = provenance
+    return analysis
 
 
 def update_progress(
@@ -3983,6 +4018,10 @@ def process_pose_video(
 
     processing_started_at = time.perf_counter()
     analysis_id = str(analysis["id"])
+    provenance = analysis.get("_run_provenance")
+    if not isinstance(provenance, PoseRunProvenance):
+        raise RuntimeError("Brak immutable Pose run provenance dla analizy.")
+    provenance_document = provenance.to_document()
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         raise RuntimeError("OpenCV nie może otworzyć filmu źródłowego.")
@@ -6374,6 +6413,16 @@ def process_pose_video(
     overlay_diagnostics_records: list[dict[str, object]] = []
     overlay_metric_frames = angle_v2.metric_frames
     render_v6_frames: list[dict[str, PersistentBone]] = []
+    overlay_expert_value = high_motion_summary.get("temporal_expert_v67", {})
+    overlay_expert = overlay_expert_value if isinstance(overlay_expert_value, dict) else {}
+    overlay_run_label = (
+        f"W{WORKER_VERSION.removesuffix('-beta.1')} | "
+        f"P{POSE_VERSION.removeprefix('pose-v').removesuffix('.0-beta.1')} | "
+        f"{provenance.quality_profile} | "
+        f"TAR{'+' if bool(overlay_expert.get('tar_executed')) else '-'} "
+        f"TAP{'+' if bool(overlay_expert.get('tapnext_executed')) else '-'}"
+    )
+    overlay_run_id = f"RUN: {provenance.analysis_run_id.split('-', 1)[0]}"
 
     try:
         for frame_offset, body_record in enumerate(body_records):
@@ -6520,6 +6569,26 @@ def process_pose_video(
                 right_hand_offset=right_hand_offset,
                 left_grip_state=left_grip_frame.state.value,
                 right_grip_state=right_grip_frame.state.value,
+            )
+            cv2.putText(
+                rendered_frame,
+                overlay_run_label,
+                (18, max(20, height - 34)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.37,
+                (150, 220, 230),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                rendered_frame,
+                overlay_run_id,
+                (18, max(38, height - 17)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.34,
+                (120, 175, 190),
+                1,
+                cv2.LINE_AA,
             )
             if settings.debug_overlay:
                 render_source_counts = Counter(
@@ -7369,6 +7438,7 @@ def process_pose_video(
         "total_ms": round(1000.0 * (time.perf_counter() - processing_started_at), 3),
     }
 
+    model_usage = temporal_model_usage(high_motion_summary)
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
@@ -7378,6 +7448,10 @@ def process_pose_video(
         "pose_version": POSE_VERSION,
         "pose_schema_version": POSE_SCHEMA_VERSION,
         "quality_version": QUALITY_VERSION,
+        "analysis_run_id": provenance.analysis_run_id,
+        "artifact_generation_id": provenance.artifact_generation_id,
+        "provenance": provenance_document,
+        "model_usage": model_usage,
         "pose_model": (
             "COCO YOLOX-X + RTMW Wholebody performance "
             "+ MediaPipe Hand Landmarker full"
@@ -7876,6 +7950,10 @@ def process_pose_video(
         "pose_version": POSE_VERSION,
         "pose_schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
+        "analysis_run_id": provenance.analysis_run_id,
+        "artifact_generation_id": provenance.artifact_generation_id,
+        "provenance": provenance_document,
+        "model_usage": model_usage,
         "runtime_seconds": round(time.perf_counter() - processing_started_at, 4),
         "runtime_breakdown_seconds": runtime_breakdown,
         "iterative_v64": iterative_v64_summary,
@@ -8000,6 +8078,7 @@ def process_pose_video(
         active_segment=active_segment,
         left_hand_summary=left_hand_result.summary,
         right_hand_summary=right_hand_result.summary,
+        model_usage=model_usage,
     )
 
 def upload_result_file(
@@ -8030,12 +8109,40 @@ def upload_pose_results(
 ) -> tuple[str, str, str]:
     user_id = str(analysis["user_id"])
     analysis_id = str(analysis["id"])
-    base_path = f"{user_id}/{analysis_id}/results"
+    provenance = analysis.get("_run_provenance")
+    if not isinstance(provenance, PoseRunProvenance):
+        raise RuntimeError("Brak provenance przy zapisie artefaktów Pose.")
+    base_path = f"{user_id}/{analysis_id}/results/{provenance.analysis_run_id}"
 
     video_storage_path = f"{base_path}/pose-overlay.mp4"
     json_storage_path = f"{base_path}/pose-keypoints.json"
     thumbnail_storage_path = f"{base_path}/pose-thumbnail.jpg"
     diagnostics_storage_path = f"{base_path}/pose-diagnostics.json"
+    manifest_storage_path = f"{base_path}/pose-artifacts-manifest.json"
+    manifest_path = result.json_path.with_name("pose-artifacts-manifest.json")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "analysis_id": analysis_id,
+                "analysis_run_id": provenance.analysis_run_id,
+                "artifact_generation_id": provenance.artifact_generation_id,
+                "worker_version": provenance.worker_version,
+                "pose_version": provenance.pose_version,
+                "pose_schema": provenance.pose_schema,
+                "quality_profile": provenance.quality_profile,
+                "artifacts": {
+                    "overlay": video_storage_path,
+                    "keypoints": f"{json_storage_path}.gz",
+                    "thumbnail": thumbnail_storage_path,
+                    "diagnostics": diagnostics_storage_path,
+                },
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
 
     upload_result_file(
         supabase,
@@ -8097,12 +8204,19 @@ def upload_pose_results(
         diagnostics_storage_path,
         "application/json",
     )
+    upload_result_file(
+        supabase,
+        settings.results_bucket,
+        manifest_path,
+        manifest_storage_path,
+        "application/json",
+    )
 
     return video_storage_path, json_storage_path, thumbnail_storage_path
 
 
 
-def complete_pose_inference_v3(
+def complete_pose_inference_v4(
     supabase: Client,
     settings: PoseWorkerSettings,
     analysis: dict[str, Any],
@@ -8112,9 +8226,12 @@ def complete_pose_inference_v3(
     thumbnail_storage_path: str,
 ) -> None:
     segment = result.active_segment
+    provenance = analysis.get("_run_provenance")
+    if not isinstance(provenance, PoseRunProvenance):
+        raise RuntimeError("Brak provenance przy finalizacji Pose.")
 
     response = supabase.rpc(
-        "complete_pose_inference_v3",
+        "complete_pose_inference_v4",
         {
             "p_analysis_id": str(analysis["id"]),
             "p_worker_id": settings.worker_id,
@@ -8156,6 +8273,15 @@ def complete_pose_inference_v3(
             "p_right_hand_rejected_frames": (
                 result.right_hand_summary.rejected_frames
             ),
+            "p_analysis_run_id": provenance.analysis_run_id,
+            "p_artifact_generation_id": provenance.artifact_generation_id,
+            "p_temporal_experts_actually_used": bool(
+                result.model_usage["temporal_experts_actually_used"]
+            ),
+            "p_temporal_expert_frames_count": int(
+                result.model_usage["temporal_expert_frames_count"]
+            ),
+            "p_model_usage": result.model_usage,
         },
     ).execute()
 
@@ -8182,12 +8308,28 @@ def process_analysis(
         exist_ok=True,
     )
     preserve_job_directory = False
+    provenance = analysis.get("_run_provenance")
+    if not isinstance(provenance, PoseRunProvenance):
+        raise RuntimeError("Claim nie zwrócił poprawnego Pose run provenance.")
 
     logger.info(
         "Rozpoczynam Pose Pipeline V6 / Worker %s: %s — %s",
         WORKER_VERSION,
         analysis_id,
         analysis.get("title"),
+    )
+    logger.info(
+        "Pose run provenance: analysis_id=%s run_id=%s artifact_generation_id=%s "
+        "worker=%s pose=%s schema=%s profile=%s instance=%s build=%s",
+        analysis_id,
+        provenance.analysis_run_id,
+        provenance.artifact_generation_id,
+        provenance.worker_version,
+        provenance.pose_version,
+        provenance.pose_schema,
+        provenance.quality_profile,
+        provenance.worker_instance_id,
+        provenance.build_id or "unavailable",
     )
 
     try:
@@ -8274,7 +8416,7 @@ def process_analysis(
             "saving-pose-results-v6",
         )
 
-        complete_pose_inference_v3(
+        complete_pose_inference_v4(
             supabase,
             settings,
             analysis,
@@ -8289,6 +8431,12 @@ def process_analysis(
             "Wynik przycięto do %.3f s.",
             analysis_id,
             active_segment.duration_seconds,
+        )
+        logger.info(
+            "Pose run completed: run_id=%s temporal_used=%s frames=%d",
+            provenance.analysis_run_id,
+            result.model_usage["temporal_experts_actually_used"],
+            result.model_usage["temporal_expert_frames_count"],
         )
     except Exception as error:
         logger.exception(
@@ -8333,7 +8481,20 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
     while True:
         try:
-            analysis = claim_next_pose_analysis(supabase, settings.worker_id)
+            provenance = create_pose_run_provenance(
+                worker_version=WORKER_VERSION,
+                pose_version=POSE_VERSION,
+                pose_schema=POSE_SCHEMA_VERSION,
+                quality_profile=settings.model_mode.upper(),
+                worker_instance_id=settings.worker_id,
+                worker_started_at=WORKER_STARTED_AT,
+                repository_root=REPOSITORY_ROOT,
+            )
+            analysis = claim_next_pose_analysis(
+                supabase,
+                settings.worker_id,
+                provenance,
+            )
 
             if analysis is None:
                 logger.info("Brak analiz gotowych do Pose Pipeline V6.")

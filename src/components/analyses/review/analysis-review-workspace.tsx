@@ -9,6 +9,7 @@ import type { AnalysisReviewModel, ReviewMetricName } from "@/lib/analysis-revie
 import type { CompanyMethodsView } from "@/lib/company-methods/normalize";
 import type { AnalysisCategory, AnalysisMetadata, Workstation } from "@/types/analysis-context";
 import { AnalysisContextEditor } from "@/components/analyses/analysis-context-editor";
+import { PoseProvenanceBadge, type PoseProvenance } from "@/components/analyses/pose-provenance-badge";
 
 import { AnalysisTimeline } from "./analysis-timeline";
 import { AssessmentSection } from "./assessment-section";
@@ -33,6 +34,7 @@ type AnalysisReviewWorkspaceProps = {
   metadata: AnalysisMetadata;
   workstations: Workstation[];
   categories: AnalysisCategory[];
+  poseProvenance: PoseProvenance;
   analysis: {
     id: string;
     title: string;
@@ -56,7 +58,7 @@ type AnalysisReviewWorkspaceProps = {
   };
 };
 
-export function AnalysisReviewWorkspace({ model, companyMethods, metadata, workstations, categories, analysis, urls }: AnalysisReviewWorkspaceProps) {
+export function AnalysisReviewWorkspace({ model, companyMethods, metadata, workstations, categories, poseProvenance, analysis, urls }: AnalysisReviewWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastUpdateRef = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -104,6 +106,7 @@ export function AnalysisReviewWorkspace({ model, companyMethods, metadata, works
             {analysis.sourceWidth && analysis.sourceHeight && <div className="flex gap-2"><dt>Rozdzielczość:</dt><dd className="font-medium text-slate-300">{analysis.sourceWidth} × {analysis.sourceHeight}</dd></div>}
             <div className="flex gap-2"><dt>Ryzyko:</dt><dd className="font-medium text-slate-300">{riskLabel(model.risk.level)}</dd></div>
           </dl>
+          <div className="mt-4 max-w-3xl"><PoseProvenanceBadge value={poseProvenance} /></div>
         </header>
         <AnalysisContextEditor analysisId={analysis.id} metadata={metadata} workstations={workstations} categories={categories} />
 
