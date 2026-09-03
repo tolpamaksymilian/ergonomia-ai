@@ -158,6 +158,70 @@ class HighMotionConfig:
 
 
 @dataclass(frozen=True)
+class SilhouetteConfig:
+    """Optional SAM 2.1 person-mask evidence for Pose V6.8."""
+
+    enabled: bool = True
+    model: str = "sam2.1_hiera_base_plus"
+    reanchor_interval_seconds: float = 1.0
+    maximum_reanchor_rounds: int = 2
+    minimum_mask_confidence: float = 0.30
+    minimum_bbox_agreement: float = 0.20
+    drift_centroid_scale_ratio: float = 0.42
+    drift_area_ratio_minimum: float = 0.48
+    drift_area_ratio_maximum: float = 1.90
+    standard_fill_alpha: float = 0.035
+    debug_fill_alpha: float = 0.16
+
+    def validate(self) -> None:
+        if self.model not in {
+            "sam2.1_hiera_base_plus",
+            "sam2.1_hiera_large",
+        }:
+            raise ValueError("silhouette model must be SAM 2.1 Base+ or Large")
+        if not 0.10 <= self.reanchor_interval_seconds <= 10.0:
+            raise ValueError("SAM2 re-anchor interval must be in range 0.10..10")
+        if not 1 <= self.maximum_reanchor_rounds <= 3:
+            raise ValueError("SAM2 re-anchor rounds must be in range 1..3")
+        for value in (self.minimum_mask_confidence, self.minimum_bbox_agreement):
+            if not 0.0 <= value <= 1.0:
+                raise ValueError("SAM2 quality thresholds must be in range 0..1")
+        if self.drift_centroid_scale_ratio <= 0.0:
+            raise ValueError("SAM2 centroid drift ratio must be positive")
+        if not 0.0 < self.drift_area_ratio_minimum <= 1.0:
+            raise ValueError("SAM2 minimum area ratio must be in range 0..1")
+        if self.drift_area_ratio_maximum < 1.0:
+            raise ValueError("SAM2 maximum area ratio must be at least 1")
+        for value in (self.standard_fill_alpha, self.debug_fill_alpha):
+            if not 0.0 <= value <= 0.35:
+                raise ValueError("SAM2 overlay alpha must be in range 0..0.35")
+
+
+@dataclass(frozen=True)
+class GlobalBodyConfig:
+    """Sequence-level full-body selection and bounded repair policy."""
+
+    enabled: bool = True
+    beam_width: int = 6
+    temporal_window_seconds: float = 0.25
+    worst_frame_ratio: float = 0.01
+    maximum_repair_iterations: int = 1
+    minimum_quality_gain: float = 0.008
+
+    def validate(self) -> None:
+        if not 1 <= self.beam_width <= 16:
+            raise ValueError("global body beam width must be in range 1..16")
+        if not 0.05 <= self.temporal_window_seconds <= 1.0:
+            raise ValueError("global body window must be in range 0.05..1.0")
+        if not 0.001 <= self.worst_frame_ratio <= 0.10:
+            raise ValueError("worst-frame ratio must be in range 0.001..0.10")
+        if not 1 <= self.maximum_repair_iterations <= 3:
+            raise ValueError("deep repair iterations must be in range 1..3")
+        if not 0.0 <= self.minimum_quality_gain <= 0.25:
+            raise ValueError("global body minimum gain must be in range 0..0.25")
+
+
+@dataclass(frozen=True)
 class PoseV6Config:
     profile: str = "ACCURATE"
     temporal: TemporalPolicy = field(default_factory=TemporalPolicy)
@@ -165,12 +229,14 @@ class PoseV6Config:
     motion: MotionConfig = field(default_factory=MotionConfig)
     iterative: IterativeRefinementConfig = field(default_factory=IterativeRefinementConfig)
     high_motion: HighMotionConfig = field(default_factory=HighMotionConfig)
+    silhouette: SilhouetteConfig = field(default_factory=SilhouetteConfig)
+    global_body: GlobalBodyConfig = field(default_factory=GlobalBodyConfig)
     recovery_roi_scale: float = 1.22
     refinement_fast_motion_enabled: bool = True
 
     def validate(self) -> None:
-        if self.profile not in {"BALANCED", "ACCURATE", "ULTRA"}:
-            raise ValueError("profile must be BALANCED, ACCURATE or ULTRA")
+        if self.profile not in {"PERFORMANCE", "ACCURATE", "ULTRA"}:
+            raise ValueError("profile must be PERFORMANCE, ACCURATE or ULTRA")
         if not 1.0 <= self.recovery_roi_scale <= 2.0:
             raise ValueError("recovery_roi_scale must be in range 1..2")
         self.temporal.validate()
@@ -178,14 +244,18 @@ class PoseV6Config:
         self.motion.validate()
         self.iterative.validate()
         self.high_motion.validate()
+        self.silhouette.validate()
+        self.global_body.validate()
 
 
 def load_pose_v6_config() -> PoseV6Config:
     """Read the intentionally small V6 environment surface."""
 
     profile = os.getenv("POSE_V6_PROFILE", "ACCURATE").strip().upper()
+    if profile == "BALANCED":  # legacy name; exposed contract is PERFORMANCE
+        profile = "PERFORMANCE"
     ultra = profile == "ULTRA"
-    balanced = profile == "BALANCED"
+    balanced = profile == "PERFORMANCE"
     fast_threshold = _number("POSE_FAST_MOTION_THRESHOLD", 1.20, 0.1, 10.0)
     config = PoseV6Config(
         profile=profile,
@@ -256,6 +326,49 @@ def load_pose_v6_config() -> PoseV6Config:
             maximum_rtmw_batch_size=int(_number(
                 "POSE_RTM_MAX_BATCH_SIZE", 8.0, 1.0, 32.0,
             )),
+        ),
+        silhouette=SilhouetteConfig(
+            enabled=_boolean(
+                "POSE_SAM2_ENABLED",
+                profile in {"ACCURATE", "ULTRA"},
+            ),
+            model=os.getenv(
+                "POSE_SAM2_MODEL",
+                "sam2.1_hiera_large" if ultra else "sam2.1_hiera_base_plus",
+            ).strip().lower(),
+            reanchor_interval_seconds=_number(
+                "POSE_SAM2_REANCHOR_SECONDS", 0.75 if ultra else 1.0, 0.10, 10.0,
+            ),
+            maximum_reanchor_rounds=int(_number(
+                "POSE_SAM2_REANCHOR_ROUNDS", 2.0, 1.0, 3.0,
+            )),
+            minimum_mask_confidence=_number(
+                "POSE_SAM2_MINIMUM_CONFIDENCE", 0.30, 0.0, 1.0,
+            ),
+            minimum_bbox_agreement=_number(
+                "POSE_SAM2_MINIMUM_BBOX_AGREEMENT", 0.20, 0.0, 1.0,
+            ),
+        ),
+        global_body=GlobalBodyConfig(
+            enabled=_boolean(
+                "POSE_GLOBAL_BODY_SOLVER_ENABLED",
+                profile in {"ACCURATE", "ULTRA"},
+            ),
+            beam_width=int(_number(
+                "POSE_GLOBAL_BODY_BEAM_WIDTH", 10.0 if ultra else 6.0, 1.0, 16.0,
+            )),
+            temporal_window_seconds=_number(
+                "POSE_GLOBAL_BODY_WINDOW_SECONDS", 0.40 if ultra else 0.25, 0.05, 1.0,
+            ),
+            worst_frame_ratio=_number(
+                "POSE_GLOBAL_BODY_WORST_RATIO", 0.03 if ultra else 0.01, 0.001, 0.10,
+            ),
+            maximum_repair_iterations=int(_number(
+                "POSE_GLOBAL_BODY_REPAIR_ITERATIONS", 3.0 if ultra else 1.0, 1.0, 3.0,
+            )),
+            minimum_quality_gain=_number(
+                "POSE_GLOBAL_BODY_MINIMUM_GAIN", 0.008, 0.0, 0.25,
+            ),
         ),
         recovery_roi_scale=_number("POSE_RECOVERY_ROI_SCALE", 1.22, 1.0, 2.0),
         refinement_fast_motion_enabled=_boolean("POSE_REFINEMENT_FAST_MOTION_ENABLED", True),

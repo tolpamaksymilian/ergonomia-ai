@@ -1,12 +1,59 @@
-# Pose Pipeline V6.7 — real temporal expert pass
+# Pose Pipeline V6.8 — silhouette-aware global body solve
+
+Pose V6.8 is an additive offline quality layer. After the existing V6.7
+RTMW/TAR/TAP path has produced CPU geometry, official Meta SAM 2.1 tracks the
+silhouette of that same locked worker. ACCURATE uses
+`sam2.1_hiera_base_plus`; ULTRA uses `sam2.1_hiera_large`. Both checkpoint
+variants were smoke-tested on the same real production video. RTMW is released
+before SAM2 loads, masks are packed on CPU, and SAM2 is released before output
+rendering. A SAM failure is explicitly degraded and keeps the last valid V6.7
+body state.
+
+The mask only answers where the visible person is. It never supplies an elbow,
+wrist, knee, ankle or ergonomic angle. Per-frame mask identity, area, centroid,
+bbox, torso and temporal-IoU checks can disable its influence and trigger a
+same-person re-anchor. Signed distance and a dynamically widened corridor score
+both joints and complete limb segments, including the real failure mode where
+a line crosses empty background.
+
+Several `FullBodyHypothesis` candidates share one root/torso state. A
+sequence-level beam search scores image/model evidence, silhouette agreement,
+bone topology, identity and transition continuity (velocity, acceleration,
+jerk, bone length, side identity, root and mask movement). A bounded best-state
+repair revisits the worst 1% in ACCURATE and 3% in ULTRA; regression is rolled
+back. The resulting arrays are frozen in `ImmutableFinalBodyState`. Grip,
+Angle Engine, renderer and serialized coordinates all consume that same state,
+with an exact renderer parity check and a rounding-aware JSON parity check.
+
+The final video draws a subtle SAM2 contour beneath the existing skeleton.
+Debug output adds mask quality, selected body-hypothesis ID and support. New
+KPIs measure silhouette/body alignment, not accuracy. Schema remains `6.0`.
+
+SAM 3D Body is not enabled: its official checkpoint is gated and its code and
+weights use the SAM License. The current release decision is `BENCHMARK_ONLY`;
+see `MODEL_LICENSES_V68.md`. Monocular mesh geometry must never be presented as
+metrological 3D.
+
+Install pinned SAM2 artifacts explicitly (never during worker runtime):
+
+```powershell
+worker\.venv\Scripts\python.exe worker\tools\install_sam2_expert.py --model all
+```
+
+Benchmark the official predictors on a local real video and pose JSON:
+
+```powershell
+worker\.venv\Scripts\python.exe worker\tools\benchmark_sam2_expert.py `
+  input.mp4 pose-keypoints.json.gz worker\outputs\sam2-benchmark.json
+```
+
+## V6.7 temporal expert contract retained
 
 Pose V6 extends the existing YOLOX-X, RTMW WholeBody, MediaPipe hand and
 biomechanical validation pipeline. V6.7 adds two licensed temporal experts only
 for hard-motion segments. Its role
 is to preserve the identity and visual continuity of the locked worker during
 short detector/keypoint gaps while keeping analytical provenance explicit.
-
-## V6.7 temporal expert contract
 
 TAR-ViTPose Base is a real five-frame pose measurement backend. Its official
 Apache-2.0 checkpoint is decoded in original source pixels and mapped only to

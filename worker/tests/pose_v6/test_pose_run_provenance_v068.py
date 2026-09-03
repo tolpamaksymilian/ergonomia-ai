@@ -47,12 +47,13 @@ def test_temporal_usage_reports_actual_execution_not_only_enablement() -> None:
     assert usage["temporal_expert_frames_count"] == 19
     assert usage["temporal_pose_expert"]["frames"] == 19
     assert usage["trajectory_expert"]["used"] is False
+    assert usage["trajectory_expert"]["skip_reason"] is not None
 
 
 def test_production_worker_uses_versioned_artifact_paths_and_provenance_rpcs() -> None:
     source = (ROOT / "worker" / "src" / "pose_worker.py").read_text(encoding="utf-8")
 
-    assert '"claim_next_pose_analysis_v2"' in source
+    assert '"claim_next_pose_analysis_v3"' in source
     assert '"complete_pose_inference_v4"' in source
     assert 'results/{provenance.analysis_run_id}' in source
     assert 'pose-artifacts-manifest.json' in source

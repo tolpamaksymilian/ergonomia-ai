@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import gc
 import json
 import logging
 import math
@@ -53,11 +54,13 @@ from ergonomics.processor import compute_overlay_metrics_from_frame
 try:
     from worker.src.pose_artifact_storage import (
         compress_json_artifact,
+        decompress_json_payload,
         upload_compressed_json,
     )
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution
     from pose_artifact_storage import (
         compress_json_artifact,
+        decompress_json_payload,
         upload_compressed_json,
     )
 try:
@@ -66,6 +69,10 @@ try:
         PoseRunProvenance,
         create_pose_run_provenance,
         temporal_model_usage,
+    )
+    from worker.src.pose_v6.late_stage import (
+        PoseStageError,
+        build_completion_parameters,
     )
     from worker.src.pose_v6.anatomical_stability import project_anatomical_sequence
     from worker.src.pose_v6.angle_engine import stabilize_angle_sequence
@@ -76,6 +83,15 @@ try:
     from worker.src.pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
     from worker.src.pose_v6.expert_backend import assess_local_expert_candidates, pose_model_evaluation_table
     from worker.src.pose_v6.grip_v4 import analyze_grip_v4
+    from worker.src.pose_v6.final_body_contract import (
+        validate_renderer_final_state_parity,
+        validate_serialized_final_state_parity,
+    )
+    from worker.src.pose_v6.global_body import (
+        CORE_BONES as V68_CORE_BONES,
+        GlobalBodySolveResult,
+        solve_global_body_sequence,
+    )
     from worker.src.pose_v6.high_motion import (
         CORE_LIMB_CHAINS,
         build_limb_crops,
@@ -97,8 +113,10 @@ try:
         select_critical_segments,
     )
     from worker.src.pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
+    from worker.src.pose_v6.mesh_referee import current_mesh_referee_readiness
     from worker.src.pose_v6.optical_flow import track_point_forward_backward
     from worker.src.pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from worker.src.pose_v6.sam2_backend import empty_sam2_result, run_sam2_silhouette_expert
     from worker.src.pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from worker.src.pose_v6.limb_consistency import (
         attach_temporal_metadata,
@@ -112,6 +130,11 @@ try:
     from worker.src.pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from worker.src.pose_v6.temporal_expert_pass import run_temporal_expert_pass
     from worker.src.pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from worker.src.pose_v6.silhouette import (
+        draw_silhouette_overlay,
+        evaluate_skeleton_against_silhouette,
+        summarize_silhouette_alignment,
+    )
     from worker.src.pose_v6.timeline import probe_native_frame_timeline
     from worker.src.pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fallback
@@ -121,6 +144,7 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
         create_pose_run_provenance,
         temporal_model_usage,
     )
+    from pose_v6.late_stage import PoseStageError, build_completion_parameters
     from pose_v6.anatomical_stability import project_anatomical_sequence
     from pose_v6.angle_engine import stabilize_angle_sequence
     from pose_v6.config import PoseV6Config, frames_for_seconds, load_pose_v6_config
@@ -130,6 +154,15 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.diagnostics import rank_temporal_worst_frames, summarize_temporal_frames
     from pose_v6.expert_backend import assess_local_expert_candidates, pose_model_evaluation_table
     from pose_v6.grip_v4 import analyze_grip_v4
+    from pose_v6.final_body_contract import (
+        validate_renderer_final_state_parity,
+        validate_serialized_final_state_parity,
+    )
+    from pose_v6.global_body import (
+        CORE_BONES as V68_CORE_BONES,
+        GlobalBodySolveResult,
+        solve_global_body_sequence,
+    )
     from pose_v6.high_motion import (
         CORE_LIMB_CHAINS,
         build_limb_crops,
@@ -151,8 +184,10 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
         select_critical_segments,
     )
     from pose_v6.motion_analysis import MotionAnalyzer, MotionObservation, MotionState
+    from pose_v6.mesh_referee import current_mesh_referee_readiness
     from pose_v6.optical_flow import track_point_forward_backward
     from pose_v6.render_continuity import PersistentBone, PersistentBoneRenderer, summarize_render_sources
+    from pose_v6.sam2_backend import empty_sam2_result, run_sam2_silhouette_expert
     from pose_v6.serialization import PoseOutputSerializationError, write_pose_document
     from pose_v6.limb_consistency import (
         attach_temporal_metadata,
@@ -166,6 +201,11 @@ except ModuleNotFoundError:  # pragma: no cover - worker/src direct execution fa
     from pose_v6.temporal_reconstruction import PointSource, TemporalFrame, merge_flow_result, reconstruct_temporal_sequence, reject_reconstructed_analysis_joints, validate_analysis_bones
     from pose_v6.temporal_expert_pass import run_temporal_expert_pass
     from pose_v6.temporal_tracker import BBoxMotionEstimator, BBoxSource, recovery_allowed
+    from pose_v6.silhouette import (
+        draw_silhouette_overlay,
+        evaluate_skeleton_against_silhouette,
+        summarize_silhouette_alignment,
+    )
     from pose_v6.timeline import probe_native_frame_timeline
     from pose_v6.trajectory_refinement import refine_fixed_lag_sequence
 from pose_v5.camera_motion import CameraMotionEstimator
@@ -338,6 +378,8 @@ class PoseWorkerSettings:
     keep_worker_files: bool
 
     model_mode: str
+    requested_quality_profile: str
+    effective_quality_profile: str
 
     detector_score_threshold: float
     detector_nms_threshold: float
@@ -526,6 +568,11 @@ def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
             "Pose Pipeline V6 korzysta z modelu performance. "
             "Ustaw POSE_MODEL_MODE=performance."
         )
+    requested_quality_profile = os.getenv("POSE_V6_PROFILE", "ACCURATE").strip().upper()
+    if requested_quality_profile == "BALANCED":
+        requested_quality_profile = "PERFORMANCE"
+    if requested_quality_profile not in {"PERFORMANCE", "ACCURATE", "ULTRA"}:
+        raise RuntimeError("POSE_V6_PROFILE musi być PERFORMANCE, ACCURATE albo ULTRA.")
 
     settings = PoseWorkerSettings(
         supabase_url=(
@@ -563,6 +610,8 @@ def load_settings(*, require_supabase: bool = True) -> PoseWorkerSettings:
             default=False,
         ),
         model_mode=model_mode,
+        requested_quality_profile=requested_quality_profile,
+        effective_quality_profile=requested_quality_profile,
         detector_score_threshold=float(
             os.getenv(
                 "POSE_DETECTOR_SCORE_THRESHOLD",
@@ -1219,13 +1268,14 @@ def claim_next_pose_analysis(
     provenance: PoseRunProvenance,
 ) -> dict[str, Any] | None:
     response = supabase.rpc(
-        "claim_next_pose_analysis_v2",
+        "claim_next_pose_analysis_v3",
         {
             "p_worker_id": worker_id,
             "p_worker_version": provenance.worker_version,
             "p_pose_version": provenance.pose_version,
             "p_pose_schema": provenance.pose_schema,
             "p_quality_profile": provenance.quality_profile,
+            "p_effective_quality_profile": provenance.effective_quality_profile,
             "p_worker_started_at": provenance.worker_started_at,
             "p_build_id": provenance.build_id,
             "p_analysis_run_id": provenance.analysis_run_id,
@@ -1244,6 +1294,207 @@ def claim_next_pose_analysis(
     analysis = dict(rows[0])
     analysis["_run_provenance"] = provenance
     return analysis
+
+
+def claim_next_pose_late_retry(
+    supabase: Client,
+    worker_id: str,
+) -> dict[str, Any] | None:
+    response = supabase.rpc(
+        "claim_next_pose_late_retry",
+        {"p_worker_id": worker_id},
+    ).execute()
+    rows = response.data or []
+    return dict(rows[0]) if rows else None
+
+
+def _download_json_document(
+    supabase: Client,
+    bucket_name: str,
+    storage_path: str,
+) -> dict[str, Any]:
+    payload = supabase.storage.from_(bucket_name).download(storage_path)
+    value = json.loads(decompress_json_payload(payload).decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"Artefakt {storage_path} nie jest dokumentem JSON.")
+    return value
+
+
+def _upload_retry_artifacts(
+    supabase: Client,
+    settings: PoseWorkerSettings,
+    analysis: dict[str, Any],
+    manifest: dict[str, Any],
+) -> None:
+    job_directory = DATA_DIRECTORY / str(analysis["id"])
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("Manifest retry nie zawiera ścieżek artefaktów.")
+    required = {
+        "overlay": (job_directory / "pose-overlay.mp4", "video/mp4"),
+        "thumbnail": (job_directory / "pose-thumbnail.jpg", "image/jpeg"),
+        "diagnostics": (job_directory / "pose-diagnostics.json", "application/json"),
+    }
+    for name, (local_path, content_type) in required.items():
+        storage_path = artifacts.get(name)
+        if not isinstance(storage_path, str) or not local_path.is_file():
+            raise FileNotFoundError(f"Brak lokalnego artefaktu retry: {name}.")
+        upload_result_file(
+            supabase, settings.results_bucket, local_path, storage_path, content_type
+        )
+    source_json = job_directory / "pose-keypoints.json"
+    keypoints_path = artifacts.get("keypoints")
+    if not isinstance(keypoints_path, str) or not source_json.is_file():
+        raise FileNotFoundError("Brak lokalnego pose-keypoints.json dla retry.")
+    compressed = compress_json_artifact(
+        source_json,
+        keypoints_path.removesuffix(".gz"),
+    )
+    upload_compressed_json(
+        supabase.storage.from_(settings.results_bucket), compressed
+    )
+    manifest_path = job_directory / "pose-artifacts-manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    base_path = keypoints_path.rsplit("/", 1)[0]
+    upload_result_file(
+        supabase,
+        settings.results_bucket,
+        manifest_path,
+        f"{base_path}/pose-artifacts-manifest.json",
+        "application/json",
+    )
+
+
+def _reconcile_uploaded_pose_metadata(
+    supabase: Client,
+    settings: PoseWorkerSettings,
+    analysis: dict[str, Any],
+    pose_document: dict[str, Any],
+    manifest: dict[str, Any],
+) -> None:
+    """Correct metadata-only provenance without rerunning Pose inference."""
+
+    configuration = pose_document.get("configuration")
+    pose_v6 = configuration.get("pose_v6") if isinstance(configuration, dict) else None
+    configured_profile = (
+        str(pose_v6.get("profile", "")).strip().upper()
+        if isinstance(pose_v6, dict) else ""
+    )
+    if configured_profile == "BALANCED":
+        configured_profile = "PERFORMANCE"
+    if configured_profile not in {"PERFORMANCE", "ACCURATE", "ULTRA"}:
+        configured_profile = settings.effective_quality_profile
+    model_usage = pose_document.get("model_usage")
+    model_usage = model_usage if isinstance(model_usage, dict) else {}
+    provenance = pose_document.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+        pose_document["provenance"] = provenance
+    provenance.update({
+        "quality_profile": configured_profile,
+        "requested_quality_profile": configured_profile,
+        "effective_quality_profile": configured_profile,
+    })
+    pose_document.update({
+        "requested_quality_profile": configured_profile,
+        "effective_quality_profile": configured_profile,
+        "quality_profile_degraded": False,
+        "quality_profile_degradation_reason": None,
+    })
+    manifest.update({
+        "quality_profile": configured_profile,
+        "requested_quality_profile": configured_profile,
+        "effective_quality_profile": configured_profile,
+        "quality_profile_degraded": False,
+        "degradation_reason": None,
+        "model_usage": model_usage,
+    })
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict) or not isinstance(artifacts.get("keypoints"), str):
+        raise ValueError("Manifest nie zawiera keypoints do korekty provenance.")
+    job_directory = DATA_DIRECTORY / str(analysis["id"])
+    job_directory.mkdir(parents=True, exist_ok=True)
+    pose_path = job_directory / "pose-keypoints.json"
+    write_pose_document(pose_path, pose_document, document_name="pose-keypoints", pretty=False)
+    compressed = compress_json_artifact(
+        pose_path, str(artifacts["keypoints"]).removesuffix(".gz")
+    )
+    upload_compressed_json(supabase.storage.from_(settings.results_bucket), compressed)
+    manifest_path = job_directory / "pose-artifacts-manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    upload_result_file(
+        supabase,
+        settings.results_bucket,
+        manifest_path,
+        str(artifacts["keypoints"]).rsplit("/", 1)[0] + "/pose-artifacts-manifest.json",
+        "application/json",
+    )
+
+
+def retry_pose_late_stage(
+    supabase: Client,
+    settings: PoseWorkerSettings,
+    analysis: dict[str, Any],
+    logger: logging.Logger,
+) -> None:
+    analysis_id = str(analysis["id"])
+    run_id = str(analysis["pose_analysis_run_id"])
+    base_path = f"{analysis['user_id']}/{analysis_id}/results/{run_id}"
+    manifest_path = f"{base_path}/pose-artifacts-manifest.json"
+    retry_kind = str(analysis["retry_kind"])
+    logger.info(
+        "Ponawiam wyłącznie późny etap Pose: analysis_id=%s run_id=%s stage=%s",
+        analysis_id,
+        run_id,
+        retry_kind,
+    )
+    try:
+        if retry_kind == "artifact-upload":
+            local_manifest = DATA_DIRECTORY / analysis_id / "pose-artifacts-manifest.json"
+            if not local_manifest.is_file():
+                raise FileNotFoundError("Brak zachowanego manifestu lokalnego dla retry uploadu.")
+            manifest = json.loads(local_manifest.read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("Lokalny manifest retry jest nieprawidłowy.")
+            _upload_retry_artifacts(supabase, settings, analysis, manifest)
+        else:
+            manifest = _download_json_document(
+                supabase, settings.results_bucket, manifest_path
+            )
+        keypoints_path = manifest.get("artifacts", {}).get("keypoints")
+        if not isinstance(keypoints_path, str):
+            raise ValueError("Manifest nie wskazuje pose-keypoints.")
+        pose_document = _download_json_document(
+            supabase, settings.results_bucket, keypoints_path
+        )
+        _reconcile_uploaded_pose_metadata(
+            supabase, settings, analysis, pose_document, manifest
+        )
+        parameters = build_completion_parameters(
+            pose_document, manifest, worker_id=settings.worker_id
+        )
+        response = supabase.rpc("complete_pose_inference_v4", parameters).execute()
+        if response.data is not True:
+            raise RuntimeError("Finalizacja retry nie zwróciła true.")
+    except Exception as error:
+        stage = "artifact-upload" if retry_kind == "artifact-upload" else "database-finalization"
+        wrapped = error if isinstance(error, PoseStageError) else PoseStageError(stage, error)
+        mark_analysis_failed(supabase, analysis_id, settings.worker_id, wrapped)
+        raise wrapped
+    job_directory = DATA_DIRECTORY / analysis_id
+    if job_directory.exists() and not settings.keep_worker_files:
+        shutil.rmtree(job_directory, ignore_errors=True)
+    logger.info(
+        "Późny etap Pose zakończony bez ponownego inference: analysis_id=%s run_id=%s",
+        analysis_id,
+        run_id,
+    )
 
 
 def update_progress(
@@ -1288,17 +1539,29 @@ def mark_analysis_failed(
     worker_id: str,
     error: Exception,
 ) -> None:
+    stage_error = error if isinstance(error, PoseStageError) else PoseStageError(
+        "pose-inference", error
+    )
+    failure = stage_error.failure
     response = supabase.rpc(
-        "fail_analysis_processing",
+        "fail_pose_processing_v2",
         {
             "p_analysis_id": analysis_id,
             "p_worker_id": worker_id,
-            "p_error_code": str(
-                getattr(error, "error_code", type(error).__name__.upper())
-            )[:100],
-            "p_error_message": str(error),
+            "p_failure_stage": failure.stage,
+            "p_failure_code": failure.code,
+            "p_failure_message": failure.message,
+            "p_failure_component": failure.component,
+            "p_failure_timestamp": failure.timestamp,
+            "p_retryable": failure.retryable,
+            "p_http_status": failure.http_status,
+            "p_upstream_error_code": failure.upstream_error_code,
         },
     ).execute()
+    if response.data is not True:
+        raise RuntimeError(
+            "Nie zapisano błędu Pose: worker utracił blokadę analizy."
+        )
 
     if response.data is not True:
         raise RuntimeError("Nie udało się oznaczyć analizy jako failed.")
@@ -1347,11 +1610,14 @@ class StrictWholebodyModel:
             "pose": 0.0,
         }
         self.last_batch_diagnostics: dict[str, dict[str, object]] = {}
+        self.released = False
 
     def __call__(
         self,
         frame: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
+        if getattr(self, "released", False):
+            raise RuntimeError("RTMW/YOLOX stage has already released GPU resources")
         frame_height, frame_width = frame.shape[:2]
         self.last_object_detections = []
         self.last_timing_seconds = {"detector": 0.0, "pose": 0.0}
@@ -1518,6 +1784,8 @@ class StrictWholebodyModel:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Run RTMW only on explicit, already bounded person ROIs."""
 
+        if getattr(self, "released", False):
+            raise RuntimeError("RTMW/YOLOX stage has already released GPU resources")
         if not bounding_boxes:
             return self.empty_result()
         height, width = frame.shape[:2]
@@ -1603,6 +1871,27 @@ class StrictWholebodyModel:
                 dtype=np.float32,
             ),
         )
+
+    def release_gpu_resources(self) -> None:
+        """Release RTMW/YOLOX before staged SAM2 loading.
+
+        The worker recreates this wrapper before the next analysis.  This
+        avoids retaining ONNX Runtime CUDA sessions while the PyTorch SAM2
+        video stage is active on an 8 GB GPU.
+        """
+
+        if getattr(self, "released", False):
+            return
+        self.detector = None
+        self.pose_model = None
+        self.last_object_detections = []
+        self.last_batch_diagnostics = {}
+        self.released = True
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except (RuntimeError, AttributeError):
+            pass
 
 
 def initialize_pose_model(
@@ -5796,6 +6085,89 @@ def process_pose_video(
         ),
     )
     temporal_frames = list(limb_chain_result.frames)
+
+    # V6.8 is an additive, staged quality layer. RTMW/TAR/TAP have completed;
+    # release their primary CUDA stage before the optional SAM2 video model.
+    maybe_update_progress(
+        supabase,
+        analysis_id,
+        settings.worker_id,
+        70,
+        "pose-v6-sam2-silhouette",
+    )
+    if pose_v6_config.silhouette.enabled:
+        release_pose_gpu = getattr(model, "release_gpu_resources", None)
+        if callable(release_pose_gpu):
+            release_pose_gpu()
+    sam2_result = run_sam2_silhouette_expert(
+        video_path,
+        job_directory,
+        body_records,
+        temporal_frames,
+        track_ids,
+        fps=fps,
+        config=pose_v6_config.silhouette,
+        logger=logger,
+    ) if pose_v6_config.silhouette.enabled else empty_sam2_result(
+        body_records,
+        track_ids,
+        model_name=pose_v6_config.silhouette.model,
+        reason="PROFILE_DISABLED",
+    )
+    silhouette_evidence = [
+        evaluate_skeleton_against_silhouette(
+            silhouette,
+            temporal.render_points,
+            temporal.render_scores,
+            V68_CORE_BONES,
+            body_scale=float(record["pose_graph"].body_scale),
+            motion_blur=float(record["motion_blur_v66"]["motion_blur_score"]),
+            motion_state=str(record["motion_v6"]["state"]),
+            occluded=(str(record["tracking_state"]) == TrackingState.PARTIAL.value),
+        )
+        for record, temporal, silhouette in zip(
+            body_records, temporal_frames, sam2_result.frames,
+        )
+    ]
+    global_body_started_at = time.perf_counter()
+    global_body_result = solve_global_body_sequence(
+        temporal_frames,
+        [np.asarray(record["raw_points"], dtype=np.float32) for record in body_records],
+        [np.asarray(record["raw_scores"], dtype=np.float32) for record in body_records],
+        sam2_result.frames,
+        silhouette_evidence,
+        [float(record["pose_graph"].body_scale) for record in body_records],
+        [float(record["source_timestamp_seconds"]) for record in body_records],
+        [str(record["motion_v6"]["state"]) for record in body_records],
+        scene_cut_flags,
+        config=pose_v6_config.global_body,
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    global_body_seconds = time.perf_counter() - global_body_started_at
+    temporal_frames = list(global_body_result.frames)
+    # Limb-chain consistency already gates every candidate immediately before
+    # the sequence solve.  From this point the solver-selected full-body state
+    # is immutable: a second kinematic pass would silently replace individual
+    # joints and could undo the globally selected hypothesis.
+    silhouette_evidence = [
+        evaluate_skeleton_against_silhouette(
+            silhouette,
+            temporal.render_points,
+            temporal.render_scores,
+            V68_CORE_BONES,
+            body_scale=float(record["pose_graph"].body_scale),
+            motion_blur=float(record["motion_blur_v66"]["motion_blur_score"]),
+            motion_state=str(record["motion_v6"]["state"]),
+            occluded=(str(record["tracking_state"]) == TrackingState.PARTIAL.value),
+        )
+        for record, temporal, silhouette in zip(
+            body_records, temporal_frames, sam2_result.frames,
+        )
+    ]
+    silhouette_summary = summarize_silhouette_alignment(
+        sam2_result.frames,
+        silhouette_evidence,
+    )
     for index, record in enumerate(body_records):
         record["trajectory_refinement"] = trajectory_result.frame_diagnostics[index]
         record["global_trajectory_optimization"] = (
@@ -5857,6 +6229,9 @@ def process_pose_video(
         record["temporal_v6"] = temporal
         record["final_track_id_v66"] = track_ids[index]
         record["limb_chain_v66"] = limb_chain_result.frame_diagnostics[index]
+        record["person_silhouette_v68"] = sam2_result.frames[index]
+        record["silhouette_evidence_v68"] = silhouette_evidence[index]
+        record["global_body_v68"] = global_body_result.frame_diagnostics[index]
         record["high_motion_error_causes_v66"] = sorted(set([
             *record.get("high_motion_error_causes_v66", []),
             *record["limb_chain_v66"].get("rejection_reasons", []),
@@ -6361,6 +6736,10 @@ def process_pose_video(
     )
 
     temporal_frames = list(freeze_temporal_frames(temporal_frames))
+    final_body_states = tuple(
+        replace(state, frame=temporal)
+        for state, temporal in zip(global_body_result.states, temporal_frames)
+    )
     for record, temporal in zip(body_records, temporal_frames):
         record["temporal_v6"] = temporal
     pre_render_skeleton_contract = validate_final_skeleton_contract(
@@ -6413,6 +6792,7 @@ def process_pose_video(
     overlay_diagnostics_records: list[dict[str, object]] = []
     overlay_metric_frames = angle_v2.metric_frames
     render_v6_frames: list[dict[str, PersistentBone]] = []
+    renderer_final_points: list[np.ndarray] = []
     overlay_expert_value = high_motion_summary.get("temporal_expert_v67", {})
     overlay_expert = overlay_expert_value if isinstance(overlay_expert_value, dict) else {}
     overlay_run_label = (
@@ -6420,7 +6800,8 @@ def process_pose_video(
         f"P{POSE_VERSION.removeprefix('pose-v').removesuffix('.0-beta.1')} | "
         f"{provenance.quality_profile} | "
         f"TAR{'+' if bool(overlay_expert.get('tar_executed')) else '-'} "
-        f"TAP{'+' if bool(overlay_expert.get('tapnext_executed')) else '-'}"
+        f"TAP{'+' if bool(overlay_expert.get('tapnext_executed')) else '-'} "
+        f"SAM2{'+' if sam2_result.used_frames else '-'} 3D-"
     )
     overlay_run_id = f"RUN: {provenance.analysis_run_id.split('-', 1)[0]}"
 
@@ -6547,6 +6928,14 @@ def process_pose_video(
                 if isinstance(right_offset_value, list) and len(right_offset_value) == 2
                 else None
             )
+            frame = draw_silhouette_overlay(
+                frame,
+                sam2_result.frames[frame_offset],
+                debug=settings.debug_overlay,
+                standard_fill_alpha=pose_v6_config.silhouette.standard_fill_alpha,
+                debug_fill_alpha=pose_v6_config.silhouette.debug_fill_alpha,
+            )
+            renderer_final_points.append(temporal.render_points.copy())
             rendered_frame, overlay_diagnostics = draw_pose_overlay_v4(
                 frame,
                 body_record["pose_graph"],
@@ -6639,6 +7028,23 @@ def process_pose_video(
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.42,
                     (170, 225, 245),
+                    1,
+                    cv2.LINE_AA,
+                )
+                silhouette_frame = sam2_result.frames[frame_offset]
+                body_state = final_body_states[frame_offset]
+                cv2.putText(
+                    rendered_frame,
+                    (
+                        f"SAM2={'VALID' if silhouette_frame.valid else 'DEGRADED'} "
+                        f"mask={silhouette_frame.quality.mask_confidence:.2f} "
+                        f"body={body_state.selected_hypothesis_id} "
+                        f"support={body_state.body_quality:.2f}"
+                    ),
+                    (18, 118),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.38,
+                    (90, 220, 220) if silhouette_frame.valid else (80, 150, 245),
                     1,
                     cv2.LINE_AA,
                 )
@@ -6757,6 +7163,18 @@ def process_pose_video(
                     ),
                     "temporal_expert_v67": body_record.get(
                         "temporal_expert_v67"
+                    ),
+                    "person_silhouette_v68": sam2_result.frames[
+                        frame_offset
+                    ].to_dict(include_contour=True),
+                    "silhouette_evidence_v68": silhouette_evidence[
+                        frame_offset
+                    ].to_dict(),
+                    "final_body_state_v68": final_body_states[
+                        frame_offset
+                    ].to_dict(),
+                    "global_body_diagnostics_v68": body_record.get(
+                        "global_body_v68"
                     ),
                     "trajectory_refinement": body_record.get("trajectory_refinement"),
                     "global_trajectory_optimization": body_record.get(
@@ -6945,6 +7363,24 @@ def process_pose_video(
     finally:
         render_capture.release()
         writer.release()
+
+    renderer_final_state_parity = validate_renderer_final_state_parity(
+        final_body_states,
+        renderer_final_points,
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    serialized_final_state_parity = validate_serialized_final_state_parity(
+        final_body_states,
+        [
+            serialize_coordinates(state.frame.render_points, state.frame.render_scores)
+            for state in final_body_states
+        ],
+        body_joint_count=BODY_POINT_COUNT,
+    )
+    if not renderer_final_state_parity["valid"] or not serialized_final_state_parity["valid"]:
+        raise RuntimeError(
+            "Pose V6.8 FinalBodyState parity failed before artifact serialization"
+        )
 
     if best_thumbnail is None:
         raise RuntimeError(
@@ -7310,6 +7746,33 @@ def process_pose_video(
             "final_limb_chain_break_count": 0,
         },
     }
+    high_motion_kpis.update({
+        **silhouette_summary,
+        "full_body_geometry_valid_ratio": global_body_result.summary.get(
+            "full_body_geometry_valid_ratio", 0.0,
+        ),
+        "full_body_hypothesis_switch_count": global_body_result.summary.get(
+            "full_body_hypothesis_switch_count", 0,
+        ),
+        "arm_chain_alignment_ratio": global_body_result.summary.get(
+            "arm_chain_alignment_ratio",
+        ),
+        "leg_chain_alignment_ratio": global_body_result.summary.get(
+            "leg_chain_alignment_ratio",
+        ),
+        "foot_chain_alignment_ratio": global_body_result.summary.get(
+            "foot_chain_alignment_ratio",
+        ),
+        "renderer_final_state_mismatch_count": renderer_final_state_parity[
+            "renderer_final_state_mismatch_count"
+        ],
+        "catastrophic_body_geometry_count": global_body_result.summary.get(
+            "catastrophic_body_geometry_count", 0,
+        ),
+        "worst_1_percent_body_quality": global_body_result.summary.get(
+            "worst_1_percent_body_quality",
+        ),
+    })
     render_v6_summary["high_motion_v66"] = high_motion_kpis
     temporal_v6_summary["high_motion_recovery_v66"] = high_motion_summary
     temporal_v6_summary["temporal_expert_v67"] = high_motion_summary.get(
@@ -7414,6 +7877,8 @@ def process_pose_video(
         "high_motion_pass_ms": round(1000.0 * high_motion_seconds, 3),
         "expert_pass_ms": round(1000.0 * expert_pass_seconds, 3),
         "global_optimization_ms": round(1000.0 * global_optimization_seconds, 3),
+        "sam2_silhouette_ms": round(1000.0 * sam2_result.runtime_seconds, 3),
+        "global_body_solver_ms": round(1000.0 * global_body_seconds, 3),
         "person_detection_ms": round(1000.0 * sum(
             float(record["timing_seconds"]["detector"])
             for record in body_records
@@ -7439,6 +7904,8 @@ def process_pose_video(
     }
 
     model_usage = temporal_model_usage(high_motion_summary)
+    model_usage["silhouette_expert"] = sam2_result.summary
+    model_usage["mesh_referee"] = current_mesh_referee_readiness().to_model_usage()
     result_document = {
         "schema_version": POSE_SCHEMA_VERSION,
         "analysis_id": analysis_id,
@@ -7452,6 +7919,10 @@ def process_pose_video(
         "artifact_generation_id": provenance.artifact_generation_id,
         "provenance": provenance_document,
         "model_usage": model_usage,
+        "requested_quality_profile": provenance.requested_quality_profile,
+        "effective_quality_profile": provenance.effective_quality_profile,
+        "quality_profile_degraded": False,
+        "quality_profile_degradation_reason": None,
         "pose_model": (
             "COCO YOLOX-X + RTMW Wholebody performance "
             "+ MediaPipe Hand Landmarker full"
@@ -7799,6 +8270,15 @@ def process_pose_video(
             "quality": quality_summary,
             "quality_v3": quality_v3_summary,
             "high_motion_v66": high_motion_kpis,
+            "silhouette_v68": {
+                **sam2_result.summary,
+                **silhouette_summary,
+            },
+            "global_body_v68": {
+                **global_body_result.summary,
+                "renderer_parity": renderer_final_state_parity,
+                "json_parity": serialized_final_state_parity,
+            },
             "holding": {
                 "version": "holding-v3",
                 "left": {
@@ -7881,7 +8361,7 @@ def process_pose_video(
             error.python_type,
             error.value_preview,
         )
-        raise
+        raise PoseStageError("artifact-serialization", error) from error
 
     worst_tracking_frames = [
         index
@@ -7954,6 +8434,10 @@ def process_pose_video(
         "artifact_generation_id": provenance.artifact_generation_id,
         "provenance": provenance_document,
         "model_usage": model_usage,
+        "requested_quality_profile": provenance.requested_quality_profile,
+        "effective_quality_profile": provenance.effective_quality_profile,
+        "quality_profile_degraded": False,
+        "quality_profile_degradation_reason": None,
         "runtime_seconds": round(time.perf_counter() - processing_started_at, 4),
         "runtime_breakdown_seconds": runtime_breakdown,
         "iterative_v64": iterative_v64_summary,
@@ -7966,6 +8450,15 @@ def process_pose_video(
         "body": pose_graph_summary,
         "quality": quality_summary,
         "quality_v3": quality_v3_summary,
+        "silhouette_v68": {
+            **sam2_result.summary,
+            **silhouette_summary,
+        },
+        "global_body_v68": {
+            **global_body_result.summary,
+            "renderer_parity": renderer_final_state_parity,
+            "json_parity": serialized_final_state_parity,
+        },
         "high_motion_v66": {
             "recovery": high_motion_summary,
             "kpis": high_motion_kpis,
@@ -8040,7 +8533,7 @@ def process_pose_video(
             error.python_type,
             error.value_preview,
         )
-        raise
+        raise PoseStageError("artifact-serialization", error) from error
 
     logger.info(
         "Pose V6 zakończone: frames_total=%d body_valid_ratio=%.3f "
@@ -8131,6 +8624,11 @@ def upload_pose_results(
                 "pose_version": provenance.pose_version,
                 "pose_schema": provenance.pose_schema,
                 "quality_profile": provenance.quality_profile,
+                "requested_quality_profile": provenance.requested_quality_profile,
+                "effective_quality_profile": provenance.effective_quality_profile,
+                "quality_profile_degraded": False,
+                "degradation_reason": None,
+                "model_usage": result.model_usage,
                 "artifacts": {
                     "overlay": video_storage_path,
                     "keypoints": f"{json_storage_path}.gz",
@@ -8158,7 +8656,10 @@ def upload_pose_results(
         json_size_bytes / (1024 * 1024),
         result.json_path,
     )
-    compressed_json = compress_json_artifact(result.json_path, json_storage_path)
+    try:
+        compressed_json = compress_json_artifact(result.json_path, json_storage_path)
+    except Exception as error:
+        raise PoseStageError("artifact-compression", error) from error
     logger.info(
         "Pose JSON po gzip: bytes=%d MB=%.3f path=%s storage_path=%s",
         compressed_json.compressed_size_bytes,
@@ -8404,9 +8905,11 @@ def process_analysis(
                 result,
                 logger,
             )
-        except Exception:
+        except Exception as error:
             preserve_job_directory = True
-            raise
+            if isinstance(error, PoseStageError):
+                raise
+            raise PoseStageError("artifact-upload", error) from error
 
         update_progress(
             supabase,
@@ -8415,16 +8918,26 @@ def process_analysis(
             97,
             "saving-pose-results-v6",
         )
-
-        complete_pose_inference_v4(
+        update_progress(
             supabase,
-            settings,
-            analysis,
-            result,
-            video_storage_path,
-            json_storage_path,
-            thumbnail_storage_path,
+            analysis_id,
+            settings.worker_id,
+            97,
+            "database-finalization",
         )
+        try:
+            complete_pose_inference_v4(
+                supabase,
+                settings,
+                analysis,
+                result,
+                video_storage_path,
+                json_storage_path,
+                thumbnail_storage_path,
+            )
+        except Exception as error:
+            preserve_job_directory = True
+            raise PoseStageError("database-finalization", error) from error
 
         logger.info(
             "Analiza %s gotowa do obliczeń ergonomicznych. "
@@ -8439,6 +8952,8 @@ def process_analysis(
             result.model_usage["temporal_expert_frames_count"],
         )
     except Exception as error:
+        if isinstance(error, PoseStageError) and error.failure.retryable:
+            preserve_job_directory = True
         logger.exception(
             "Błąd Pose Pipeline V6 dla analizy %s.",
             analysis_id,
@@ -8477,15 +8992,23 @@ def process_analysis(
 def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
     logger = configure_logging()
     supabase = create_supabase_client(settings)
-    model = initialize_pose_model(settings, logger)
+    model: StrictWholebodyModel | None = None
 
     while True:
         try:
+            late_retry = claim_next_pose_late_retry(supabase, settings.worker_id)
+            if late_retry is not None:
+                retry_pose_late_stage(supabase, settings, late_retry, logger)
+                if once:
+                    return 0
+                continue
             provenance = create_pose_run_provenance(
                 worker_version=WORKER_VERSION,
                 pose_version=POSE_VERSION,
                 pose_schema=POSE_SCHEMA_VERSION,
-                quality_profile=settings.model_mode.upper(),
+                quality_profile=settings.effective_quality_profile,
+                requested_quality_profile=settings.requested_quality_profile,
+                effective_quality_profile=settings.effective_quality_profile,
                 worker_instance_id=settings.worker_id,
                 worker_started_at=WORKER_STARTED_AT,
                 repository_root=REPOSITORY_ROOT,
@@ -8505,6 +9028,9 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
                 time.sleep(settings.poll_interval_seconds)
                 continue
 
+            if model is None:
+                model = initialize_pose_model(settings, logger)
+
             process_analysis(
                 supabase,
                 settings,
@@ -8512,6 +9038,10 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
                 analysis,
                 logger,
             )
+            if model.released:
+                # SAM2 owns the next staged GPU phase. The released RTMW/YOLOX
+                # sessions must never be reused by the continuous worker.
+                model = None
 
             if once:
                 return 0
@@ -8519,6 +9049,8 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
             logger.info("Worker został zatrzymany.")
             return 0
         except Exception:
+            if model is not None and model.released:
+                model = None
             logger.exception("Nieobsłużony błąd cyklu Pose Pipeline V6.")
 
             if once:
@@ -8529,7 +9061,7 @@ def run_worker(settings: PoseWorkerSettings, once: bool) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.7"
+        description=f"Ergonomia AI Worker {WORKER_VERSION} — Pose Pipeline V6.8"
     )
     parser.add_argument(
         "--once",

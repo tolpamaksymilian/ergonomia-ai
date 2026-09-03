@@ -35,6 +35,21 @@ def augment_pose_document_v6(
             "render_persistence_seconds": config.temporal.render_persistence_seconds,
             "recovery_roi_scale": config.recovery_roi_scale,
             "hard_frame_fusion": "per-joint-confidence-and-disagreement-gated",
+            "silhouette_expert": {
+                "enabled": config.silhouette.enabled,
+                "model": config.silhouette.model,
+                "role": "person-silhouette-evidence-not-pose-measurement",
+                "reanchor_interval_seconds": config.silhouette.reanchor_interval_seconds,
+                "maximum_reanchor_rounds": config.silhouette.maximum_reanchor_rounds,
+            },
+            "global_body_solver": {
+                "enabled": config.global_body.enabled,
+                "strategy": "full-body-beam-search-with-peak-repair",
+                "beam_width": config.global_body.beam_width,
+                "temporal_window_seconds": config.global_body.temporal_window_seconds,
+                "worst_frame_ratio": config.global_body.worst_frame_ratio,
+                "maximum_repair_iterations": config.global_body.maximum_repair_iterations,
+            },
             "timeline_contract": "pose-timeline-coverage-v1",
             "anatomical_projection": "canonical-normalized-constrained-chain-v1",
             "angle_engine": "angle-engine-v3.0",
@@ -72,5 +87,9 @@ def augment_pose_document_v6(
         "angles_are_2d_video_plane_projections_not_full_3d_anatomical_angles",
         "short_reconstructed_samples_are_explicitly_labelled",
         "timeline_only_continuity_is_not_an_ergonomic_measurement",
+        "sam2_silhouette_is_supporting_evidence_not_a_joint_measurement",
+        "skeleton_to_silhouette_alignment_is_not_ground_truth_accuracy",
+        "global_body_reconstruction_is_explicitly_provenanced_not_measured",
+        "monocular_silhouette_does_not_provide_metric_3d_geometry",
     ]))
     return document

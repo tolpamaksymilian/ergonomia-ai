@@ -66,6 +66,10 @@ export default async function AnalysisDetailsPage({
       actual_pose_version,
       actual_pose_schema,
       actual_quality_profile,
+      requested_quality_profile,
+      effective_quality_profile,
+      quality_profile_degraded,
+      quality_profile_degradation_reason,
       actual_worker_instance_id,
       pose_worker_started_at,
       pose_processing_started_at,
@@ -91,6 +95,14 @@ export default async function AnalysisDetailsPage({
       critical_events_count,
       error_code,
       error_message,
+      failure_stage,
+      failure_code,
+      failure_message,
+      failure_component,
+      failure_timestamp,
+      failure_retryable,
+      failure_http_status,
+      failure_upstream_error_code,
       queued_at,
       created_at,
       updated_at,
@@ -236,16 +248,26 @@ export default async function AnalysisDetailsPage({
       .filter(Boolean)
       .join(" ") || null;
 
-  const poseArtifactFile = analysis.result_json_path
-    ? await supabase.storage.from("analysis-results").download(poseManifestPath(analysis.result_json_path))
+  const currentPoseManifestPath = analysis.result_json_path
+    ? poseManifestPath(analysis.result_json_path)
+    : analysis.pose_analysis_run_id
+      ? `${analysis.user_id}/${analysis.id}/results/${analysis.pose_analysis_run_id}/pose-artifacts-manifest.json`
+      : null;
+  const poseArtifactFile = currentPoseManifestPath
+    ? await supabase.storage.from("analysis-results").download(currentPoseManifestPath)
     : { data: null, error: null };
   const poseArtifactDocument = await parseStorageJson(poseArtifactFile.data);
+  const artifactPoseProvenance = mergeArtifactProvenance(poseProvenance, poseArtifactDocument);
+  const previousPoseArtifact = isArtifactPathFromAnotherRun(
+    analysis.result_video_path,
+    analysis.pose_analysis_run_id,
+  );
   const stalePoseArtifact = isStalePoseArtifact(
     poseArtifactDocument,
     analysis.pose_analysis_run_id,
     analysis.actual_pose_version,
     analysis.pose_artifact_generation_id,
-  );
+  ) || previousPoseArtifact;
 
 
   const {
@@ -347,7 +369,7 @@ export default async function AnalysisDetailsPage({
         metadata={metadata}
         workstations={workstations}
         categories={categories}
-        poseProvenance={{ ...poseProvenance, staleArtifact: completedStaleArtifact }}
+        poseProvenance={{ ...artifactPoseProvenance, staleArtifact: completedStaleArtifact }}
         analysis={{
           id: analysis.id,
           title: analysis.title,
@@ -456,7 +478,14 @@ export default async function AnalysisDetailsPage({
           </div>
         </section>
 
-        <div className="mt-4 max-w-3xl"><PoseProvenanceBadge value={{ ...poseProvenance, staleArtifact: stalePoseArtifact }} active={["queued", "processing"].includes(analysis.status)} /></div>
+        <div className="mt-4 max-w-3xl"><PoseProvenanceBadge value={{ ...artifactPoseProvenance, staleArtifact: stalePoseArtifact }} active={["queued", "processing"].includes(analysis.status)} /></div>
+
+        {previousPoseArtifact && (
+          <div className="mt-4 max-w-3xl rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100/80">
+            <span className="font-semibold text-amber-200">Poprzedni wynik.</span>{" "}
+            Zachowany artefakt pochodzi z wcześniejszego runu i nie jest aktualnym wynikiem tej próby.
+          </div>
+        )}
 
         <div className="mt-6"><AnalysisContextEditor analysisId={analysis.id} metadata={metadata} workstations={workstations} categories={categories} /></div>
 
@@ -604,7 +633,7 @@ export default async function AnalysisDetailsPage({
             />
 
             <PipelineStep
-              label="Pose Pipeline V3.0"
+              label="Pose Pipeline"
               completed={
                 [
                   "ready-for-ergonomics",
@@ -635,6 +664,13 @@ export default async function AnalysisDetailsPage({
                   "pose-v3-rendering-validated-results",
                   "uploading-pose-results-v3",
                   "saving-pose-results-v3",
+                  "downloading-for-pose-v6",
+                  "pose-inference-active-segment-v6",
+                  "uploading-pose-results-v6",
+                  "saving-pose-results-v6",
+                  "database-finalization",
+                  "pose-artifact-upload-retry",
+                  "pose-database-finalization-retry",
                 ].includes(
                   analysis.processing_stage ??
                     "",
@@ -689,7 +725,7 @@ export default async function AnalysisDetailsPage({
         {analysis.status === "failed" && (
           <section className="mt-6 rounded-[28px] border border-red-400/20 bg-red-400/[0.07] p-6">
             <div className="flex items-start gap-4">
-              <TriangleAlert className="mt-1 size-6 shrink-0 text-red-300" />
+              <TriangleAlert aria-hidden="true" className="mt-1 size-6 shrink-0 text-red-300" />
 
               <div>
                 <p className="font-semibold text-red-200">
@@ -707,6 +743,10 @@ export default async function AnalysisDetailsPage({
                       <div><dt className="text-red-300/50">Etap</dt><dd>{analysis.processing_stage ?? "—"}</dd></div>
                       <div><dt className="text-red-300/50">Liczba prób</dt><dd>{analysis.attempts ?? 0}</dd></div>
                       <div><dt className="text-red-300/50">Worker</dt><dd>{analysis.report_worker_id ?? analysis.risk_worker_id ?? analysis.worker_id ?? "zwolniony"}</dd></div>
+                      <div><dt className="text-red-300/50">Komponent</dt><dd>{analysis.failure_component ?? "—"}</dd></div>
+                      <div><dt className="text-red-300/50">Failure stage</dt><dd>{analysis.failure_stage ?? "—"}</dd></div>
+                      <div><dt className="text-red-300/50">Upstream</dt><dd>{analysis.failure_upstream_error_code ?? "—"}</dd></div>
+                      <div><dt className="text-red-300/50">Retry</dt><dd>{analysis.failure_retryable ? "tylko nieudany etap" : "pełne ponowienie wymagane"}</dd></div>
                     </dl>
                     <form action={retryFailedAnalysisStage.bind(null, analysis.id)} className="mt-4">
                       <button
@@ -848,6 +888,10 @@ function buildPoseProvenance(analysis: Record<string, unknown>): PoseProvenance 
     poseVersion: stringOrNull(analysis.actual_pose_version),
     poseSchema: stringOrNull(analysis.actual_pose_schema),
     qualityProfile: stringOrNull(analysis.actual_quality_profile),
+    requestedQualityProfile: stringOrNull(analysis.requested_quality_profile),
+    effectiveQualityProfile: stringOrNull(analysis.effective_quality_profile) ?? stringOrNull(analysis.actual_quality_profile),
+    qualityProfileDegraded: analysis.quality_profile_degraded === true,
+    degradationReason: stringOrNull(analysis.quality_profile_degradation_reason),
     workerInstanceId: stringOrNull(analysis.actual_worker_instance_id),
     workerStartedAt: stringOrNull(analysis.pose_worker_started_at),
     processingStartedAt: stringOrNull(analysis.pose_processing_started_at),
@@ -864,6 +908,25 @@ function buildPoseProvenance(analysis: Record<string, unknown>): PoseProvenance 
     temporalExpertFramesCount: finiteNumber(analysis.temporal_expert_frames_count),
     modelUsage: isUnknownRecord(analysis.pose_model_usage) ? analysis.pose_model_usage : null,
   };
+}
+
+function mergeArtifactProvenance(value: PoseProvenance, artifact: unknown): PoseProvenance {
+  if (!isUnknownRecord(artifact)) return value;
+  return {
+    ...value,
+    requestedQualityProfile: stringOrNull(artifact.requested_quality_profile) ?? value.requestedQualityProfile,
+    effectiveQualityProfile: stringOrNull(artifact.effective_quality_profile) ?? value.effectiveQualityProfile,
+    qualityProfile: stringOrNull(artifact.effective_quality_profile) ?? stringOrNull(artifact.quality_profile) ?? value.qualityProfile,
+    qualityProfileDegraded: artifact.quality_profile_degraded === true || value.qualityProfileDegraded,
+    degradationReason: stringOrNull(artifact.degradation_reason) ?? value.degradationReason,
+    modelUsage: isUnknownRecord(artifact.model_usage) ? artifact.model_usage : value.modelUsage,
+  };
+}
+
+function isArtifactPathFromAnotherRun(path: unknown, runId: unknown) {
+  const normalizedPath = stringOrNull(path);
+  const normalizedRun = stringOrNull(runId);
+  return Boolean(normalizedPath && normalizedRun && !normalizedPath.includes(`/${normalizedRun}/`));
 }
 
 function isStalePoseArtifact(value: unknown, expectedRunId: unknown, expectedPoseVersion: unknown, expectedGenerationId: unknown) {

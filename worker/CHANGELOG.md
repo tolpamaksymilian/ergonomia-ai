@@ -1,5 +1,22 @@
 # Worker changelog
 
+## 0.16.0-beta.1
+
+- Pose `pose-v6.8.0-beta.1` adds the official Apache-2.0 SAM 2.1 video
+  silhouette expert after the existing V6.7 pose/trajectory stages. ACCURATE
+  uses Base+ and ULTRA uses Large, with pinned source, bytes and SHA-256.
+- Whole-person masks are identity/drift gated, packed on CPU and used only as
+  support. Signed-distance joint evidence and complete-bone corridors expose
+  skeleton lines crossing empty background without claiming pose measurement.
+- A root-consistent `FullBodyHypothesis` beam solver selects whole-body states
+  over native time, retains best-state rollback and performs a bounded repair
+  of the worst frames. Foot/arm chains and ground contact remain evidence-only.
+- Renderer, Angle Engine, Grip and JSON consume one immutable final geometry;
+  renderer/JSON parity is validated before artifact serialization.
+- SAM 3D Body remains `BENCHMARK_ONLY` behind an explicit SAM License and
+  gated-checkpoint decision. Pose schema remains additively compatible at
+  `6.0`; downstream contracts and database schema are unchanged.
+
 ## 0.15.0-beta.1
 
 - Pose `pose-v6.7.0-beta.1` executes the official TAR-ViTPose Base five-frame

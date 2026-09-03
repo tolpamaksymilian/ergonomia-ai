@@ -1,4 +1,4 @@
-"""Run the production Pose V6.7 core for a local video without Supabase."""
+"""Run the production Pose V6.8 core for a local video without Supabase."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -27,7 +28,11 @@ from pose_v6.quality_benchmark import (  # noqa: E402
     collect_quality_kpis,
     compare_quality_documents,
 )
+from pose_v6.provenance import create_pose_run_provenance  # noqa: E402
+from pose_v6.worst_frame_export import export_worst_frames, load_pose_document  # noqa: E402
 from pose_worker import (  # noqa: E402
+    POSE_SCHEMA_VERSION,
+    POSE_VERSION,
     WORKER_VERSION,
     configure_logging,
     create_hand_pipeline_config,
@@ -40,7 +45,7 @@ from pose_worker import (  # noqa: E402
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lokalny real-video benchmark Pose V6.7 bez Supabase i kolejki."
+        description="Lokalny real-video benchmark Pose V6.8 bez Supabase i kolejki."
     )
     parser.add_argument("--input", required=True, help="Ścieżka do lokalnego filmu.")
     parser.add_argument(
@@ -150,6 +155,17 @@ def main() -> int:
         "source_width": width,
         "source_height": height,
     }
+    analysis["_run_provenance"] = create_pose_run_provenance(
+        worker_version=WORKER_VERSION,
+        pose_version=POSE_VERSION,
+        pose_schema=POSE_SCHEMA_VERSION,
+        quality_profile=settings.effective_quality_profile,
+        requested_quality_profile=settings.requested_quality_profile,
+        effective_quality_profile=settings.effective_quality_profile,
+        worker_instance_id="local-pose-benchmark",
+        worker_started_at=datetime.now(timezone.utc).isoformat(),
+        repository_root=WORKER_DIRECTORY.parent,
+    )
     try:
         active_segment = scan_active_segment(
             None,
@@ -237,10 +253,11 @@ def main() -> int:
     )
     if arguments.save_frames:
         _save_selected_frames(result.video_path, output_directory, diagnostics)
-    _save_worst_frames(
+    export_worst_frames(
         input_path,
         result.video_path,
         output_directory,
+        load_pose_document(result.json_path),
         diagnostics,
         limit=30,
     )

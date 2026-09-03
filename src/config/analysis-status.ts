@@ -36,6 +36,7 @@ const stageDefinitions = {
   "pose-v3-rendering-validated-results": status("Tworzenie wyniku pozy", "Pose Pipeline", "Tworzymy film z zatwierdzonymi punktami pozy.", 73, "active", true),
   "pose-v6-collecting-body-and-hands": status("Analiza ruchu w toku", "Pose Pipeline V6", "Śledzimy pracownika oraz zbieramy dane ciała i dłoni.", 30, "active", true),
   "pose-v6-temporal-reconstruction": status("Stabilizacja ruchu", "Pose Pipeline V6", "Łączymy wiarygodne obserwacje w spójną trajektorię czasową.", 72, "active", true),
+  "pose-v6-sam2-silhouette": status("Analiza obrysu sylwetki", "Pose Pipeline V6.8", "SAM 2.1 śledzi obrys tego samego pracownika jako niezależne wsparcie geometrii ciała.", 70, "active", true),
   "pose-v6-rendering-persistent-skeleton": status("Tworzenie stabilnego podglądu", "Pose Pipeline V6", "Renderujemy ciągły szkielet z jawnym rozróżnieniem pomiaru i wsparcia temporalnego.", 73, "active", true),
   "uploading-pose-results": status("Zapisywanie wyników pozy", "Pose Pipeline", "Przesyłamy wyniki pozy do prywatnego Storage.", 91, "active", true),
   "uploading-pose-results-v3": status("Zapisywanie wyników pozy", "Pose Pipeline", "Przesyłamy wyniki pozy do prywatnego Storage.", 91, "active", true),
@@ -59,6 +60,13 @@ const stageDefinitions = {
   "ergonomics-failed": status("Błąd metryk", "Błąd metryk", "Nie udało się obliczyć metryk ergonomicznych. Wyniki pozy zostały zachowane.", 75, "error", false, true, true),
   "risk-failed": status("Błąd oceny ryzyka", "Błąd oceny", "Nie udało się ocenić ryzyka. Wyniki pozy i metryk zostały zachowane.", 90, "error", false, true, true),
   "report-failed": status("Błąd raportu", "Błąd raportu", "Nie udało się przygotować raportu. Wcześniejsze wyniki zostały zachowane.", 97, "error", false, true, true),
+  "database-finalization": status("Finalizacja analizy pozy", "Zapis wyniku", "Analiza pozy została wykonana. Zapisujemy finalne metadane wyniku.", 97, "active", true),
+  "pose-artifact-upload-retry": status("Ponowny zapis artefaktów", "Ponawianie uploadu", "Ponawiamy wyłącznie zapis gotowych artefaktów bez ponownej analizy filmu.", 91, "active", true),
+  "pose-database-finalization-retry": status("Ponowna finalizacja", "Ponawianie finalizacji", "Ponawiamy wyłącznie finalny zapis metadanych bez ponownej analizy filmu.", 97, "active", true),
+  "ready-for-pose-artifact-upload": status("Artefakty gotowe do ponownego zapisu", "Retry uploadu", "Gotowe wyniki oczekują na ponowny upload. Analiza pozy nie będzie wykonywana ponownie.", 91, "queued", true),
+  "ready-for-pose-finalization": status("Wyniki gotowe do finalizacji", "Retry finalizacji", "Przesłane artefakty oczekują wyłącznie na ponowną finalizację bazy.", 97, "queued", true),
+  "pose-artifact-upload-failed": status("Błąd zapisu wyników", "Błąd uploadu", "Nie udało się zapisać gotowych wyników analizy. Artefakty lokalne zostały zachowane do ponowienia uploadu.", 91, "error", false, true, true),
+  "pose-database-finalization-failed": status("Błąd finalizacji wyniku", "Błąd finalizacji", "Analiza została wykonana i artefakty przesłano, ale nie udało się zakończyć zapisu wyniku w bazie.", 97, "error", false, true, true),
 } as const satisfies Record<string, AnalysisStatusDefinition>;
 
 const baseDefinitions = {
